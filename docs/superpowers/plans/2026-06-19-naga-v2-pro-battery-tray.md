@@ -1903,46 +1903,66 @@ git commit -m "feat: AppHost wiring, single-instance, popup toggle, power/sessio
 
 ---
 
-## Task 13: Publish, footprint check, trim fallback
+## Task 13: Publish, install to a permanent location, footprint check
 
 **Files:**
 - Modify: `src/NagaBatteryTray/NagaBatteryTray.csproj` (publish properties)
+- Create: `scripts/install.ps1`, `scripts/uninstall.ps1`, `README.md`
 
 **Interfaces:**
 - Consumes: the whole app.
-- Produces: a self-contained single-file exe; a verified footprint.
+- Produces: a self-contained exe installed under `%LOCALAPPDATA%\Programs\NagaBatteryTray`; a verified footprint.
 
-- [ ] **Step 1: Add publish properties to the csproj `<PropertyGroup>`**
+**Decision (deviates from original draft):** ship **full self-contained, no trimming.**
+Disk size is not a concern for a single personal machine, and trimming risks stripping
+WPF / wpf-ui XAML resources. Self-contained (vs framework-dependent) is chosen for
+robustness: the installed app bundles its own .NET 10 runtime and depends on nothing
+staying installed on the machine. Publish props are scoped to `Release` so the Debug
+inner loop and `dotnet test` stay fast and framework-dependent.
+
+- [x] **Step 1: Add a Release-only publish `<PropertyGroup>` to the csproj**
 
 ```xml
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
-    <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
+  </PropertyGroup>
 ```
 
-- [ ] **Step 2: Publish**
+- [x] **Step 2: Publish**
 
 Run:
 ```bash
 dotnet publish src/NagaBatteryTray -c Release
 ```
-Expected: a single `NagaBatteryTray.exe` under `src/NagaBatteryTray/bin/Release/net10.0-windows10.0.17763.0/win-x64/publish/`. Note any IL2xxx trim warnings.
+Output under `src/NagaBatteryTray/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/`:
+one ~188 MB `NagaBatteryTray.exe` **plus five `*_cor3.dll` WPF native libraries**
+(`D3DCompiler_47_cor3`, `PenImc_cor3`, `PresentationNative_cor3`, `vcruntime140_cor3`,
+`wpfgfx_cor3`) and a `.pdb`. `PublishSingleFile` bundles the *managed* code but leaves
+WPF's *native* DLLs beside the exe by design.
 
-- [ ] **Step 3: Run the published exe and verify it behaves like Task 12**
+- [x] **Step 3: Install to a permanent per-user location and wire startup**
 
-Launch the published `NagaBatteryTray.exe` directly (not via `dotnet run`). Verify: tray icon shows the number, popup opens and is styled (Mica/Fluent — **if the popup is unstyled or throws at runtime, the trimmer stripped wpf-ui/XAML resources**: set `<PublishTrimmed>false</PublishTrimmed>` and re-publish), toast works.
+Use `scripts/install.ps1`. It copies the runtime files (everything except the `.pdb`)
+to `%LOCALAPPDATA%\Programs\NagaBatteryTray`, sets the `HKCU\...\Run` key to the
+installed exe, and launches it. **The five `*_cor3.dll` files MUST travel with the exe** —
+copying the exe alone crashes at startup with `System.DllNotFoundException` from
+`MS.Internal.WindowsBase` (WPF native libs missing). Verify it behaves like Task 12:
+tray number, styled popup, toast, and that it stays resident (does not exit).
 
-- [ ] **Step 4: Check footprint**
+- [x] **Step 4: Check footprint**
 
-In Task Manager, after opening the popup once: confirm idle CPU ~0% and working-set RAM roughly in the 45–55 MB range (≤ ~80 MB acceptable). Note the on-disk exe size.
+Measured installed + idle: **idle CPU 0%**, **private working set ~23 MB** (the real RAM
+cost), full working set ~90 MB (mostly *shared* runtime pages — self-contained doesn't
+share framework pages, so the full number runs higher than the original 45–55 MB estimate
+while private RAM stays tiny). On-disk ~196 MB total.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
-git commit -m "build: self-contained single-file trimmed publish with trim fallback note"
+git commit -m "build: full self-contained publish + per-user install scripts and README"
 ```
 
 ---

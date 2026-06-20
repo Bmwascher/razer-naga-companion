@@ -11,6 +11,14 @@
     <StartupObject>NagaBatteryTray.Program</StartupObject>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
+  <!-- Release = full self-contained single-file: bundles the .NET 10 runtime so the installed
+       exe depends on nothing on the machine. No trimming (disk is not a concern; trimming risks
+       stripping WPF / wpf-ui XAML resources). Debug stays framework-dependent for a fast inner loop. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.WinUI.Notifications" Version="7.1.2" />
     <PackageReference Include="HidSharp" Version="2.6.4" />
