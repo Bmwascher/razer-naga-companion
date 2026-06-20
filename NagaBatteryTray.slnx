@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NagaBatteryTray/NagaBatteryTray.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NagaBatteryTray.Tests/NagaBatteryTray.Tests.csproj" />
+  </Folder>
+</Solution>
