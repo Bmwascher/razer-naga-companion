@@ -43,7 +43,7 @@
               <TextBlock Text="Notify at or below this percent" Opacity="0.7" FontSize="12"/>
             </StackPanel>
           </ui:CardControl.Header>
-          <ui:NumberBox MinWidth="120" Value="{Binding LowBatteryThreshold, Mode=TwoWay, Converter={StaticResource DoubleInt}}"
+          <ui:NumberBox MinWidth="120" Value="{Binding LowBatteryThreshold, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource DoubleInt}}"
                         Minimum="1" Maximum="100" SmallChange="5" MaxDecimalPlaces="0"/>
         </ui:CardControl>
 
@@ -58,7 +58,7 @@
           <StackPanel MinWidth="220">
             <Slider Minimum="100" Maximum="30000" Value="{Binding Dpi, Mode=TwoWay, Converter={StaticResource DoubleInt}}"
                     IsEnabled="{Binding DevicePresent}" TickFrequency="100" LargeChange="1000" SmallChange="50"/>
-            <ui:NumberBox Margin="0,8,0,0" Value="{Binding Dpi, Mode=TwoWay, Converter={StaticResource DoubleInt}}"
+            <ui:NumberBox Margin="0,8,0,0" Value="{Binding Dpi, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource DoubleInt}}"
                           IsEnabled="{Binding DevicePresent}"
                           Minimum="100" Maximum="30000" SmallChange="50" MaxDecimalPlaces="0"/>
             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -84,7 +84,7 @@
                 <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
               </Grid.ColumnDefinitions>
               <TextBlock Text="On battery (seconds)" VerticalAlignment="Center"/>
-              <ui:NumberBox Grid.Column="1" MinWidth="120" Value="{Binding PollSeconds, Mode=TwoWay, Converter={StaticResource DoubleInt}}"
+              <ui:NumberBox Grid.Column="1" MinWidth="120" Value="{Binding PollSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource DoubleInt}}"
                             Minimum="15" Maximum="3600" SmallChange="15" MaxDecimalPlaces="0"/>
             </Grid>
             <Grid Margin="0,4">
@@ -92,7 +92,7 @@
                 <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
               </Grid.ColumnDefinitions>
               <TextBlock Text="While charging (seconds)" VerticalAlignment="Center"/>
-              <ui:NumberBox Grid.Column="1" MinWidth="120" Value="{Binding PollChargingSeconds, Mode=TwoWay, Converter={StaticResource DoubleInt}}"
+              <ui:NumberBox Grid.Column="1" MinWidth="120" Value="{Binding PollChargingSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource DoubleInt}}"
                             Minimum="15" Maximum="3600" SmallChange="15" MaxDecimalPlaces="0"/>
             </Grid>
           </StackPanel>
