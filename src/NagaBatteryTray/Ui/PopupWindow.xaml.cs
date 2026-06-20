@@ -10,6 +10,7 @@ public partial class PopupWindow : Window
 {
     private readonly PopupViewModel _vm = new();
     public event Action? RefreshRequested;
+    public event Action? SettingsRequested;
 
     public PopupWindow()
     {
@@ -51,6 +52,8 @@ public partial class PopupWindow : Window
     }
 
     private void OnRefresh(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke();
+
+    private void OnSettings(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke();
 
     private const uint SWP_NOSIZE = 0x0001, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
 

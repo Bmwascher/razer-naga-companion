@@ -22,6 +22,7 @@ public sealed class AppHost
     private BatteryMonitor _monitor = null!;
     private TrayIconController _tray = null!;
     private PopupWindow? _popup;
+    private SettingsWindow? _settingsWindow;
 
     public AppHost(Application app) => _app = app;
 
@@ -41,6 +42,7 @@ public sealed class AppHost
         _tray.LeftClicked += TogglePopup;
         _tray.RefreshRequested += () => _ = _monitor.RefreshNowAsync();
         _tray.StartupToggled += SetStartup;
+        _tray.SettingsRequested += OpenSettings;
         _tray.QuitRequested += Quit;
 
         _tray.SetStartupChecked(_startup.IsEnabled());
@@ -65,8 +67,51 @@ public sealed class AppHost
     {
         var p = new PopupWindow();
         p.RefreshRequested += () => _ = _monitor.RefreshNowAsync();
+        p.SettingsRequested += OpenSettings;
         _monitor.StateChanged += (_, state) => p.ApplyState(state); // live-update the popup while it's open
         return p;
+    }
+
+    private void OpenSettings()
+    {
+        if (_settingsWindow is { IsVisible: true }) { _settingsWindow.Activate(); return; }
+
+        var win = new SettingsWindow(_settings.Settings, _startup.IsEnabled());
+        win.SaveRequested += () => { win.ApplyTo(_settings.Settings); _settings.Save(); };
+        win.StartupToggled += enable => { SetStartup(enable); _tray.SetStartupChecked(enable); };
+        win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(win, dpi);
+        win.Closed += (_, _) => _settingsWindow = null;
+        win.SetDevicePresent(_monitor.State.Status == DeviceStatus.Online);
+        _settingsWindow = win;
+        win.Show();
+        _ = LoadDpiAsync(win); // read current DPI off the UI thread, then seed the UI
+    }
+
+    // Task.Run keeps the blocking HidD_*Feature calls off the UI thread (no UI freeze; supports the
+    // lightweight + zero-latency invariant). Results marshal back via Dispatch.
+    private async Task LoadDpiAsync(SettingsWindow win)
+    {
+        var dpi = await Task.Run(() => _monitor.GetDpiAsync());
+        Dispatch(() => { win.SetCurrentDpi(dpi); win.SetDevicePresent(dpi is not null); });
+    }
+
+    private async Task ApplyDpiAsync(SettingsWindow win, int dpi)
+    {
+        Dispatch(() => win.SetDpiStatus("Applying…"));
+        bool ok = await Task.Run(() => _monitor.SetDpiAsync(dpi, dpi));
+        DpiSetting? readBack = ok ? await Task.Run(() => _monitor.GetDpiAsync()) : null;
+        Dispatch(() =>
+        {
+            if (readBack is { } v && v.X == dpi)
+            {
+                win.SetCurrentDpi(v);
+                win.SetDpiStatus($"Applied ({v.X} DPI)");
+            }
+            else
+            {
+                win.SetDpiStatus("Couldn't confirm — wiggle the mouse and retry");
+            }
+        });
     }
 
     private void SetStartup(bool enable)
@@ -76,6 +121,7 @@ public sealed class AppHost
 
     private void Quit()
     {
+        _settingsWindow?.Close();
         _monitor.Dispose();
         _device.Dispose();
         _tray.Dispose();
