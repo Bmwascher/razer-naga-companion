@@ -31,24 +31,40 @@ public static class IconRenderer
     public static Icon Render(DeviceState state, int dpi)
     {
         int size = Math.Max(16, dpi * 16 / 96); // SM_CXSMICON scales with DPI
-        using var bmp = new Bitmap(size, size);
+        int render = size * 2;                  // supersample 2x; Windows downscales -> crisper small digits
+        string text = state.Status == DeviceStatus.Unknown ? "-" : state.Percent.ToString();
+        Color color = state.Status == DeviceStatus.Unknown
+            ? Color.Gray
+            : ColorForLevel(state.Percent, state.Charging);
+
+        using var bmp = new Bitmap(render, render);
         using (var g = Graphics.FromImage(bmp))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             g.Clear(Color.Transparent);
 
-            string text = state.Status == DeviceStatus.Unknown ? "-" : state.Percent.ToString();
-            Color color = state.Status == DeviceStatus.Unknown
-                ? Color.Gray
-                : ColorForLevel(state.Percent, state.Charging);
-
-            float emSize = text.Length >= 3 ? size * 0.5f : size * 0.72f;
-            using var font = new Font("Segoe UI", emSize, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var fmt = new StringFormat(StringFormat.GenericTypographic)
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+            };
+            using var font = new Font("Segoe UI", FitEm(g, text, fmt, render - 2f), FontStyle.Bold, GraphicsUnit.Pixel);
             using var brush = new SolidBrush(color);
-            using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString(text, font, brush, new RectangleF(0, 0, size, size), fmt);
+            g.DrawString(text, font, brush, new RectangleF(0, 0, render, render), fmt);
         }
         return Icon.FromHandle(bmp.GetHicon());
+    }
+
+    /// <summary>Largest bold Segoe UI em size whose rendered text fits within <paramref name="max"/> px square.</summary>
+    private static float FitEm(Graphics g, string text, StringFormat fmt, float max)
+    {
+        for (float em = max; em > 4f; em -= 0.5f)
+        {
+            using var f = new Font("Segoe UI", em, FontStyle.Bold, GraphicsUnit.Pixel);
+            var sz = g.MeasureString(text, f, new PointF(0, 0), fmt);
+            if (sz.Width <= max && sz.Height <= max) return em;
+        }
+        return 5f;
     }
 }

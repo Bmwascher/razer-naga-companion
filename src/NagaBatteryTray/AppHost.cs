@@ -58,24 +58,15 @@ public sealed class AppHost
     {
         _popup ??= CreatePopup();
         if (_popup.IsVisible) { _popup.Hide(); return; }
-
-        var anchor = TrayAnchorRect();
-        var work = Screen.FromRectangle(anchor).WorkingArea;
-        _popup.ShowAt(_monitor.State, anchor, work);
+        _popup.ShowAt(_monitor.State);
     }
 
     private PopupWindow CreatePopup()
     {
         var p = new PopupWindow();
         p.RefreshRequested += () => _ = _monitor.RefreshNowAsync();
+        _monitor.StateChanged += (_, state) => p.ApplyState(state); // live-update the popup while it's open
         return p;
-    }
-
-    private static Rectangle TrayAnchorRect()
-    {
-        // Fallback: bottom-right of the primary work area. (Shell_NotifyIconGetRect is a future refinement.)
-        var wa = Screen.PrimaryScreen!.WorkingArea;
-        return new Rectangle(wa.Right - 24, wa.Bottom, 24, 24);
     }
 
     private void SetStartup(bool enable)

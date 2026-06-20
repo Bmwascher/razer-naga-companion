@@ -1,37 +1,42 @@
-<ui:FluentWindow x:Class="NagaBatteryTray.Ui.PopupWindow"
+<Window x:Class="NagaBatteryTray.Ui.PopupWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
-    WindowBackdropType="Mica" ExtendsContentIntoTitleBar="True"
-    SizeToContent="Height" Topmost="True" Width="260">
-  <ui:FluentWindow.Resources>
+    AllowsTransparency="True" Background="Transparent"
+    SizeToContent="WidthAndHeight" Topmost="True">
+  <Window.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
-  </ui:FluentWindow.Resources>
-  <Border Padding="14">
+  </Window.Resources>
+  <Border Width="236" Background="#1C1E24" CornerRadius="12" Padding="15" Margin="12"
+          BorderBrush="#26FFFFFF" BorderThickness="1">
+    <Border.Effect>
+      <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.5" Color="Black"/>
+    </Border.Effect>
     <StackPanel>
       <DockPanel>
-        <TextBlock Text="Naga V2 Pro" FontWeight="SemiBold" FontSize="13"/>
+        <TextBlock Text="Naga V2 Pro" FontWeight="SemiBold" FontSize="13" Foreground="#E9EAEC"/>
         <TextBlock Text="{Binding Status}" DockPanel.Dock="Right" HorizontalAlignment="Right"
-                   Foreground="#9aa0a6" FontSize="11"/>
+                   Foreground="#9AA0A6" FontSize="11"/>
       </DockPanel>
-      <StackPanel Orientation="Horizontal" Margin="0,10,0,8">
-        <TextBlock Text="{Binding PercentText}" FontSize="40" FontWeight="Bold"
-                   Foreground="{Binding Accent}"/>
-        <Border Background="#22FFFFFF" CornerRadius="20" Padding="9,4" Margin="12,8,0,0"
+      <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
+        <TextBlock Text="{Binding PercentText}" FontSize="34" FontWeight="Bold"
+                   Foreground="{Binding Accent}" Margin="0,-4,0,0"/>
+        <Border Background="#22FFFFFF" CornerRadius="20" Padding="8,3" Margin="10,6,0,0"
                 VerticalAlignment="Center"
                 Visibility="{Binding Charging, Converter={StaticResource BoolToVis}}">
-          <TextBlock Text="&#x26A1; Charging" FontSize="11"/>
+          <TextBlock Text="&#x26A1; Charging" FontSize="11" Foreground="#E9EAEC"/>
         </Border>
       </StackPanel>
-      <Border Height="7" CornerRadius="4" Background="#2a2c31" Width="232" HorizontalAlignment="Left">
-        <Border CornerRadius="4" Background="{Binding Accent}" HorizontalAlignment="Left"
+      <Border Height="6" CornerRadius="3" Background="#2A2C31" Width="206" HorizontalAlignment="Left">
+        <Border CornerRadius="3" Background="{Binding Accent}" HorizontalAlignment="Left"
                 Width="{Binding BarPixelWidth}"/>
       </Border>
-      <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-        <ui:Button Content="Refresh" Click="OnRefresh" Margin="0,0,8,0"/>
-        <ui:Button Content="Settings" IsEnabled="False" ToolTip="Coming soon"/>
+      <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+        <ui:Button Content="Refresh" Click="OnRefresh" Padding="12,5" FontSize="12"/>
+        <ui:Button Content="Settings" IsEnabled="False" ToolTip="Coming soon"
+                   Margin="8,0,0,0" Padding="12,5" FontSize="12"/>
       </StackPanel>
     </StackPanel>
   </Border>
-</ui:FluentWindow>
+</Window>
