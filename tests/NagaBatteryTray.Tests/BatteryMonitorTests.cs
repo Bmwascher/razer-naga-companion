@@ -1,0 +1,74 @@
+using NagaBatteryTray.Hid;
+using NagaBatteryTray.Monitoring;
+using NagaBatteryTray.Settings;
+using Xunit;
+
+public class BatteryMonitorTests
+{
+    private static BatteryMonitor NewMonitor(out List<int> lowFires, ISettingsStore? store = null)
+    {
+        store ??= new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"naga-{Guid.NewGuid():N}.json"));
+        var monitor = new BatteryMonitor(new FakeRazerDevice(), store, a => a()); // synchronous dispatch
+        var fires = new List<int>();
+        monitor.LowBatteryCrossed += (_, pct) => fires.Add(pct);
+        lowFires = fires;
+        return monitor;
+    }
+
+    private static BatteryReading Online(int pct, bool charging) =>
+        new(pct, charging, true, DateTimeOffset.Now);
+
+    [Fact]
+    public void Online_reading_sets_online_state()
+    {
+        var m = NewMonitor(out _);
+        m.ProcessReading(Online(87, true));
+        Assert.Equal(DeviceStatus.Online, m.State.Status);
+        Assert.Equal(87, m.State.Percent);
+        Assert.True(m.State.Charging);
+    }
+
+    [Fact]
+    public void Low_battery_fires_once_at_or_below_threshold_while_discharging()
+    {
+        var m = NewMonitor(out var fires);
+        m.ProcessReading(Online(80, false)); // armed
+        m.ProcessReading(Online(15, false)); // fire (inclusive)
+        m.ProcessReading(Online(10, false)); // no second fire
+        Assert.Equal(new[] { 15 }, fires);
+    }
+
+    [Fact]
+    public void Charging_suppresses_and_does_not_rearm()
+    {
+        var m = NewMonitor(out var fires);
+        m.ProcessReading(Online(12, true));  // plugged in below threshold: no fire
+        m.ProcessReading(Online(12, false)); // unplugged still below: no fire (never recovered)
+        Assert.Empty(fires);
+    }
+
+    [Fact]
+    public void Rearms_only_after_recovering_above_threshold()
+    {
+        var m = NewMonitor(out var fires);
+        m.ProcessReading(Online(80, false)); // armed
+        m.ProcessReading(Online(15, false)); // fire
+        m.ProcessReading(Online(50, false)); // re-arm (>threshold)
+        m.ProcessReading(Online(14, false)); // fire again
+        Assert.Equal(new[] { 15, 14 }, fires);
+    }
+
+    [Fact]
+    public void Staleness_goes_unknown_after_more_than_three_misses()
+    {
+        var m = NewMonitor(out _);
+        m.ProcessReading(Online(50, false));
+        var absent = BatteryReading.Absent(DateTimeOffset.Now);
+        m.ProcessReading(absent); // miss 1 — keep last
+        Assert.Equal(DeviceStatus.Online, m.State.Status);
+        m.ProcessReading(absent); // 2
+        m.ProcessReading(absent); // 3
+        m.ProcessReading(absent); // 4 (>3) -> Unknown
+        Assert.Equal(DeviceStatus.Unknown, m.State.Status);
+    }
+}
