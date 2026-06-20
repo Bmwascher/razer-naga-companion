@@ -39,7 +39,7 @@ A build is "done" when:
 
 ### 4.1 Process model — one process, two modes
 
-A single tray application (.NET 8, Windows-only):
+A single tray application (.NET 10, Windows-only):
 
 - **Resident mode (always running):** a WinForms `NotifyIcon` in the tray + a `System.Threading.Timer` polling battery. **No WPF popup / visual surface is constructed** in this state (a hosted `NotifyIcon` does keep a hidden message-pump window — that's the only window, and it's cheap). This is the near-0 idle state.
 - **On-demand window:** the WPF popup is constructed only on first tray click, and hidden/released when it loses focus. The heavy WPF surface isn't paid for until the user looks at it.
@@ -60,7 +60,7 @@ Each layer has one responsibility and a narrow interface. `BatteryMonitor` depen
 
 ### 4.3 Footprint strategy & honest numbers
 
-- Publish as **self-contained, single-file, trimmed** .NET 8 (no runtime install needed).
+- Publish as **self-contained, single-file, trimmed** .NET 10 (no runtime install needed).
 - **NativeAOT is NOT used** — unsupported for WPF (COM/reflection). Trimmed single-file is the lever instead.
 - **`PublishTrimmed` on WPF is best-effort:** expect IL2xxx trim warnings, and XAML / wpf-ui resource resolution can break at runtime. **Test the published exe early**; be ready to fall back to `TrimMode=partial` (with roots) or `PublishTrimmed=false`. The RAM/disk numbers below hold either way.
 - **Realistic footprint:** ~**45–55 MB** working-set RAM (WPF + WPF-UI pulls in `PresentationFramework`), ~**30–45 MB** on disk. Idle CPU ~0% (one poll/60 s). Still **3–8× lighter than Synapse**.
@@ -185,7 +185,7 @@ Typed `ISettingsStore` over JSON at `%APPDATA%\NagaBatteryTray\settings.json`:
 
 ## 9. Tech stack & dependencies (exact)
 
-- **Runtime:** .NET 8, `net8.0-windows10.0.17763.0` (for WinRT toast APIs). `<UseWPF>true</UseWPF>` **and** `<UseWindowsForms>true</UseWindowsForms>` (WinForms is referenced solely for `NotifyIcon` + `System.Drawing` icon rendering).
+- **Runtime:** .NET 10, `net10.0-windows10.0.17763.0` (for WinRT toast APIs). `<UseWPF>true</UseWPF>` **and** `<UseWindowsForms>true</UseWindowsForms>` (WinForms is referenced solely for `NotifyIcon` + `System.Drawing` icon rendering).
 - **Tray host:** **WinForms `NotifyIcon`** (chosen over WPF-UI's tray — it's the native GDI+ bitmap + `Icon.FromHandle` path of §6.3 and keeps resident mode free of a visible window).
 - **HID:** `HidSharp` — `DeviceList.Local.GetHidDevices(0x1532, …)`, the `0xFF00` filter, `HidStream.SetFeature/GetFeature`, 91-byte feature buffer (incl. report-id byte; `GetMaxFeatureReportLength()` includes it, expect 91). CRC computed by us.
 - **Fluent UI:** `wpf-ui` (`Wpf.Ui.Controls.FluentWindow`, Mica).

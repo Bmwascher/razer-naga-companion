@@ -6,13 +6,13 @@
 
 **Architecture:** One process, two modes — an always-resident WinForms `NotifyIcon` + polling timer (near-0 idle), and an on-demand WPF popup. Layered: `RazerDevice` (HID transport primitive + battery facade) → `BatteryMonitor` (timer, state machine, low-battery edge logic) → UI consumers (`TrayIconController`, `PopupWindow`, `Notifications`). `AppHost` owns lifecycle, single-instance, run-at-login, power/session events, and an injected `ISettingsStore`.
 
-**Tech Stack:** C# / .NET 8 (`net8.0-windows10.0.17763.0`), WPF + WinForms (NotifyIcon), HidSharp (HID), wpf-ui (Fluent popup), CommunityToolkit.WinUI.Notifications (toast). xUnit for tests.
+**Tech Stack:** C# / .NET 10 (`net10.0-windows10.0.17763.0`), WPF + WinForms (NotifyIcon), HidSharp (HID), wpf-ui (Fluent popup), CommunityToolkit.WinUI.Notifications (toast). xUnit for tests.
 
 ## Global Constraints
 
 Project-wide requirements — every task implicitly includes these (values copied verbatim from the spec):
 
-- **Target framework:** `net8.0-windows10.0.17763.0`; `<UseWPF>true</UseWPF>` **and** `<UseWindowsForms>true</UseWindowsForms>`.
+- **Target framework:** `net10.0-windows10.0.17763.0`; `<UseWPF>true</UseWPF>` **and** `<UseWindowsForms>true</UseWindowsForms>`.
 - **No admin/UAC.** Per-user only. Single instance via `Mutex` named `Local\NagaBatteryTray-b3f1c2d4-5a6e-4f80-9c1a-2e7d8b4f6a90`.
 - **Display strings:** device = `Naga V2 Pro`; app/toast display name = `Naga Battery Tray`; toast AUMID = `NagaBatteryTray`.
 - **HID target:** VID `0x1532`, mouse PID `0x00A8` (wireless; `0x00A7` wired fallback), vendor control collection **usage page `0xFF00`** (mandatory filter, not first-match). Query the **mouse**, never the dock `0x00A4`.
@@ -87,7 +87,7 @@ naga-battery-tray/
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
@@ -98,13 +98,13 @@ naga-battery-tray/
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="HidSharp" Version="2.1.0" />
-    <PackageReference Include="WPF-UI" Version="3.0.5" />
+    <PackageReference Include="HidSharp" Version="2.6.4" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
     <PackageReference Include="CommunityToolkit.WinUI.Notifications" Version="7.1.2" />
   </ItemGroup>
 </Project>
 ```
-> Package versions are confirmed during Task 5/9/10 against NuGet; pin the latest stable of each major shown.
+> **Versions verified current as of June 2026:** .NET 10 SDK (LTS → Nov 2028), HidSharp 2.6.4, WPF-UI 4.3.0, CommunityToolkit.WinUI.Notifications 7.1.2. During execution prefer `dotnet add package <name>` (no version) to lock the current stable, and scaffold the test project via `dotnet new xunit` so its tooling matches the installed SDK. WPF-UI 4.x kept the core controls/theming in the `wpf-ui` package (abstractions/DI split into separate packages we don't reference) — confirm `FluentWindow` / `ApplicationThemeManager` / `Markup.ThemesDictionary` / `Markup.ControlsDictionary` names at first build.
 
 - [ ] **Step 2: Create the DPI manifest**
 
@@ -142,7 +142,7 @@ internal static class Program
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
@@ -1621,7 +1621,7 @@ public static class Notifications
     }
 }
 ```
-> `ToastNotificationManagerCompat` (invoked under the hood by `.Show()`) auto-registers the COM activator + AUMID `NagaBatteryTray` on first use, so no Start-menu shortcut is needed for this unpackaged app. Confirm the package target `net8.0-windows10.0.17763.0` exposes the WinRT toast types during build.
+> `ToastNotificationManagerCompat` (invoked under the hood by `.Show()`) auto-registers the COM activator + AUMID `NagaBatteryTray` on first use, so no Start-menu shortcut is needed for this unpackaged app. Confirm the package target `net10.0-windows10.0.17763.0` exposes the WinRT toast types during build.
 
 - [ ] **Step 2: Build**
 
@@ -1928,7 +1928,7 @@ Run:
 ```bash
 dotnet publish src/NagaBatteryTray -c Release
 ```
-Expected: a single `NagaBatteryTray.exe` under `src/NagaBatteryTray/bin/Release/net8.0-windows10.0.17763.0/win-x64/publish/`. Note any IL2xxx trim warnings.
+Expected: a single `NagaBatteryTray.exe` under `src/NagaBatteryTray/bin/Release/net10.0-windows10.0.17763.0/win-x64/publish/`. Note any IL2xxx trim warnings.
 
 - [ ] **Step 3: Run the published exe and verify it behaves like Task 12**
 
