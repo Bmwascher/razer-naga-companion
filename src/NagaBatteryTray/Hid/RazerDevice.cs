@@ -93,26 +93,70 @@ public sealed class RazerDevice : IRazerDevice
         return 0;
     }
 
-    /// <summary>One SET->wait->GET round-trip with one busy retry. Returns the data byte or null on failure.</summary>
-    private async Task<byte?> QueryAsync(byte transactionId, byte commandId, CancellationToken ct)
+    /// <summary>One SET->wait->GET round-trip with one busy retry. Returns the raw 91-byte reply or null on failure.
+    /// On a failed HID call the handle is closed so the next EnsureOpen re-acquires.</summary>
+    private async Task<byte[]?> ExchangeAsync(byte[] request, CancellationToken ct)
     {
         if (_handle is null || _handle.IsInvalid) return null;
-        var buffer = RazerProtocol.BuildFeatureBuffer(transactionId, commandId);
-        if (!HidD_SetFeature(_handle, buffer, buffer.Length)) return null;
+        if (!HidD_SetFeature(_handle, request, request.Length)) { CloseHandle(); return null; }
 
         for (int attempt = 0; attempt < 2; attempt++)
         {
             await Task.Delay(_settings.Settings.SetReadDelayMs, ct);
             var reply = new byte[RazerProtocol.BufferLength];
             reply[0] = 0x00;
-            if (!HidD_GetFeature(_handle, reply, reply.Length)) return null;
-
-            var result = RazerProtocol.ParseReply(reply, out byte value);
-            if (result == ReplyResult.Success) return value;
-            if (result == ReplyResult.Failed) return null;
-            await Task.Delay(200, ct); // Busy: wait a bit more, then retry the GET once
+            if (!HidD_GetFeature(_handle, reply, reply.Length)) { CloseHandle(); return null; }
+            if (reply[1] == 0x01) { await Task.Delay(200, ct); continue; } // Busy: wait, retry GET once
+            return reply;
         }
-        return null;
+        return null; // still busy after retries
+    }
+
+    /// <summary>SET->GET a power-class query and return the data byte, or null on failure.</summary>
+    private async Task<byte?> QueryAsync(byte transactionId, byte commandId, CancellationToken ct)
+    {
+        var reply = await ExchangeAsync(RazerProtocol.BuildFeatureBuffer(transactionId, commandId), ct);
+        if (reply is null) return null;
+        return RazerProtocol.ParseReply(reply, out byte value) == ReplyResult.Success ? value : null;
+    }
+
+    public async Task<DpiSetting?> GetDpiAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!EnsureOpen()) return null;
+            byte tid = await ResolveTransactionIdAsync(ct);
+            if (tid == 0) return null;
+            var reply = await ExchangeAsync(RazerProtocol.BuildGetDpiBuffer(tid), ct);
+            if (reply is null) return null;
+            if (RazerProtocol.ParseDpiReply(reply, out int x, out int y) != ReplyResult.Success) return null;
+            return new DpiSetting(x, y);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CloseHandle();
+            LogOnce(ex);
+            return null;
+        }
+    }
+
+    public async Task<bool> SetDpiAsync(int dpiX, int dpiY, CancellationToken ct)
+    {
+        try
+        {
+            if (!EnsureOpen()) return false;
+            byte tid = await ResolveTransactionIdAsync(ct);
+            if (tid == 0) return false;
+            var reply = await ExchangeAsync(RazerProtocol.BuildSetDpiBuffer(tid, dpiX, dpiY), ct);
+            if (reply is null) return false;
+            return RazerProtocol.ParseDpiReply(reply, out _, out _) == ReplyResult.Success;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CloseHandle();
+            LogOnce(ex);
+            return false;
+        }
     }
 
     private void CloseHandle()

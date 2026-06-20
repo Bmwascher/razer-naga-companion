@@ -19,6 +19,12 @@ internal static class Program
             return Diagnostics.ProbeCommand.Run();
         }
 
+        if (args.Length > 0 && args[0] == "--probe-dpi")
+        {
+            AllocConsoleIfNeeded();
+            return Diagnostics.ProbeCommand.RunDpi();
+        }
+
         using var mutex = new Mutex(initiallyOwned: true, MutexName, out bool createdNew);
         if (!createdNew) return 0; // already running
 
