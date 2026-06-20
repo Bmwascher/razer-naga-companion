@@ -1,0 +1,17 @@
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+
+# Publish output
+publish/
+*.exe.config
+
+# Visual brainstorm companion (mockups + local server state)
+.superpowers/
+
+# OS / editor
+.vs/
+Thumbs.db
+.DS_Store
