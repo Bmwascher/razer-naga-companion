@@ -29,8 +29,9 @@ directly over HID with no Synapse, no driver, and no admin rights.
 
 ## ✨ Features
 
-- 🔋 **Battery % in the tray** — a crisp, DPI-aware number that recolors by level
-  (🟢 green → 🟡 amber → 🔴 red), and turns green while charging.
+- 🔋 **Battery % in the tray** — a battery number that stays sharp at any display
+  scaling (100%/150%/200%) and recolors by level (🟢 green → 🟡 amber → 🔴 red),
+  turning green while charging.
 - 🖱️ **Click for details** — a compact popup with the exact %, a charging chip, a
   level bar, and a Refresh button.
 - 🔔 **Low-battery toast** — a native Windows notification when you drop to/below your
@@ -46,16 +47,16 @@ directly over HID with no Synapse, no driver, and no admin rights.
 ## 👀 What it looks like
 
 ```
-   Tray icon:   [95]   ← colored battery %, click it ↓
+Tray:  [95]   ← battery %, recolored by level — click to open ↓
 
-   ┌────────────────────────────────┐
-   │  Naga V2 Pro         On battery │
-   │                                 │
-   │  95%   ⚡ Charging               │
-   │  ██████████████████████████░░░  │
-   │                                 │
-   │    [ Refresh ]    [ Settings ]  │
-   └────────────────────────────────┘
+┌──────────────────────────────────┐
+│  Naga V2 Pro            Charging │
+│                                  │
+│  95%                             │
+│  ███████████████████████████░    │
+│                                  │
+│   [ Refresh ]     [ Settings ]   │
+└──────────────────────────────────┘
 ```
 
 ---
