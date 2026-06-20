@@ -42,6 +42,38 @@ into a small Synapse replacement, without adding weight or new dependencies.
   HID handle errors; idle footprint unchanged (~0% CPU, ~23 MB private).
 - All new protocol code covered by pure unit tests; existing 22 tests stay green.
 
+## 3.1 Non-functional invariants (HARD, GATING requirement)
+
+The overriding constraint: the app must **stay lightweight** and introduce **zero regression
+in mouse input latency / feel**. These gate "done" — a build that fails either is not shippable.
+
+**Lightweight:**
+- No new background timers, threads, or periodic work. Battery polling cadence and mechanism
+  are unchanged.
+- The Settings window is created on demand and released on close (the single `_settingsWindow`
+  reference is nulled on `Closed`); idle steady-state returns to the v1 baseline (~0% CPU,
+  ~23 MB private working set). A transient RAM bump *while the window is open* is expected and fine.
+- No new dependencies (WPF-UI 4.3.0 is already referenced).
+
+**Zero mouse-input-latency regression:**
+- We communicate only via HID **feature reports** (`HidD_SetFeature`/`GetFeature` → USB
+  **control endpoint** EP0). Mouse movement/clicks are delivered on a **separate interrupt IN
+  endpoint** with reserved bandwidth, serviced continuously by the OS — our control transfers
+  do not starve or delay it.
+- The device is opened with **zero desired access** + `FILE_SHARE_READ|WRITE` (passive client):
+  we never take exclusive access and never claim/touch the OS-owned input collection, so the
+  input path is undisturbed.
+- DPI I/O is strictly **on-demand** (settings-window open + explicit Apply) — **no DPI polling**,
+  no new periodic mouse traffic. DPI is never read on slider drag, only on the Apply button.
+- Battery polling stays infrequent (default 60 s; 15 s charging) with an enforced **floor of
+  15 s** so cadence can't be set aggressively enough to add bus chatter or keep the mouse awake.
+- Battery polls and DPI ops are **serialized** through the single read lock — never concurrent
+  or stacked feature transfers on the one HID handle.
+
+**Verification (gating acceptance — see §9):** footprint returns to baseline after using the
+window, and mouse input latency is measured before vs. during/after our operations with no
+perceptible or measurable increase.
+
 ## 4. User experience
 
 **Entry points (one shared window):**
@@ -56,7 +88,8 @@ into a small Synapse replacement, without adding weight or new dependencies.
 2. **Run at startup** — `ui:ToggleSwitch` (read fresh from `StartupRegistration.IsEnabled()` on open).
 3. **Mouse DPI** — "Current: N DPI" label, a `Slider` (100–30000) bound two-way to a
    `ui:NumberBox` (same VM value), and an **Apply DPI** button.
-4. **Advanced** (`ui:CardExpander`, collapsed) — on-battery and charging poll seconds (`ui:NumberBox`).
+4. **Advanced** (`ui:CardExpander`, collapsed) — on-battery and charging poll seconds
+   (`ui:NumberBox`, **minimum 15 s** floor per §3.1; defaults 60 / 15).
 
 **Buttons:** **Apply DPI** (writes to the mouse immediately) and **Close**. App settings
 (threshold, cadence) are saved when the window closes; run-at-startup writes through
@@ -238,6 +271,11 @@ that it **blocks** for the lock (not skip), and that a concurrent poll skips.
    updating, no HID errors.
 5. Toggle run-at-startup → tray checkmark + HKCU key both update.
 6. Unplug mouse → DPI controls disabled, "unknown"; replug → enabled with current DPI.
+7. **(Gating) Footprint:** after opening and closing the Settings window, idle CPU returns to
+   ~0% and private working set to ~23 MB — no lasting growth, no new background activity.
+8. **(Gating) Mouse latency:** with a click-latency / polling-rate tool (or a controlled
+   cursor / in-game test), confirm no measurable or perceptible input-lag increase — at idle,
+   during a battery poll, and during a DPI Apply. Compare before vs. after the change.
 
 ## 10. Out of scope / future
 
@@ -254,6 +292,9 @@ path.
   (confirmed current, .NET 10-ready) — no new dependencies.
 - **HID:** VID `0x1532`, mouse PID `0x00A8` (wireless) / `0x00A7` (wired); 90-byte report,
   91-byte feature buffer; CRC XOR `[2..87]`; transaction id `0x1f`.
+- **Lightweight + zero mouse-input-latency are hard, gating requirements** (see §3.1): no new
+  background work, on-demand DPI only, feature-report (control-pipe) I/O that never touches the
+  input path, a 15 s poll-cadence floor, and footprint + latency verified as acceptance gates.
 - **DRY, YAGNI, TDD, frequent commits.** Conventional-commit messages. Surgical changes that
   preserve existing style.
 
