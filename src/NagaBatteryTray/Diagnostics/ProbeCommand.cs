@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using System.Threading;
+using Microsoft.Win32.SafeHandles;
 using HidSharp;
 using NagaBatteryTray.Hid;
 
@@ -8,53 +10,64 @@ public static class ProbeCommand
 {
     public static int Run()
     {
-        Console.WriteLine("Naga Battery Tray - HID probe");
-        Console.WriteLine("Enumerating VID 0x1532 devices:");
-        foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId))
-        {
-            int maxFeature = -1;
-            try { maxFeature = dev.GetMaxFeatureReportLength(); } catch { }
-            Console.WriteLine($"  PID 0x{dev.ProductID:x4}  maxFeature={maxFeature}  {SafeName(dev)}");
-        }
+        Console.WriteLine("Naga Battery Tray - HID probe (raw HidD_*, zero-access open)\n");
 
         foreach (int pid in new[] { RazerProtocol.MousePidWireless, RazerProtocol.MousePidWired })
         {
             foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
             {
-                if (!dev.TryOpen(out var stream)) continue;
-                using (stream)
+                int max = -1;
+                try { max = dev.GetMaxFeatureReportLength(); } catch { }
+                if (max != RazerProtocol.BufferLength) continue; // only collections with the 90+1 feature report
+
+                Console.WriteLine($"PID 0x{pid:x4} {Mi(dev.DevicePath)} max={max} -> raw zero-access open");
+                using var h = CreateFile(dev.DevicePath, 0, 0x3, IntPtr.Zero, 0x3, 0, IntPtr.Zero);
+                if (h.IsInvalid)
                 {
-                    foreach (byte tid in RazerProtocol.TransactionIdProbeSet)
-                    {
-                        var battery = OneShot(stream, tid, RazerProtocol.CommandIdBattery);
-                        if (battery is null) continue;
-                        var charging = OneShot(stream, tid, RazerProtocol.CommandIdCharging);
-                        Console.WriteLine(
-                            $"PID 0x{pid:x4} transaction 0x{tid:x2} => battery raw {battery} " +
-                            $"({RazerProtocol.ScaleBattery(battery.Value)}%), charging={(charging is null ? "?" : (charging != 0).ToString())}");
-                    }
+                    Console.WriteLine($"  CreateFile failed err={Marshal.GetLastWin32Error()}");
+                    continue;
                 }
+                Console.WriteLine("  opened OK (zero-access)");
+                foreach (byte tid in RazerProtocol.TransactionIdProbeSet)
+                    Console.WriteLine($"  tid 0x{tid:x2}: {OneShot(h, tid)}");
             }
         }
-        Console.WriteLine("Done. The transaction id whose battery % is plausible is the right one.");
+        Console.WriteLine("\nLegend: status 0x02=success, 0x01=busy(asleep), other=fail.");
         return 0;
     }
 
-    private static string SafeName(HidDevice dev)
-    {
-        try { return dev.GetFriendlyName() ?? "?"; } catch { return "?"; }
-    }
-
-    private static byte? OneShot(HidStream stream, byte tid, byte commandId)
+    private static string OneShot(SafeFileHandle h, byte tid)
     {
         try
         {
-            stream.SetFeature(RazerProtocol.BuildFeatureBuffer(tid, commandId));
+            var buf = RazerProtocol.BuildFeatureBuffer(tid, RazerProtocol.CommandIdBattery);
+            if (!HidD_SetFeature(h, buf, buf.Length))
+                return $"SetFeature failed err={Marshal.GetLastWin32Error()}";
             Thread.Sleep(400);
             var reply = new byte[RazerProtocol.BufferLength];
-            stream.GetFeature(reply);
-            return RazerProtocol.ParseReply(reply, out byte value) == ReplyResult.Success ? value : null;
+            reply[0] = 0;
+            if (!HidD_GetFeature(h, reply, reply.Length))
+                return $"GetFeature failed err={Marshal.GetLastWin32Error()}";
+            var r = RazerProtocol.ParseReply(reply, out byte v);
+            return $"status=0x{reply[1]:x2} {r} raw={v} ({RazerProtocol.ScaleBattery(v)}%)";
         }
-        catch { return null; }
+        catch (Exception ex) { return $"EXC {ex.Message}"; }
     }
+
+    private static string Mi(string p)
+    {
+        int i = p.IndexOf("mi_", StringComparison.OrdinalIgnoreCase);
+        return i >= 0 && i + 5 <= p.Length ? p.Substring(i, 5) : "mi_??";
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    private static extern bool HidD_SetFeature(SafeFileHandle h, byte[] buffer, int length);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    private static extern bool HidD_GetFeature(SafeFileHandle h, byte[] buffer, int length);
 }
