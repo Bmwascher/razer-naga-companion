@@ -70,6 +70,8 @@ Each layer has one responsibility and a narrow interface. `BatteryMonitor` depen
 
 Verified against the openrazer kernel driver (read twice), the RazerBatteryTaskbar device table, and the hsutungyu Python tool, then reconciled. Confidence **high** on the protocol; §11 items are confirmed empirically at first run.
 
+> **Hardware correction (2026-06-20, verified on the actual Naga V2 Pro — battery raw 243 → 95%, transaction id `0x1f`):** No collection on this device exposes usage page `0xFF00`. The 90-byte feature report lives on the **mouse collection `mi_00`** — the one whose `GetMaxFeatureReportLength() == 91`. Windows owns that collection, so HidSharp's stream open fails ("Unable to open HID class device"). It must be opened with **`CreateFile(dwDesiredAccess = 0, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING)`** and exchanged via **`HidD_SetFeature` / `HidD_GetFeature`** (P/Invoke). Selection rule: enumerate with HidSharp (`DeviceList.Local.GetHidDevices(0x1532, 0x00A8/0x00A7)`), pick the collection with `GetMaxFeatureReportLength() == 91`, then open its `DevicePath` raw. The `0xFF00`/`GetTopLevelUsage` approach below is superseded by this for the Naga V2 Pro.
+
 ### 5.1 Target device & interface
 
 - **Vendor:** `0x1532`. **Query the MOUSE, not the dock.** When docked, the Naga still enumerates as its own USB device (**wireless PID `0x00A8`**, wired `0x00A7`); the Mouse Dock Pro (`0x00A4`) is separate and does **not** proxy the mouse's battery. The user's machine confirms the Naga enumerates as **`0x00A8`**.

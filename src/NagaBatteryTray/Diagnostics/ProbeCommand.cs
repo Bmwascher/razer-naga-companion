@@ -1,8 +1,10 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
 using HidSharp;
 using NagaBatteryTray.Hid;
+using NagaBatteryTray.Settings;
 
 namespace NagaBatteryTray.Diagnostics;
 
@@ -32,6 +34,14 @@ public static class ProbeCommand
                     Console.WriteLine($"  tid 0x{tid:x2}: {OneShot(h, tid)}");
             }
         }
+        Console.WriteLine("\n--- RazerDevice.ReadAsync (production class) ---");
+        var store = new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"naga-probe-{Guid.NewGuid():N}.json"));
+        using (var device = new RazerDevice(store))
+        {
+            var reading = device.ReadAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Console.WriteLine($"  present={reading.IsPresent} percent={reading.Percent}% charging={reading.IsCharging} cachedTid={store.Settings.CachedTransactionId}");
+        }
+
         Console.WriteLine("\nLegend: status 0x02=success, 0x01=busy(asleep), other=fail.");
         return 0;
     }

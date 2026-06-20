@@ -1,15 +1,22 @@
-using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using HidSharp;
+using Microsoft.Win32.SafeHandles;
 using NagaBatteryTray.Settings;
 
 namespace NagaBatteryTray.Hid;
 
+/// <summary>
+/// Reads battery/charging from a Razer Naga V2 Pro. The 90-byte Razer feature report lives on the
+/// mouse HID collection (mi_00, GetMaxFeatureReportLength == 91), which Windows owns — so it must be
+/// opened with CreateFile(dwDesiredAccess = 0) and exchanged via HidD_SetFeature/HidD_GetFeature.
+/// (No collection exposes usage page 0xFF00 on this device; verified empirically.)
+/// </summary>
 public sealed class RazerDevice : IRazerDevice
 {
     private readonly ISettingsStore _settings;
-    private HidStream? _stream;
+    private SafeFileHandle? _handle;
     private bool _loggedError;
 
     public RazerDevice(ISettingsStore settings) => _settings = settings;
@@ -33,9 +40,9 @@ public sealed class RazerDevice : IRazerDevice
             _loggedError = false;
             return new BatteryReading(percent, isCharging, true, now);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseStream();
+            CloseHandle();
             LogOnce(ex);
             return BatteryReading.Absent(now);
         }
@@ -43,39 +50,29 @@ public sealed class RazerDevice : IRazerDevice
 
     private bool EnsureOpen()
     {
-        if (_stream is not null) return true;
-        var device = FindControlDevice();
-        if (device is null) return false;
-        if (!device.TryOpen(out _stream)) { _stream = null; return false; }
-        _stream.ReadTimeout = 1000;
-        _stream.WriteTimeout = 1000;
+        if (_handle is { IsInvalid: false }) return true;
+        CloseHandle();
+
+        var path = FindControlPath();
+        if (path is null) return false;
+
+        var h = CreateFile(path, 0, FileShareReadWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+        if (h.IsInvalid) { h.Dispose(); return false; }
+        _handle = h;
         return true;
     }
 
-    /// <summary>Enumerate VID 0x1532 mouse PIDs and pick the vendor 0xFF00 control collection.</summary>
-    private static HidDevice? FindControlDevice()
+    /// <summary>The control collection is the mouse's HID device that exposes the 90+1 byte feature report.</summary>
+    private static string? FindControlPath()
     {
         foreach (int pid in new[] { RazerProtocol.MousePidWireless, RazerProtocol.MousePidWired })
-        {
             foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
             {
-                if (HasVendorUsagePage(dev)) return dev;
+                int max;
+                try { max = dev.GetMaxFeatureReportLength(); } catch { continue; }
+                if (max == RazerProtocol.BufferLength) return dev.DevicePath;
             }
-        }
         return null;
-    }
-
-    private static bool HasVendorUsagePage(HidDevice dev)
-    {
-        try
-        {
-            var descriptor = dev.GetReportDescriptor();
-            foreach (var item in descriptor.DeviceItems)
-                foreach (uint usage in item.Usages.GetAllValues())
-                    if ((usage >> 16) == RazerProtocol.UsagePageVendor) return true;
-        }
-        catch { /* some collections refuse descriptor read */ }
-        return false;
     }
 
     /// <summary>Returns cached id, else probes the set and caches the winner. 0 = could not resolve.</summary>
@@ -99,16 +96,16 @@ public sealed class RazerDevice : IRazerDevice
     /// <summary>One SET->wait->GET round-trip with one busy retry. Returns the data byte or null on failure.</summary>
     private async Task<byte?> QueryAsync(byte transactionId, byte commandId, CancellationToken ct)
     {
-        if (_stream is null) return null;
+        if (_handle is null || _handle.IsInvalid) return null;
         var buffer = RazerProtocol.BuildFeatureBuffer(transactionId, commandId);
-        _stream.SetFeature(buffer);
+        if (!HidD_SetFeature(_handle, buffer, buffer.Length)) return null;
 
         for (int attempt = 0; attempt < 2; attempt++)
         {
             await Task.Delay(_settings.Settings.SetReadDelayMs, ct);
             var reply = new byte[RazerProtocol.BufferLength];
             reply[0] = 0x00;
-            _stream.GetFeature(reply);
+            if (!HidD_GetFeature(_handle, reply, reply.Length)) return null;
 
             var result = RazerProtocol.ParseReply(reply, out byte value);
             if (result == ReplyResult.Success) return value;
@@ -118,7 +115,11 @@ public sealed class RazerDevice : IRazerDevice
         return null;
     }
 
-    private void CloseStream() { _stream?.Dispose(); _stream = null; }
+    private void CloseHandle()
+    {
+        _handle?.Dispose();
+        _handle = null;
+    }
 
     private void LogOnce(Exception ex)
     {
@@ -127,5 +128,19 @@ public sealed class RazerDevice : IRazerDevice
         Console.Error.WriteLine($"[RazerDevice] {ex.GetType().Name}: {ex.Message}");
     }
 
-    public void Dispose() => CloseStream();
+    public void Dispose() => CloseHandle();
+
+    private const uint FileShareReadWrite = 0x3; // FILE_SHARE_READ | FILE_SHARE_WRITE
+    private const uint OpenExisting = 0x3;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    private static extern bool HidD_SetFeature(SafeFileHandle h, byte[] buffer, int length);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    private static extern bool HidD_GetFeature(SafeFileHandle h, byte[] buffer, int length);
 }
