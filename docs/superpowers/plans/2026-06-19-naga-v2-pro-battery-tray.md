@@ -1774,6 +1774,13 @@ public sealed class AppHost
 
     public void Start()
     {
+        // WPF-UI controls require its theme + controls resource dictionaries merged into
+        // Application.Resources. With no App.xaml we add them in code, or FluentWindow / ui:Button
+        // render unstyled or throw at runtime. (Confirm the exact Wpf.Ui.Markup type names against
+        // the installed wpf-ui version at build time — verification was deferred due to a session limit.)
+        _app.Resources.MergedDictionaries.Add(
+            new Wpf.Ui.Markup.ThemesDictionary { Theme = Wpf.Ui.Appearance.ApplicationTheme.Dark });
+        _app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
         ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Dark);
 
         _device = new RazerDevice(_settings);
