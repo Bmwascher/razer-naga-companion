@@ -10,7 +10,7 @@
 
 ## 1. Goal & motivation
 
-Replace Razer Synapse **for the single purpose of seeing the Naga V2 Pro's battery level and charging state** from the Windows system tray. Synapse runs several background services at a combined ~150–400 MB+ just to surface a battery number. This tool does that one job in a fraction of the footprint, with no Synapse dependency.
+Replace Razer Synapse **for the single purpose of seeing the Naga V2 Pro's battery level and charging state** from the Windows system tray. Synapse runs several background services at a combined ~150–400 MB+ just to surface a battery number. This tool does that one job in a fraction of the footprint, with no Synapse dependency. Because charging state is read from the mouse (not the dock), the app also doubles as a **dock-charging diagnostic** — relevant to the user's currently-misbehaving wireless charger: dock the mouse and watch whether it flips to "charging."
 
 This is **v1 of a deliberately expandable base**: the user may later grow it into a polished config GUI and key remapping (a Synapse-lite). v1 builds none of that, but is architected so those bolt on with localized change.
 
@@ -31,7 +31,7 @@ A build is "done" when:
 **Out of scope for v1 (YAGNI):** button/key remapping, DPI/polling-rate/lighting control, profiles, battery-history graph, a multi-device switcher UI, light theme, installer/auto-update.
 
 **Architected so these are a localized change later (do not build now):**
-- **Multi-device:** `RazerDevice` enumerates and exposes a *list*, so discovery already generalizes. **Honest scope note:** `BatteryMonitor` holds a single `DeviceState` and consumers subscribe to one `StateChanged`, so adding a 2nd **battery** device later means keying state/events by device id and updating subscribers — a small, contained change, not a rewrite, but not zero. (The Mouse Dock Pro is USB-powered, has **no battery**, and is never a device entry.)
+- **Multi-device:** `RazerDevice` enumerates and exposes a *list*, so discovery already generalizes. **Honest scope note:** `BatteryMonitor` holds a single `DeviceState` and consumers subscribe to one `StateChanged`, so adding a 2nd **battery** device later means keying state/events by device id and updating subscribers — a small, contained change, not a rewrite, but not zero. (The Mouse Dock Pro is USB-powered, has **no battery**, and is never a device entry.) **Charging status — including "is the dock charging the mouse" — needs no multi-device plumbing:** it is read from the *mouse* (`0x84`), so single-device v1 fully delivers it.
 - **Config GUI:** the popup's **Settings** button is the reserved on-ramp (disabled in v1; see §6.4).
 - **Key remapping:** rides on `RazerDevice`'s **transport primitive** (open stream, build report, CRC, Set/GetFeature round-trip). A future `RemapEngine` reuses that primitive for on-device writes, plus a *separate* input-hook layer for host-side hooks. The battery facade is untouched.
 
