@@ -7,7 +7,7 @@ namespace NagaBatteryTray.Ui;
 public sealed class TrayIconController : IDisposable
 {
     private readonly BatteryMonitor _monitor;
-    private readonly NotifyIcon _icon;
+    private readonly TrayIcon _icon;
     private readonly ToolStripMenuItem _startupItem;
     private Icon? _current;
 
@@ -20,7 +20,7 @@ public sealed class TrayIconController : IDisposable
     public TrayIconController(BatteryMonitor monitor)
     {
         _monitor = monitor;
-        _icon = new NotifyIcon { Visible = false, Text = "Naga V2 Pro" };
+        _icon = new TrayIcon();
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Refresh now", null, (_, _) => RefreshRequested?.Invoke());
@@ -30,17 +30,13 @@ public sealed class TrayIconController : IDisposable
         menu.Items.Add("Settings", null, (_, _) => SettingsRequested?.Invoke());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => QuitRequested?.Invoke());
-        _icon.ContextMenuStrip = menu;
 
-        _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) LeftClicked?.Invoke(); };
+        _icon.ContextMenuRequested += pt => menu.Show(pt);
+        _icon.LeftClick += () => LeftClicked?.Invoke();
         _monitor.StateChanged += (_, state) => Update(state);
     }
 
-    public void Show()
-    {
-        Update(_monitor.State);
-        _icon.Visible = true;
-    }
+    public void Show() => Update(_monitor.State); // first Update registers the icon with the shell
 
     public void SetStartupChecked(bool value)
     {
@@ -55,10 +51,9 @@ public sealed class TrayIconController : IDisposable
     {
         int dpi = (int)Math.Round(96 * GetDpiScale());
         var next = IconRenderer.Render(state, dpi);
-        _icon.Icon = next;
-        IconRenderer.Destroy(_current);
+        _icon.Update(next, Tooltip(state));
+        IconRenderer.Destroy(_current); // keep the live HICON (next) alive; free the previous one
         _current = next;
-        _icon.Text = Tooltip(state);
     }
 
     private static string Tooltip(DeviceState s) => s.Status == DeviceStatus.Unknown
@@ -73,7 +68,6 @@ public sealed class TrayIconController : IDisposable
 
     public void Dispose()
     {
-        _icon.Visible = false;
         _icon.Dispose();
         IconRenderer.Destroy(_current);
     }
