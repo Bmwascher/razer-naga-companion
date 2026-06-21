@@ -189,6 +189,17 @@ Presence/"docked" has **no dedicated command**; it is inferred from whether the 
 If the dock does **not** relay battery in the asleep state, **goal 2 is dropped** and we keep only
 what works (e.g. dock-presence as a charging hint); this is reported plainly, not papered over.
 
+**Spike results (2026-06-20, hardware in the loop) — GATE: relay NOT confirmed.** The dock is
+addressable (`0x00A4`, `mi_00`, `GetMaxFeatureReportLength()==91`), opens zero-access, and **accepts**
+the battery (`0x07/0x80`) and charging (`0x07/0x84`) reports — it echoes the request and returns a
+real status byte. But across runs (off-dock, docked, docked+busy-retry) at both tx `0x1f` and `0xff`
+it returned only `0x04` timeout / `0x01` busy / `0x03` failure — **never `0x02` success with a real
+value.** This correlates with the dock not currently charging/hosting the mouse: the mouse is linked
+as `0x00A8` (HyperSpeed), almost certainly via a **separate dongle**, so the dock has no RF/charging
+path to relay through. **Stage 2 is on hold** pending a working dock↔mouse link (connect the mouse
+*through the dock* as its receiver and confirm it charges), then re-run `--probe-dock` expecting
+`0x02` + a sane `%`. The `--probe-dock` diagnostic (with busy-retry) is committed and is the re-test tool.
+
 ## 7. Error handling & edge cases
 
 - **No dock present:** fallback path never taken; identical to today.
