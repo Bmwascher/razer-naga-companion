@@ -78,6 +78,37 @@ public static class ProbeCommand
         return 0;
     }
 
+    public static int RunDock()
+    {
+        Console.WriteLine("Naga Battery Tray - Mouse Dock Pro probe (PID 0x00A4, battery + charging)\n");
+
+        bool any = false;
+        foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, RazerProtocol.DockPid))
+        {
+            int max = -1;
+            try { max = dev.GetMaxFeatureReportLength(); } catch { }
+            if (max != RazerProtocol.BufferLength) continue; // only the 90+1 feature-report collection
+            any = true;
+
+            Console.WriteLine($"DOCK 0x{RazerProtocol.DockPid:x4} {Mi(dev.DevicePath)} max={max} -> raw zero-access open");
+            using var h = CreateFile(dev.DevicePath, 0, 0x3, IntPtr.Zero, 0x3, 0, IntPtr.Zero);
+            if (h.IsInvalid) { Console.WriteLine($"  CreateFile failed err={Marshal.GetLastWin32Error()}"); continue; }
+            Console.WriteLine("  opened OK (zero-access)");
+
+            foreach (byte tid in new byte[] { 0x1f, 0xff })
+            {
+                Console.WriteLine($"  tid 0x{tid:x2} battery : {DockOneShot(h, tid, RazerProtocol.CommandIdBattery)}");
+                Console.WriteLine($"  tid 0x{tid:x2} charging: {DockOneShot(h, tid, RazerProtocol.CommandIdCharging)}");
+            }
+        }
+
+        if (!any)
+            Console.WriteLine($"No dock collection found (VID 0x{RazerProtocol.VendorId:x4} PID 0x{RazerProtocol.DockPid:x4}, feature len {RazerProtocol.BufferLength}).");
+        Console.WriteLine("\nRun in each state: mouse off-dock / docked+charging / docked+asleep / dock present not charging.");
+        Console.WriteLine("Legend: status 0x02=success, 0x01=busy(asleep/no relay), other=fail. battery raw 0..255; charging 0/1 at byte[10].");
+        return 0;
+    }
+
     private static string OneShot(SafeFileHandle h, byte tid)
     {
         try
@@ -92,6 +123,28 @@ public static class ProbeCommand
                 return $"GetFeature failed err={Marshal.GetLastWin32Error()}";
             var r = RazerProtocol.ParseReply(reply, out byte v);
             return $"status=0x{reply[1]:x2} {r} raw={v} ({RazerProtocol.ScaleBattery(v)}%)";
+        }
+        catch (Exception ex) { return $"EXC {ex.Message}"; }
+    }
+
+    private static string DockOneShot(SafeFileHandle h, byte tid, byte commandId)
+    {
+        try
+        {
+            var buf = RazerProtocol.BuildFeatureBuffer(tid, commandId);
+            if (!HidD_SetFeature(h, buf, buf.Length))
+                return $"SetFeature failed err={Marshal.GetLastWin32Error()}";
+            Thread.Sleep(400);
+            var reply = new byte[RazerProtocol.BufferLength];
+            reply[0] = 0;
+            if (!HidD_GetFeature(h, reply, reply.Length))
+                return $"GetFeature failed err={Marshal.GetLastWin32Error()}";
+            var hex = string.Join(" ", reply.Take(16).Select(b => b.ToString("x2")));
+            var r = RazerProtocol.ParseReply(reply, out byte v);
+            string decoded = commandId == RazerProtocol.CommandIdBattery
+                ? $"raw={v} ({RazerProtocol.ScaleBattery(v)}%)"
+                : $"charging={v}";
+            return $"status=0x{reply[1]:x2} {r} {decoded}  [{hex}]";
         }
         catch (Exception ex) { return $"EXC {ex.Message}"; }
     }

@@ -25,6 +25,12 @@ internal static class Program
             return Diagnostics.ProbeCommand.RunDpi();
         }
 
+        if (args.Length > 0 && args[0] == "--probe-dock")
+        {
+            AllocConsoleIfNeeded();
+            return Diagnostics.ProbeCommand.RunDock();
+        }
+
         using var mutex = new Mutex(initiallyOwned: true, MutexName, out bool createdNew);
         if (!createdNew) return 0; // already running
 

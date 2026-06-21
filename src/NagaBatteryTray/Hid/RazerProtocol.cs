@@ -7,6 +7,7 @@ public static class RazerProtocol
     public const int VendorId = 0x1532;
     public const int MousePidWireless = 0x00A8;
     public const int MousePidWired = 0x00A7;
+    public const int DockPid = 0x00A4;       // Razer Mouse Dock Pro (separate USB device)
     public const int UsagePageVendor = 0xFF00;
 
     public const int ReportLength = 90;
