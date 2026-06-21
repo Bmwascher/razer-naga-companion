@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,8 @@ public sealed class RazerDevice : IRazerDevice
 {
     private readonly ISettingsStore _settings;
     private SafeFileHandle? _handle;
+    private byte _tid; // transaction id confirmed working on the currently-open collection (0 = not connected)
+    private bool _wired; // true when the live collection is the wired interface (0x00A7), false for wireless (0x00A8)
     private bool _loggedError;
 
     public RazerDevice(ISettingsStore settings) => _settings = settings;
@@ -26,19 +29,20 @@ public sealed class RazerDevice : IRazerDevice
         var now = DateTimeOffset.Now;
         try
         {
-            if (!EnsureOpen()) return BatteryReading.Absent(now);
-
-            byte tid = await ResolveTransactionIdAsync(ct);
+            byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return BatteryReading.Absent(now);
 
             var battery = await QueryAsync(tid, RazerProtocol.CommandIdBattery, ct);
-            if (battery is null) return BatteryReading.Absent(now);
+            // A live handle that stops answering (e.g. the wireless receiver after the mouse switches to
+            // wired) replies with a timeout status, not a HID error — so drop it here to force the next
+            // poll to re-select whichever collection is now live.
+            if (battery is null) { CloseHandle(); return BatteryReading.Absent(now); }
 
             var charging = await QueryAsync(tid, RazerProtocol.CommandIdCharging, ct);
             int percent = RazerProtocol.ScaleBattery(battery.Value);
             bool isCharging = charging is not null && charging.Value != 0;
             _loggedError = false;
-            return new BatteryReading(percent, isCharging, true, now);
+            return new BatteryReading(percent, isCharging, true, now, _wired);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -48,31 +52,48 @@ public sealed class RazerDevice : IRazerDevice
         }
     }
 
-    private bool EnsureOpen()
+    /// <summary>Ensures <see cref="_handle"/> points at a collection that actually answers, and returns its
+    /// working transaction id (0 = none reachable). Reuses a live connection cheaply; on (re)connect it tries
+    /// each candidate collection — wired first — and keeps the first that replies to a battery query. The
+    /// verify step is essential: the wireless receiver stays enumerated when the mouse switches to wired, so
+    /// picking by enumeration order alone would lock onto a collection that can no longer reach the mouse.</summary>
+    private async Task<byte> EnsureConnectedAsync(CancellationToken ct)
     {
-        if (_handle is { IsInvalid: false }) return true;
+        if (_handle is { IsInvalid: false } && _tid != 0) return _tid;
         CloseHandle();
 
-        var path = FindControlPath();
-        if (path is null) return false;
+        foreach (var (pid, path) in FindControlPaths())
+        {
+            var h = CreateFile(path, 0, FileShareReadWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+            if (h.IsInvalid) { h.Dispose(); continue; }
+            _handle = h;
 
-        var h = CreateFile(path, 0, FileShareReadWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
-        if (h.IsInvalid) { h.Dispose(); return false; }
-        _handle = h;
-        return true;
+            byte tid = await ResolveTransactionIdAsync(ct);
+            // ResolveTransactionIdAsync short-circuits on a cached id without touching this handle, so confirm
+            // this collection truly answers before committing to it; otherwise fall through to the next.
+            if (tid != 0 && await QueryAsync(tid, RazerProtocol.CommandIdBattery, ct) is not null)
+            {
+                _tid = tid;
+                _wired = pid == RazerProtocol.MousePidWired;
+                return tid;
+            }
+            CloseHandle();
+        }
+        return 0;
     }
 
-    /// <summary>The control collection is the mouse's HID device that exposes the 90+1 byte feature report.</summary>
-    private static string? FindControlPath()
+    /// <summary>Mouse HID collections exposing the 90+1 byte feature report (with their PID), wired (0x00A7)
+    /// before wireless (0x00A8): a cabled mouse must win over a still-plugged-in receiver that can no longer
+    /// reach it. The PID is returned so the caller can report the active link (wired vs wireless).</summary>
+    private static IEnumerable<(int Pid, string Path)> FindControlPaths()
     {
-        foreach (int pid in new[] { RazerProtocol.MousePidWireless, RazerProtocol.MousePidWired })
+        foreach (int pid in new[] { RazerProtocol.MousePidWired, RazerProtocol.MousePidWireless })
             foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
             {
                 int max;
                 try { max = dev.GetMaxFeatureReportLength(); } catch { continue; }
-                if (max == RazerProtocol.BufferLength) return dev.DevicePath;
+                if (max == RazerProtocol.BufferLength) yield return (pid, dev.DevicePath);
             }
-        return null;
     }
 
     /// <summary>Returns cached id, else probes the set and caches the winner. 0 = could not resolve.</summary>
@@ -124,8 +145,7 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            if (!EnsureOpen()) return null;
-            byte tid = await ResolveTransactionIdAsync(ct);
+            byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return null;
             var reply = await ExchangeAsync(RazerProtocol.BuildGetDpiBuffer(tid), ct);
             if (reply is null) return null;
@@ -144,8 +164,7 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            if (!EnsureOpen()) return false;
-            byte tid = await ResolveTransactionIdAsync(ct);
+            byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return false;
             var reply = await ExchangeAsync(RazerProtocol.BuildSetDpiBuffer(tid, dpiX, dpiY), ct);
             if (reply is null) return false;
@@ -163,6 +182,7 @@ public sealed class RazerDevice : IRazerDevice
     {
         _handle?.Dispose();
         _handle = null;
+        _tid = 0;
     }
 
     private void LogOnce(Exception ex)
@@ -171,6 +191,10 @@ public sealed class RazerDevice : IRazerDevice
         _loggedError = true;
         Console.Error.WriteLine($"[RazerDevice] {ex.GetType().Name}: {ex.Message}");
     }
+
+    /// <summary>Drop the cached handle so the next read re-selects whichever interface is now live. Cheap;
+    /// the next <see cref="EnsureConnectedAsync"/> re-acquires (wired-first, verifying it answers).</summary>
+    public void Reset() => CloseHandle();
 
     public void Dispose() => CloseHandle();
 

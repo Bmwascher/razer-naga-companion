@@ -24,6 +24,7 @@ public partial class PopupWindow : Window
     public void ShowAt(DeviceState state)
     {
         _vm.Apply(state);
+        ParkOffScreen();  // re-park each show so a re-show never flashes at the previous on-screen spot
         Show();           // realize + lay out so SizeToContent sets the real size
         UpdateLayout();
         PositionNearCursor();
@@ -49,6 +50,18 @@ public partial class PopupWindow : Window
         int x = Math.Clamp(cursor.X - w / 2, wa.Left, Math.Max(wa.Left, wa.Right - w));
         int y = Math.Max(wa.Top, wa.Bottom - h - margin);     // just above the taskbar
         SetWindowPos(hwnd, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    /// <summary>Move the window fully off-screen before it is shown, so a re-show never flashes at the
+    /// position it last occupied. Uses SetWindowPos for an immediate move when a handle already exists
+    /// (a reused popup); the WPF properties cover the very first show before the handle is created.</summary>
+    private void ParkOffScreen()
+    {
+        Left = -32000;
+        Top = -32000;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero)
+            SetWindowPos(hwnd, IntPtr.Zero, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     private void OnRefresh(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke();

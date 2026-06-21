@@ -6,7 +6,7 @@ namespace NagaBatteryTray.Ui;
 
 public sealed class PopupViewModel : INotifyPropertyChanged
 {
-    public const double BarTrackWidth = 206;
+    public const double BarTrackWidth = 234;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -40,7 +40,10 @@ public sealed class PopupViewModel : INotifyPropertyChanged
         }
 
         PercentText = $"{s.Percent}%";
-        Status = s.Charging ? "Charging" : "On battery";
+        // Top-right shows the active link (the charging pill already conveys charge state, so don't duplicate
+        // it). Wired -> "Wired"; wireless on battery keeps "On battery"; wireless while charging (dock puck)
+        // reads "Wireless" rather than the contradictory "On battery".
+        Status = s.Wired ? "Wired" : s.Charging ? "Wireless" : "On battery";
         BarFraction = s.Percent / 100.0;
         Charging = s.Charging;
         var c = IconRenderer.ColorForLevel(s.Percent, s.Charging); // System.Drawing.Color

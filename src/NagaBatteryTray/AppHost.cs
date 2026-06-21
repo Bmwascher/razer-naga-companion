@@ -23,6 +23,8 @@ public sealed class AppHost
     private TrayIconController _tray = null!;
     private PopupWindow? _popup;
     private SettingsWindow? _settingsWindow;
+    private DeviceChangeWatcher? _deviceWatcher;
+    private CancellationTokenSource? _deviceDebounce;
 
     public AppHost(Application app) => _app = app;
 
@@ -51,10 +53,32 @@ public sealed class AppHost
         SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == PowerModes.Resume) _ = _monitor.RefreshNowAsync(); };
         SystemEvents.SessionSwitch += (_, e) => { if (e.Reason == SessionSwitchReason.SessionUnlock) _ = _monitor.RefreshNowAsync(); };
 
+        _deviceWatcher = new DeviceChangeWatcher();
+        _deviceWatcher.DeviceChanged += OnDeviceChanged;
+
         _monitor.Start();
     }
 
     private void Dispatch(Action action) => _app.Dispatcher.Invoke(action);
+
+    private const int DeviceSettleMs = 750;
+
+    // A single plug/unplug emits a burst of WM_DEVICECHANGE messages; coalesce them into one refresh
+    // fired DeviceSettleMs after the last, so the link has settled (and re-enumerated) before we read.
+    // Task.Run keeps the settle delay and the blocking HID read off the UI thread that WndProc runs on.
+    private void OnDeviceChanged()
+    {
+        _deviceDebounce?.Cancel(); // supersede any pending refresh (old CTS is collected once its task unwinds)
+        var cts = new CancellationTokenSource();
+        _deviceDebounce = cts;
+        var ct = cts.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(DeviceSettleMs, ct); }
+            catch (OperationCanceledException) { return; }
+            await _monitor.RefreshNowAsync();
+        }, ct);
+    }
 
     private void TogglePopup()
     {
@@ -121,6 +145,8 @@ public sealed class AppHost
 
     private void Quit()
     {
+        _deviceDebounce?.Cancel();
+        _deviceWatcher?.Dispose();
         _settingsWindow?.Close();
         _monitor.Dispose();
         _device.Dispose();

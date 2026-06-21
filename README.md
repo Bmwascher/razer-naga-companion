@@ -30,14 +30,19 @@ directly over HID with no Synapse, no driver, and no admin rights.
 ## ✨ Features
 
 - 🔋 **Battery % in the tray** — a battery number that stays sharp at any display
-  scaling (100%/150%/200%) and recolors by level (🟢 green → 🟡 amber → 🔴 red),
-  turning green while charging.
-- 🖱️ **Click for details** — a compact popup with the exact %, a charging chip, a
-  level bar, and a Refresh button.
+  scaling (100%/150%/200%), fills the icon, and recolors by level (🟢 green → 🟡 amber →
+  🔴 red), turning green while charging.
+- 🖱️ **Click for details** — a compact popup with the exact %, a charging chip, a level
+  bar, the active link (Wired / Wireless / On battery), and Refresh + Settings.
+- 🎯 **Active DPI control** — read and set the mouse's current hardware DPI from the
+  Settings window; the change is written to the device — no Synapse round-trip.
+- ⚙️ **Settings window** — low-battery threshold, poll cadence, and DPI, all per-user.
 - 🔔 **Low-battery toast** — a native Windows notification when you drop to/below your
   threshold (default 15%) while on battery.
-- ⚡ **Charging aware** — polls faster while charging (15 s vs 60 s) and suppresses
-  nagging notifications.
+- ⚡ **Charging aware** — polls faster while charging (15 s vs 60 s), suppresses nagging
+  notifications, and flips charge status **instantly** when you plug/unplug the cable.
+- 🔗 **Wired & wireless** — reads battery over the USB-C cable as well as the dongle, and
+  shows which link is active.
 - 🪶 **Featherweight** — single background process, ~0 idle CPU, ~23 MB private RAM.
 - 🔌 **No Synapse** — talks to the mouse directly via HID feature reports.
 - 🚀 **Runs at login**, single-instance, fully per-user (no UAC / admin prompt ever).
@@ -47,15 +52,15 @@ directly over HID with no Synapse, no driver, and no admin rights.
 ## 👀 What it looks like
 
 ```
-Tray:  [95]   ← battery %, recolored by level — click to open ↓
+Tray:  [95]   ← battery %, fills the icon, recolored by level — click to open ↓
 
 ┌──────────────────────────────────┐
-│  Naga V2 Pro            Charging │
+│  Naga V2 Pro               Wired │
 │                                  │
-│  95%                             │
+│  95%    [ Charging ]             │
 │  ███████████████████████████░    │
 │                                  │
-│   [ Refresh ]     [ Settings ]   │
+│  [    Refresh    ][   Settings  ]│
 └──────────────────────────────────┘
 ```
 
@@ -121,7 +126,8 @@ HID probe — it enumerates the Razer HID collections, tries each known transact
 prints the raw battery reply:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe       # battery
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dpi   # active DPI
 ```
 
 ---
@@ -130,12 +136,14 @@ prints the raw battery reply:
 
 ```mermaid
 flowchart LR
-    HID["Razer Naga V2 Pro<br/>HID feature reports"] --> Dev["RazerDevice<br/>open · probe · read"]
+    HID["Razer Naga V2 Pro<br/>HID feature reports"] --> Dev["RazerDevice<br/>open · probe · read · DPI"]
     Dev --> Mon["BatteryMonitor<br/>poll timer + state machine"]
-    Mon --> Tray["TrayIconController<br/>numbered icon"]
+    Mon --> Tray["TrayIcon<br/>GUID-stable icon"]
     Mon --> Popup["PopupWindow<br/>compact card"]
     Mon --> Toast["Notifications<br/>low-battery toast"]
-    Settings[("settings.json")] -.-> Mon
+    Mon --> Set["SettingsWindow<br/>threshold · cadence · DPI"]
+    DevChg["DeviceChangeWatcher<br/>USB plug/unplug"] --> Mon
+    Cfg[("settings.json")] -.-> Mon
     Host["AppHost / Program<br/>lifecycle · single-instance · run-at-login"] --- Mon
 ```
 
@@ -145,14 +153,17 @@ flowchart LR
 - **`Hid/RazerDevice.cs`** — opens the mouse's HID collection with zero-access
   `CreateFile` + `HidD_SetFeature` / `HidD_GetFeature` (the feature report lives on the
   OS-owned mouse collection, which a normal HID stream can't open), probes transaction
-  ids, and caches the one that works.
+  ids and caches the one that works, picks whichever interface is live (wired or wireless),
+  and reads/writes the active DPI.
 - **`Monitoring/BatteryMonitor.cs`** — polling timer + state machine (online/unknown,
-  low-battery edge logic, staleness → unknown).
-- **`Ui/`** — `IconRenderer` (GDI+ number icon, DPI-aware, supersampled),
-  `TrayIconController` (NotifyIcon + menu), `PopupWindow` (compact WPF card with
-  multi-monitor placement), `Notifications` (toast).
+  low-battery edge logic, staleness → unknown); also the DPI read/set pass-through.
+- **`Ui/`** — `IconRenderer` (GDI+ number icon, DPI-aware, supersampled, fills the icon
+  height), `TrayIcon` + `TrayIconController` (Win32 `Shell_NotifyIcon` with a stable GUID so
+  the taskbar position survives restarts), `PopupWindow` (compact WPF card, multi-monitor
+  placement), `SettingsWindow` (threshold / cadence / active DPI), `DeviceChangeWatcher`
+  (instant refresh on USB plug/unplug), `Notifications` (toast).
 - **`AppHost.cs` / `Program.cs`** — single-instance mutex, lifecycle wiring, and refresh
-  on power-resume / session-unlock.
+  on power-resume / session-unlock / USB device-change.
 
 Full design and implementation notes live in [`docs/superpowers/`](docs/superpowers/).
 
@@ -160,11 +171,15 @@ Full design and implementation notes live in [`docs/superpowers/`](docs/superpow
 
 ## 🗺️ Roadmap
 
-- [x] **v1 — Battery tray** (this release): tray %, popup, low-battery toast, charging
-      detection, run-at-login.
-- [ ] **A — Polished settings GUI**: a real window for threshold, poll cadence, theme,
-      and startup.
-- [ ] **C — Dock charger support**: surface Mouse Dock Pro charging/battery state.
+- [x] **v1 — Battery tray**: tray %, popup, low-battery toast, charging detection,
+      run-at-login.
+- [x] **Settings + active DPI**: a real Settings window for threshold and poll cadence,
+      plus reading and setting the mouse's hardware DPI on the device.
+- [x] **Reliability & polish**: wired/USB-C battery, instant charge-status on plug/unplug,
+      GUID tray icon (taskbar position persists), larger tray digits, refreshed popup.
+- [—] **C — Dock charger support**: *closed — the Mouse Dock Pro relay is non-viable on
+      this firmware (it never answers a battery query). Charging while docked already shows
+      via the mouse's own read.*
 - [ ] **B — Button remapping**: remap the Naga's side buttons *(feasibility spike first —
       the V2 Pro's remap protocol isn't publicly documented).*
 
@@ -194,8 +209,8 @@ is still only ~23 MB.
 
 ## 🧪 Tech stack
 
-C# · .NET 10 (`net10.0-windows`) · WPF + WinForms (`NotifyIcon`) · HidSharp ·
-[WPF-UI](https://github.com/lepoco/wpfui) (Fluent styling) ·
+C# · .NET 10 (`net10.0-windows`) · WPF + WinForms · Win32 `Shell_NotifyIcon` (GUID tray) ·
+HidSharp · [WPF-UI](https://github.com/lepoco/wpfui) (Fluent styling) ·
 CommunityToolkit.WinUI.Notifications · xUnit.
 
 ---

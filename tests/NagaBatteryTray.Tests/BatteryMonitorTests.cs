@@ -93,4 +93,17 @@ public class BatteryMonitorTests
         using var m = new BatteryMonitor(fake, TempStore(), a => a());
         Assert.Equal(new DpiSetting(800, 800), await m.GetDpiAsync());
     }
+
+    [Fact]
+    public async Task RefreshNowAsync_resets_the_device_to_re_select_the_active_link()
+    {
+        // An explicit refresh must drop the cached HID handle so the read re-selects whichever interface is
+        // now live (e.g. wired after a USB-C plug) instead of reusing a stale wireless handle.
+        var fake = new FakeRazerDevice();
+        fake.Enqueue(Online(50, true));
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        await m.RefreshNowAsync();
+        Assert.Equal(1, fake.ResetCount);
+        Assert.True(m.State.Charging);
+    }
 }

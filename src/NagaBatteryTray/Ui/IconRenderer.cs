@@ -1,6 +1,5 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using NagaBatteryTray.Monitoring;
 
@@ -11,6 +10,13 @@ public static class IconRenderer
     private static readonly Color Green = Color.FromArgb(0x44, 0xD6, 0x2C);
     private static readonly Color Amber = Color.FromArgb(0xE0, 0xA2, 0x3E);
     private static readonly Color Red = Color.FromArgb(0xE0, 0x47, 0x3E);
+    private static readonly FontFamily Family = ResolveFamily();
+
+    private static FontFamily ResolveFamily()
+    {
+        try { return new FontFamily("Segoe UI"); }
+        catch { return FontFamily.GenericSansSerif; }
+    }
 
     public static Color ColorForLevel(int percent, bool charging)
     {
@@ -31,7 +37,7 @@ public static class IconRenderer
     public static Icon Render(DeviceState state, int dpi)
     {
         int size = Math.Max(16, dpi * 16 / 96); // SM_CXSMICON scales with DPI
-        int render = size * 2;                  // supersample 2x; Windows downscales -> crisper small digits
+        int render = size * 2;                  // supersample 2x; Windows downscales -> crisper digits
         string text = state.Status == DeviceStatus.Unknown ? "-" : state.Percent.ToString();
         Color color = state.Status == DeviceStatus.Unknown
             ? Color.Gray
@@ -41,30 +47,36 @@ public static class IconRenderer
         using (var g = Graphics.FromImage(bmp))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             g.Clear(Color.Transparent);
 
-            using var fmt = new StringFormat(StringFormat.GenericTypographic)
+            // Lay the digits out as a path so we can size them by their true ink bounds. Digits have no
+            // descenders, so MeasureString leaves dead vertical space; the path's bounds don't. Fill the
+            // icon HEIGHT, then compress horizontally only when too wide — this keeps 3-digit "100" tall
+            // and legible instead of width-shrinking it into a tiny strip (the old FitEm behaviour).
+            using var fmt = new StringFormat(StringFormat.GenericTypographic);
+            using var path = new GraphicsPath();
+            path.AddString(text, Family, (int)FontStyle.Bold, 100f, PointF.Empty, fmt);
+            var ink = path.GetBounds();
+            if (ink.Width > 0 && ink.Height > 0)
             {
-                Alignment = StringAlignment.Center,
-                LineAlignment = StringAlignment.Center,
-            };
-            using var font = new Font("Segoe UI", FitEm(g, text, fmt, render - 2f), FontStyle.Bold, GraphicsUnit.Pixel);
-            using var brush = new SolidBrush(color);
-            g.DrawString(text, font, brush, new RectangleF(0, 0, render, render), fmt);
+                float margin = render * 0.04f; // hug the icon edges so the digits read as large as possible
+                float box = render - 2f * margin;
+
+                float scaleY = box / ink.Height;                          // fill the height
+                float scaleX = ink.Width * scaleY > box                   // overflow horizontally?
+                    ? box / ink.Width                                     //   compress width to fit
+                    : scaleY;                                             //   else stay uniform (no stretch)
+
+                float offX = (render - ink.Width * scaleX) / 2f - ink.Left * scaleX;
+                float offY = (render - ink.Height * scaleY) / 2f - ink.Top * scaleY;
+
+                using var m = new Matrix(scaleX, 0f, 0f, scaleY, offX, offY);
+                path.Transform(m);
+
+                using var brush = new SolidBrush(color);
+                g.FillPath(brush, path);
+            }
         }
         return Icon.FromHandle(bmp.GetHicon());
-    }
-
-    /// <summary>Largest bold Segoe UI em size whose rendered text fits within <paramref name="max"/> px square.</summary>
-    private static float FitEm(Graphics g, string text, StringFormat fmt, float max)
-    {
-        for (float em = max; em > 4f; em -= 0.5f)
-        {
-            using var f = new Font("Segoe UI", em, FontStyle.Bold, GraphicsUnit.Pixel);
-            var sz = g.MeasureString(text, f, new PointF(0, 0), fmt);
-            if (sz.Width <= max && sz.Height <= max) return em;
-        }
-        return 5f;
     }
 }
