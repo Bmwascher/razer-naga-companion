@@ -1,0 +1,108 @@
+<ui:FluentWindow x:Class="NagaBatteryTray.Ui.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:local="clr-namespace:NagaBatteryTray.Ui"
+    Title="Razer Naga Companion — Settings"
+    Width="440" Height="560" MinWidth="400" MinHeight="460"
+    WindowStartupLocation="CenterScreen"
+    ExtendsContentIntoTitleBar="True"
+    WindowBackdropType="None"
+    WindowCornerPreference="Round">
+  <ui:FluentWindow.Resources>
+    <local:DoubleIntConverter x:Key="DoubleInt"/>
+  </ui:FluentWindow.Resources>
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar Grid.Row="0" Title="Settings"/>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,8,16,16">
+      <StackPanel>
+
+        <!-- Run at startup -->
+        <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon Power24}">
+          <ui:CardControl.Header>
+            <StackPanel>
+              <TextBlock Text="Run at startup" FontWeight="Medium"/>
+              <TextBlock Text="Launch when you sign in" Opacity="0.7" FontSize="12"/>
+            </StackPanel>
+          </ui:CardControl.Header>
+          <ui:ToggleSwitch x:Name="StartupToggle" IsChecked="{Binding RunAtStartup, Mode=TwoWay}"
+                           Checked="OnStartupToggled" Unchecked="OnStartupToggled"/>
+        </ui:CardControl>
+
+        <!-- Low-battery threshold -->
+        <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon BatteryWarning24}">
+          <ui:CardControl.Header>
+            <StackPanel>
+              <TextBlock Text="Low-battery alert" FontWeight="Medium"/>
+              <TextBlock Text="Notify at or below this percent" Opacity="0.7" FontSize="12"/>
+            </StackPanel>
+          </ui:CardControl.Header>
+          <ui:NumberBox MinWidth="120" Value="{Binding LowBatteryThreshold, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource DoubleInt}}"
+                        Minimum="1" Maximum="100" SmallChange="5" MaxDecimalPlaces="0"/>
+        </ui:CardControl>
+
+        <!-- Mouse DPI -->
+        <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon TopSpeed24}">
+          <ui:CardControl.Header>
+            <StackPanel>
+              <TextBlock Text="Mouse DPI" FontWeight="Medium"/>
+              <TextBlock Text="{Binding CurrentDpiText}" Opacity="0.7" FontSize="12"/>
+            </StackPanel>
+          </ui:CardControl.Header>
+          <StackPanel MinWidth="220">
+            <Slider Minimum="100" Maximum="30000" Value="{Binding Dpi, Mode=TwoWay, Converter={StaticResource DoubleInt}}"
+                    IsEnabled="{Binding DevicePresent}" TickFrequency="100" LargeChange="1000" SmallChange="50"/>
+            <ui:NumberBox Margin="0,8,0,0" Value="{Binding Dpi, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource DoubleInt}}"
+                          IsEnabled="{Binding DevicePresent}"
+                          Minimum="100" Maximum="30000" SmallChange="50" MaxDecimalPlaces="0"/>
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+              <ui:Button Content="Apply DPI" Appearance="Primary" Click="OnApplyDpi"
+                         IsEnabled="{Binding DevicePresent}"/>
+              <TextBlock Text="{Binding DpiStatus}" VerticalAlignment="Center" Margin="10,0,0,0"
+                         Opacity="0.8" FontSize="12"/>
+            </StackPanel>
+          </StackPanel>
+        </ui:CardControl>
+
+        <!-- Advanced: polling cadence -->
+        <ui:CardExpander Margin="0,0,0,8" Icon="{ui:SymbolIcon Settings24}">
+          <ui:CardExpander.Header>
+            <StackPanel>
+              <TextBlock Text="Advanced" FontWeight="Medium"/>
+              <TextBlock Text="How often to read the battery" Opacity="0.7" FontSize="12"/>
+            </StackPanel>
+          </ui:CardExpander.Header>
+          <StackPanel Margin="0,4,0,0">
+            <Grid Margin="0,4">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="On battery (seconds)" VerticalAlignment="Center"/>
+              <ui:NumberBox Grid.Column="1" MinWidth="120" Value="{Binding PollSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource DoubleInt}}"
+                            Minimum="15" Maximum="3600" SmallChange="15" MaxDecimalPlaces="0"/>
+            </Grid>
+            <Grid Margin="0,4">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="While charging (seconds)" VerticalAlignment="Center"/>
+              <ui:NumberBox Grid.Column="1" MinWidth="120" Value="{Binding PollChargingSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource DoubleInt}}"
+                            Minimum="15" Maximum="3600" SmallChange="15" MaxDecimalPlaces="0"/>
+            </Grid>
+          </StackPanel>
+        </ui:CardExpander>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+          <ui:Button Content="Close" Click="OnClose"/>
+        </StackPanel>
+
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</ui:FluentWindow>

@@ -71,4 +71,26 @@ public class BatteryMonitorTests
         m.ProcessReading(absent); // 4 (>3) -> Unknown
         Assert.Equal(DeviceStatus.Unknown, m.State.Status);
     }
+
+    private static ISettingsStore TempStore() =>
+        new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"naga-{Guid.NewGuid():N}.json"));
+
+    [Fact]
+    public async Task SetDpiAsync_routes_to_device_and_returns_result()
+    {
+        var fake = new FakeRazerDevice { SetDpiResult = true };
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        bool ok = await m.SetDpiAsync(1600, 1600);
+        Assert.True(ok);
+        Assert.Equal(1600, fake.LastSetX);
+        Assert.Equal(1600, fake.LastSetY);
+    }
+
+    [Fact]
+    public async Task GetDpiAsync_returns_device_value()
+    {
+        var fake = new FakeRazerDevice { Dpi = new DpiSetting(800, 800) };
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        Assert.Equal(new DpiSetting(800, 800), await m.GetDpiAsync());
+    }
 }

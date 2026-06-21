@@ -35,6 +35,27 @@ public sealed class BatteryMonitor : IDisposable
 
     public Task RefreshNowAsync() => PollAsync();
 
+    /// <summary>Read the mouse's active DPI. Blocks for the read lock (never skips) so it can't be dropped
+    /// mid-poll, and serializes against the battery poll on the single HID handle.</summary>
+    public async Task<DpiSetting?> GetDpiAsync()
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return null; }
+        try { return await _device.GetDpiAsync(_cts.Token); }
+        catch (OperationCanceledException) { return null; }
+        finally { _readLock.Release(); }
+    }
+
+    /// <summary>Set the mouse's active DPI (persisted on the device). Blocks for the read lock.</summary>
+    public async Task<bool> SetDpiAsync(int dpiX, int dpiY)
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return false; }
+        try { return await _device.SetDpiAsync(dpiX, dpiY, _cts.Token); }
+        catch (OperationCanceledException) { return false; }
+        finally { _readLock.Release(); }
+    }
+
     private async Task PollAsync()
     {
         if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip

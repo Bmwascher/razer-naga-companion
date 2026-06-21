@@ -14,6 +14,7 @@ public sealed class TrayIconController : IDisposable
     public event Action? LeftClicked;
     public event Action? RefreshRequested;
     public event Action<bool>? StartupToggled;
+    public event Action? SettingsRequested;
     public event Action? QuitRequested;
 
     public TrayIconController(BatteryMonitor monitor)
@@ -26,6 +27,7 @@ public sealed class TrayIconController : IDisposable
         _startupItem = new ToolStripMenuItem("Run at startup") { CheckOnClick = true };
         _startupItem.CheckedChanged += OnStartupChanged;
         menu.Items.Add(_startupItem);
+        menu.Items.Add("Settings", null, (_, _) => SettingsRequested?.Invoke());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => QuitRequested?.Invoke());
         _icon.ContextMenuStrip = menu;

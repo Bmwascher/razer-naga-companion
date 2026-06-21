@@ -29,8 +29,8 @@ $installExe = Join-Path $installDir 'NagaBatteryTray.exe'
 
 # Resolve the dotnet CLI (the user-local install isn't always on PATH).
 $dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
-if (-not $dotnet) { $dotnet = Join-Path $env:DOTNET_ROOT 'dotnet.exe' }
-if (-not (Test-Path $dotnet)) { $dotnet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe' }
+if (-not $dotnet -and $env:DOTNET_ROOT) { $dotnet = Join-Path $env:DOTNET_ROOT 'dotnet.exe' }
+if (-not $dotnet -or -not (Test-Path $dotnet)) { $dotnet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe' }
 if (-not (Test-Path $dotnet)) { throw "Could not find dotnet. Set DOTNET_ROOT or add dotnet to PATH." }
 
 Write-Host "Publishing (Release, self-contained single-file)..." -ForegroundColor Cyan
