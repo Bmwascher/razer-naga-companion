@@ -134,17 +134,27 @@ public static class ProbeCommand
             var buf = RazerProtocol.BuildFeatureBuffer(tid, commandId);
             if (!HidD_SetFeature(h, buf, buf.Length))
                 return $"SetFeature failed err={Marshal.GetLastWin32Error()}";
-            Thread.Sleep(400);
-            var reply = new byte[RazerProtocol.BufferLength];
-            reply[0] = 0;
-            if (!HidD_GetFeature(h, reply, reply.Length))
-                return $"GetFeature failed err={Marshal.GetLastWin32Error()}";
+
+            // The dock relays over RF; a sleeping/charging mouse can answer 0x01 busy for a while.
+            // Poll the reply until it stops being busy (relay completes) or we give up (~2.2 s).
+            byte[] reply = new byte[RazerProtocol.BufferLength];
+            int tries = 0;
+            for (; tries < 10; tries++)
+            {
+                Thread.Sleep(tries == 0 ? 400 : 200);
+                reply = new byte[RazerProtocol.BufferLength];
+                reply[0] = 0;
+                if (!HidD_GetFeature(h, reply, reply.Length))
+                    return $"GetFeature failed err={Marshal.GetLastWin32Error()}";
+                if (reply[1] != 0x01) break; // not busy: success / fail / timeout
+            }
+
             var hex = string.Join(" ", reply.Take(16).Select(b => b.ToString("x2")));
             var r = RazerProtocol.ParseReply(reply, out byte v);
             string decoded = commandId == RazerProtocol.CommandIdBattery
                 ? $"raw={v} ({RazerProtocol.ScaleBattery(v)}%)"
                 : $"charging={v}";
-            return $"status=0x{reply[1]:x2} {r} {decoded}  [{hex}]";
+            return $"status=0x{reply[1]:x2} {r} {decoded} (tries={tries + 1})  [{hex}]";
         }
         catch (Exception ex) { return $"EXC {ex.Message}"; }
     }
