@@ -103,7 +103,7 @@ public sealed class BatteryMonitor : IDisposable
             }
         }
 
-        SetState(DeviceState.Online(r.Percent, r.IsCharging));
+        SetState(DeviceState.Online(r.Percent, r.IsCharging, r.IsWired));
     }
 
     private void SetState(DeviceState next)
