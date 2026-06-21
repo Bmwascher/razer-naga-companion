@@ -6,7 +6,7 @@ namespace NagaBatteryTray.Ui;
 
 public sealed class PopupViewModel : INotifyPropertyChanged
 {
-    public const double BarTrackWidth = 206;
+    public const double BarTrackWidth = 234;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

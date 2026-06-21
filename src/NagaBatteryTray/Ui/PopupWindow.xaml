@@ -8,16 +8,20 @@
   <Window.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
   </Window.Resources>
-  <Border Width="236" Background="#1C1E24" CornerRadius="12" Padding="15" Margin="12"
+  <Border Width="264" Background="#1C1E24" CornerRadius="12" Padding="15" Margin="12"
           BorderBrush="#26FFFFFF" BorderThickness="1">
     <Border.Effect>
       <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.5" Color="Black"/>
     </Border.Effect>
     <StackPanel>
       <DockPanel>
-        <TextBlock Text="Naga V2 Pro" FontWeight="SemiBold" FontSize="13" Foreground="#E9EAEC"/>
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Text="&#x1F40D;" FontSize="13" Foreground="#44D62C" VerticalAlignment="Center"/>
+          <TextBlock Text="Naga V2 Pro" FontWeight="SemiBold" FontSize="13" Foreground="#E9EAEC"
+                     VerticalAlignment="Center" Margin="5,0,0,0"/>
+        </StackPanel>
         <TextBlock Text="{Binding Status}" DockPanel.Dock="Right" HorizontalAlignment="Right"
-                   Foreground="#9AA0A6" FontSize="11"/>
+                   VerticalAlignment="Center" Foreground="#9AA0A6" FontSize="11"/>
       </DockPanel>
       <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
         <TextBlock Text="{Binding PercentText}" FontSize="34" FontWeight="Bold"
@@ -25,18 +29,28 @@
         <Border Background="#22FFFFFF" CornerRadius="20" Padding="8,3" Margin="10,6,0,0"
                 VerticalAlignment="Center"
                 Visibility="{Binding Charging, Converter={StaticResource BoolToVis}}">
-          <TextBlock Text="&#x26A1; Charging" FontSize="11" Foreground="#E9EAEC"/>
+          <StackPanel Orientation="Horizontal">
+            <ui:SymbolIcon Symbol="Flash24" FontSize="13" Foreground="#E9EAEC" VerticalAlignment="Center"/>
+            <TextBlock Text="Charging" FontSize="11" Foreground="#E9EAEC"
+                       VerticalAlignment="Center" Margin="3,0,0,0"/>
+          </StackPanel>
         </Border>
       </StackPanel>
-      <Border Height="6" CornerRadius="3" Background="#2A2C31" Width="206" HorizontalAlignment="Left">
+      <Border Height="6" CornerRadius="3" Background="#2A2C31" Width="234" HorizontalAlignment="Left">
         <Border CornerRadius="3" Background="{Binding Accent}" HorizontalAlignment="Left"
                 Width="{Binding BarPixelWidth}"/>
       </Border>
-      <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-        <ui:Button Content="Refresh" Click="OnRefresh" Padding="12,5" FontSize="12"/>
-        <ui:Button Content="Settings" Click="OnSettings"
-                   Margin="8,0,0,0" Padding="12,5" FontSize="12"/>
-      </StackPanel>
+      <Grid Margin="0,12,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="8"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <ui:Button Grid.Column="0" Content="Refresh" Click="OnRefresh" FontSize="12"
+                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,7"/>
+        <ui:Button Grid.Column="2" Content="Settings" Click="OnSettings" FontSize="12"
+                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,7"/>
+      </Grid>
     </StackPanel>
   </Border>
 </Window>
