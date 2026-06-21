@@ -1,7 +1,9 @@
 # Phase C: Mouse Dock Pro Charger Support — Design
 
 **Date:** 2026-06-20
-**Status:** Approved (ready for implementation plan)
+**Status:** **CLOSED (2026-06-21)** — dock relay conclusively non-viable on this firmware (see §6).
+Stage 2 not built. Goal 1 (charging-on-dock) is already delivered by the existing mouse read; goal 2
+(battery via dock relay) is dropped, permanently.
 **Builds on:** Phase 2-A (Settings + active DPI). See `2026-06-20-naga-settings-dpi-design.md`
 (its §3.1 non-functional invariants bind this phase unchanged).
 
@@ -199,6 +201,22 @@ as `0x00A8` (HyperSpeed), almost certainly via a **separate dongle**, so the doc
 path to relay through. **Stage 2 is on hold** pending a working dock↔mouse link (connect the mouse
 *through the dock* as its receiver and confirm it charges), then re-run `--probe-dock` expecting
 `0x02` + a sane `%`. The `--probe-dock` diagnostic (with busy-retry) is committed and is the re-test tool.
+
+**Definitive re-test (2026-06-21, mouse charging *through the dock*) — GATE CLOSED: the relay does not
+exist on this firmware.** With the mouse actively charging on the dock (so the dock unquestionably has a
+host/charging relationship to relay through), `--probe-dock` was re-run against `0x00A4` at tx `0x1f`
+and `0xff`, battery and charging, with busy-retry. Every query still returned only `0x04` timeout —
+**never `0x02`** — while at the *same instant* the mouse read perfectly on its own endpoint (`0x00A8` →
+`present=True, 65%, charging=True`; and once cabled, `0x00A7` → `71%`). That is **four** distinct states
+now tested (off-dock, docked-asleep, docked-awake-idle, docked-awake-**charging**) in which the dock
+relay never once answered. **Conclusion: the Mouse Dock Pro does not relay the mouse's battery on this
+firmware — PR #2817's relay protocol is not implemented here. Stage 2 / goal 2 is dropped permanently.**
+Goal 1 needs no dock code: a mouse charging on the dock stays reachable on its own endpoint, so the
+existing `0x84` charging read already surfaces it (verified — the popup showed `Charging`). `--probe-dock`
+is kept as a re-test tool in case firmware ever changes. *Separately*, this hardware session surfaced and
+fixed a real **wired/USB-C read bug** — when cabled the mouse moves to `0x00A7` while the dock's `0x00A8`
+receiver stays enumerated, and the app was reading the dead receiver (commit `932398e`); that fix is
+unrelated to the dock relay.
 
 ## 7. Error handling & edge cases
 

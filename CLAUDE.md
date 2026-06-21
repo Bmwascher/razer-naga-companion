@@ -49,11 +49,17 @@ the exe (single-file leaves them out of the bundle; copying the exe alone → Dl
   `ParseDpiReply` treats DPI outside `100..30000` as **Failed** (guards wrong-layout firmware replies).
 - `Hid/RazerDevice.cs` (implements `Hid/IRazerDevice.cs`) — zero-access `CreateFile` +
   `HidD_Set/GetFeature`; `ExchangeAsync` transport (SET→`SetReadDelayMs` wait→GET, busy-retry,
-  close-on-failure). Device is found by the HID collection whose `GetMaxFeatureReportLength()==91`,
-  **not** by usage page 0xFF00 (none exposed — verified empirically); VID `0x1532`, PID `0x00A8`
-  wireless / `0x00A7` wired. The Razer **transaction id is auto-probed** (`ResolveTransactionIdAsync`
-  over `TransactionIdProbeSet`) and cached; every battery/DPI call gates on `tid != 0`, returning
-  Absent/null silently until it resolves.
+  close-on-failure). `EnsureConnectedAsync` picks the **live** collection (the one whose
+  `GetMaxFeatureReportLength()==91`, **not** usage page 0xFF00 — none exposed) by trying candidates
+  **wired `0x00A7` first, then wireless `0x00A8`**, and **verifying each actually answers a battery
+  query** before committing: the dock's wireless receiver stays enumerated when the mouse switches to
+  wired, so first-enumerated alone would lock onto a dead collection (this was the wired/USB-C "no
+  response" bug, `932398e`). A read returning null drops the handle so the next poll re-selects
+  (self-heals on plug/unplug). The active link is surfaced
+  (`BatteryReading.IsWired` → `DeviceState.Wired` → popup top-right "Wired"/"Wireless"/"On battery").
+  VID `0x1532`. The Razer **transaction id is auto-probed** (`ResolveTransactionIdAsync` over
+  `TransactionIdProbeSet`) and cached; every battery/DPI call gates on `tid != 0`, returning Absent/null
+  silently until it resolves.
 - `Monitoring/BatteryMonitor.cs` — poll timer + arming state machine; takes `IRazerDevice`; battery
   poll + DPI pass-throughs serialize on one `_readLock` (poll skips if busy, DPI blocks).
 - `Settings/` — `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at
@@ -90,7 +96,10 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
 ## Roadmap
 - [x] v1 — battery tray
 - [x] Phase 2-A — Settings window + active DPI (shipped 2026-06-20)
-- [ ] C — Mouse Dock Pro charger support
+- [x] C — Mouse Dock Pro charger support — **CLOSED 2026-06-21 (not built): dock relay non-viable** on
+  this firmware (`0x00A4` never answers a battery/charging query — confirmed across 4 states incl.
+  actively charging). Goal 1 (charging-on-dock) already works via the mouse's own read; goal 2 (relay)
+  dropped. `--probe-dock` kept as the re-test tool. See `docs/superpowers/specs/2026-06-20-naga-dock-pro-design.md` §6.
 - [ ] B — Button remapping (feasibility spike first; the V2 Pro remap protocol isn't documented)
 
 ## Conventions

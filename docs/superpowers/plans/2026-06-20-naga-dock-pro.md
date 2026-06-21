@@ -8,6 +8,12 @@
 
 **Tech Stack:** C#, .NET 10 (`net10.0-windows10.0.19041.0`), WPF + WinForms, WPF-UI 4.3.0, HidSharp, xUnit. User-local .NET SDK at `%LOCALAPPDATA%\Microsoft\dotnet`.
 
+## Status — 2026-06-21: CLOSED (Stage 1 done; Stage 2 NOT built)
+
+- **Task 1** (`--probe-dock`) — done, committed.
+- **Task 2 GATE — NO-GO.** The spike, including a definitive re-test with the mouse charging *through* the dock, showed the dock (`0x00A4`) **never** returns `0x02` to a battery/charging relay query — in any of four states (off-dock, docked-asleep, docked-awake-idle, docked-awake-charging). The relay does not exist on this firmware. See spec §6.
+- **Stage 2 (Tasks 3–7) — dropped, not built.** Goal 2 (battery via dock relay) is non-viable; goal 1 (charging-on-dock) is already delivered by the existing mouse `0x84` read, so no dock code is needed. The Stage 2 tasks below are retained only as a record of the design the gate ruled out. **Note:** Task 3's `FindControlPath` rewrite was overtaken by the unrelated wired/USB-C fix (commit `932398e`), which already reworked that method (now `FindControlPaths`, wired-first + verify) — so the Task 3 snippets no longer match `RazerDevice.cs`.
+
 ## Global Constraints
 
 - **HARD GATING (never regress):** stay lightweight (~0% idle CPU, ~23 MB private working set) AND zero mouse input-latency regression. Passive HID **feature reports** only (`HidD_Set/GetFeature`, USB control endpoint); open **zero desired access** + `FILE_SHARE_READ|WRITE`; never claim the input collection. **No new timer/thread** — the dock read piggybacks the existing battery poll (cadence floor 15 s). Dock and mouse transfers **serialize through the single existing `_readLock`**. **Zero dock I/O when the mouse is reachable** (the dock is feature-queried only when the mouse read returns `Absent`). Dock handle opened **on demand**. DPI untouched, never polled.
