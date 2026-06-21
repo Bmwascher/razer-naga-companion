@@ -33,7 +33,11 @@ public sealed class BatteryMonitor : IDisposable
         _timer = new System.Threading.Timer(_ => _ = PollAsync(), null, TimeSpan.Zero, Timeout.InfiniteTimeSpan);
     }
 
-    public Task RefreshNowAsync() => PollAsync();
+    /// <summary>Explicit refresh (manual button, wake, USB device-change). Drops the cached HID handle first
+    /// so the read re-selects the now-active interface — after a USB-C plug flips the mouse from the wireless
+    /// receiver to the wired interface, the stale wireless handle would otherwise keep reporting the old
+    /// not-charging state. The frequent background poll keeps reusing the handle for efficiency.</summary>
+    public Task RefreshNowAsync() => PollAsync(reconnect: true);
 
     /// <summary>Read the mouse's active DPI. Blocks for the read lock (never skips) so it can't be dropped
     /// mid-poll, and serializes against the battery poll on the single HID handle.</summary>
@@ -56,11 +60,12 @@ public sealed class BatteryMonitor : IDisposable
         finally { _readLock.Release(); }
     }
 
-    private async Task PollAsync()
+    private async Task PollAsync(bool reconnect = false)
     {
         if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip
         try
         {
+            if (reconnect) _device.Reset(); // re-select the active interface for explicit refreshes
             var reading = await _device.ReadAsync(_cts.Token);
             ProcessReading(reading);
             ScheduleNext(reading);

@@ -192,6 +192,10 @@ public sealed class RazerDevice : IRazerDevice
         Console.Error.WriteLine($"[RazerDevice] {ex.GetType().Name}: {ex.Message}");
     }
 
+    /// <summary>Drop the cached handle so the next read re-selects whichever interface is now live. Cheap;
+    /// the next <see cref="EnsureConnectedAsync"/> re-acquires (wired-first, verifying it answers).</summary>
+    public void Reset() => CloseHandle();
+
     public void Dispose() => CloseHandle();
 
     private const uint FileShareReadWrite = 0x3; // FILE_SHARE_READ | FILE_SHARE_WRITE

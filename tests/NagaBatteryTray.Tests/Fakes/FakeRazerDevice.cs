@@ -18,5 +18,8 @@ public sealed class FakeRazerDevice : IRazerDevice
         return Task.FromResult(SetDpiResult);
     }
 
+    public int ResetCount { get; private set; }
+    public void Reset() => ResetCount++;
+
     public void Dispose() { }
 }
