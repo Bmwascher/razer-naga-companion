@@ -110,14 +110,16 @@ public sealed class AppHost
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
         win.LivenessRefreshRequested += () => _ = RefreshLivenessAsync(vm);
         win.SettingsOverlayRequested += () => ShowSettingsOverlay(win, vm);
+        EventHandler<DeviceState> onState = (_, state) => Dispatch(() => vm.ApplyState(state));
+        _monitor.StateChanged += onState;
         win.Closed += (_, _) =>
         {
+            _monitor.StateChanged -= onState; // release-on-close: don't leave the VM rooted by the app-lifetime monitor
             vm.ApplyTo(_settings.Settings);
             _settings.Save();
             _dashboard = null; // release-on-close: idle memory returns to baseline
         };
         vm.ApplyState(_monitor.State);
-        _monitor.StateChanged += (_, state) => Dispatch(() => { if (_dashboard == win) vm.ApplyState(state); });
         _dashboard = win;
         win.Show();
         _ = SeedDashboardAsync(vm);
