@@ -28,7 +28,13 @@ public partial class DashboardWindow : FluentWindow
         vm.PropertyChanged += (_, e) =>
         { if (e.PropertyName == nameof(vm.StatusDotBrushKey)) UpdateDot(); };
         UpdateDot();
-        PreviewMouseDown += (_, _) => { if (_capturing is { } c && !c.IsCapturing) _capturing = null; };
+        // click-away cancels a live capture (spec §4.3); fires before a chip's MouseLeftButtonUp,
+        // so clicking another chip cancels this capture first, then starts its own
+        PreviewMouseDown += (_, _) =>
+        {
+            if (_capturing is { } c && c.IsCapturing) c.CancelCapture();
+            _capturing = null;
+        };
     }
 
     private void UpdateDot() =>
