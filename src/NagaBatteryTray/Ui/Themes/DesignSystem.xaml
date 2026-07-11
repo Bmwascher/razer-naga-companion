@@ -1,0 +1,40 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="Status.Positive" Color="#43D675"/>
+  <SolidColorBrush x:Key="Status.Warning" Color="#E6A23C"/>
+  <SolidColorBrush x:Key="Status.Critical" Color="#E5484D"/>
+
+  <Style x:Key="CardBorder" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource App.CardFill}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource App.CardStroke}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="12"/>
+    <Setter Property="Padding" Value="14"/>
+  </Style>
+  <Style x:Key="ChipBorder" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource App.ChipFill}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource App.ChipStroke}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="9"/>
+    <Setter Property="Padding" Value="8,5"/>
+  </Style>
+  <Style x:Key="LabelText" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="10"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Foreground" Value="{DynamicResource App.TextSecondary}"/>
+    <Setter Property="Typography.Capitals" Value="AllSmallCaps"/>
+  </Style>
+  <Style x:Key="NumeralText" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="34"/>
+    <Setter Property="FontWeight" Value="ExtraLight"/>
+    <Setter Property="Foreground" Value="{DynamicResource App.Numeral}"/>
+  </Style>
+  <Style x:Key="BodyText" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="Foreground" Value="{DynamicResource App.TextPrimary}"/>
+  </Style>
+  <Style x:Key="SubtleText" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="11"/>
+    <Setter Property="Foreground" Value="{DynamicResource App.TextSecondary}"/>
+  </Style>
+</ResourceDictionary>

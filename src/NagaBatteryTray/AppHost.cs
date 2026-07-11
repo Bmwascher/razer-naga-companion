@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Windows;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using NagaBatteryTray.Hid;
@@ -34,6 +35,9 @@ public sealed class AppHost
         // (no App.xaml here), or FluentWindow / ui:Button render unstyled.
         _app.Resources.MergedDictionaries.Add(new ThemesDictionary { Theme = ApplicationTheme.Dark });
         _app.Resources.MergedDictionaries.Add(new ControlsDictionary());
+        _app.Resources.MergedDictionaries.Add(
+            new ResourceDictionary { Source = new Uri("pack://application:,,,/Ui/Themes/DesignSystem.xaml") });
+        ThemeManager.Apply(_app, _settings.Settings.Theme);
         ApplicationThemeManager.Apply(ApplicationTheme.Dark);
 
         _device = new RazerDevice(_settings);
