@@ -67,4 +67,34 @@ public class SettingsViewModelTests
         Assert.Equal("Current: unknown", vm.CurrentDpiText);
         Assert.False(vm.DevicePresent);
     }
+
+    [Fact]
+    public void Buttons_are_seeded_from_the_settings_table()
+    {
+        var settings = Sample();
+        settings.ButtonBindings[2] = new ButtonBindingSetting
+        {
+            Kind = ButtonActionKind.Key, Modifiers = 0x01, HidUsage = 0x06,
+        };
+        settings.ButtonBindings[7] = new ButtonBindingSetting { Kind = ButtonActionKind.Disabled };
+        var vm = new SettingsViewModel(settings, false);
+
+        Assert.Equal(12, vm.Buttons.Count);
+        Assert.Equal("Ctrl+C", vm.Row(2).CurrentText);
+        Assert.Equal("Disabled", vm.Row(7).CurrentText);
+        Assert.Equal("Default", vm.Row(1).CurrentText);
+        Assert.Empty(vm.GetPendingButtonOps()); // freshly seeded — nothing pending
+    }
+
+    [Fact]
+    public void GetPendingButtonOps_collects_only_changed_rows()
+    {
+        var vm = new SettingsViewModel(Sample(), false);
+        vm.Row(1).StageKey(0x00, 0x04);  // A
+        vm.Row(12).StageDisabled();
+        var ops = vm.GetPendingButtonOps();
+        Assert.Equal(2, ops.Count);
+        Assert.Equal(1, ops[0].Position);
+        Assert.Equal(12, ops[1].Position);
+    }
 }

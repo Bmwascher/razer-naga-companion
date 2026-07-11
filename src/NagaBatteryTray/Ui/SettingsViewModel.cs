@@ -17,6 +17,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _currentDpiText = "Current: unknown";
     private string _dpiStatus = "";
     private bool _devicePresent;
+    private string _buttonsStatus = "";
 
     public SettingsViewModel(AppSettings source, bool runAtStartup)
     {
@@ -24,6 +25,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _pollSeconds = source.PollIntervalSeconds;
         _pollChargingSeconds = source.PollIntervalChargingSeconds;
         _runAtStartup = runAtStartup;
+
+        var rows = new List<ButtonRowViewModel>(NagaV2ProButtons.Count);
+        for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
+        {
+            var row = new ButtonRowViewModel(pos);
+            if (source.ButtonBindings.TryGetValue(pos, out var b))
+                row.SetApplied(b.Kind, b.Modifiers, b.HidUsage);
+            rows.Add(row);
+        }
+        Buttons = rows;
     }
 
     public int LowBatteryThreshold { get => _lowBatteryThreshold; set => Set(ref _lowBatteryThreshold, value); }
@@ -40,6 +51,20 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public string CurrentDpiText { get => _currentDpiText; set => Set(ref _currentDpiText, value); }
     public string DpiStatus { get => _dpiStatus; set => Set(ref _dpiStatus, value); }
     public bool DevicePresent { get => _devicePresent; set => Set(ref _devicePresent, value); }
+    public string ButtonsStatus { get => _buttonsStatus; set => Set(ref _buttonsStatus, value); }
+
+    public IReadOnlyList<ButtonRowViewModel> Buttons { get; }
+
+    public ButtonRowViewModel Row(int position) => Buttons[position - 1];
+
+    /// <summary>Ops for every staged row (empty when nothing changed) — the Apply button's payload.</summary>
+    public List<ButtonOp> GetPendingButtonOps()
+    {
+        var ops = new List<ButtonOp>();
+        foreach (var row in Buttons)
+            if (row.ToOp() is { } op) ops.Add(op);
+        return ops;
+    }
 
     /// <summary>Writes clamped edited values into the live settings instance (cadence floor 15 s, threshold 1..100).
     /// Leaves unedited fields (CachedTransactionId, SetReadDelayMs, LowBatteryNotify) untouched.</summary>
