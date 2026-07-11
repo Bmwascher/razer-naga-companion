@@ -1391,34 +1391,41 @@ git commit -m "feat(ui): Buttons section with key capture + apply/re-apply orche
 **Interfaces:**
 - Consumes: the finished feature. **The acceptance checks need Brandon with the mouse** (Synapse absent).
 
-- [ ] **Step 1: Functional acceptance (spec §3 Stage 2)**
+- [ ] **Step 1: Functional acceptance (spec §3 Stage 2) — RE-RUN for the onboard-slot model**
+
+> Rewritten 2026-07-11: the first run passed 1/2/4/5 on the re-apply model but exposed the wireless
+> power-cycle gap (#3). The scratch-slot probe then **passed**, so the shipped model is the
+> **onboard app-owned slot** (spec §5.3) — bindings live in the mouse; #3 must now be instant.
 
 With the dev build running and the mouse connected:
-1. Settings → Buttons → Rebind button 1 → press `Ctrl+F5` → Apply. Row shows "Applied"; pressing
-   **grid button 1 emits Ctrl+F5** in any app.
+1. Settings → Buttons → Rebind button 1 → press `Ctrl+F5` → Apply. The status line reads
+   "Saved to onboard profile N (colour) — select it with the bottom button". **One-time:** press the
+   button on the mouse's underside until the LED shows that colour. Pressing **grid button 1 then
+   emits Ctrl+F5** in any app.
 2. Disable button 2 → Apply → pressing grid button 2 does nothing.
-3. Power-cycle the mouse → bindings re-assert **without opening Settings**: instantly on a wired/dongle
-   replug (device-change refresh), and after a silent **wireless** power-cycle — which emits **no USB
-   event** (found in the first acceptance run) — within one battery-poll interval, or immediately via
-   tray icon → **Refresh now** (both paths sentinel-verify and re-assert on drift).
+3. Power-cycle the mouse (wireless off/on) → bindings work **immediately** on wake — no software
+   involved, no poll wait, app can even be closed. This is the criterion the re-apply model failed.
 4. Button 1 → Default → Apply → button 1 emits its stock action again instantly.
-5. Restart the app → bindings still listed (persisted) and re-applied on startup.
-6. `settings.json` shows the sparse `ButtonBindings` table; deleting it restores no-remap behaviour.
+5. Restart the app → bindings still listed in Settings (persisted table; the mouse held them anyway).
+6. `settings.json` shows the sparse `ButtonBindings` table + `OnboardSlot`; your original profiles
+   (slots 1–2) behave exactly as before when selected via the bottom button.
 
 - [ ] **Step 2: §3.1 gating acceptance (spec §9)**
 
-After a batch of applies + a reconnect re-apply: Task Manager shows idle CPU back to ~0% and private
-working set ~23 MB; mouse movement/click feel unchanged at idle, during Apply, and during a
-connect-time re-apply. **A failure here is not shippable** — stop and investigate.
+After a batch of applies: Task Manager shows idle CPU back to ~0% and private working set ~23 MB
+(Release install); mouse movement/click feel unchanged at idle and during Apply. Note the poll now
+does zero button I/O — strictly less runtime work than the first acceptance build. **A failure here
+is not shippable** — stop and investigate.
 
 - [ ] **Step 3: Update the docs**
 
 In `CLAUDE.md`: mark the roadmap line `- [ ] B — Button remapping` as
-`- [x] B — Button remapping (MVP: key+modifiers/disable, volatile re-apply model — shipped YYYY-MM-DD)`
+`- [x] B — Button remapping (MVP: key+modifiers/disable, onboard app-owned slot — shipped YYYY-MM-DD)`
 using the date the acceptance run passed, and
-add one architecture sentence alongside the DPI notes: buttons are written to the **volatile direct
-profile** (`0x02/0x0c`, ids `0x40..0x4b`) and re-applied on startup/device-change; onboard profiles are
-never written. In `README.md`: add button remapping to the feature list.
+add one architecture sentence alongside the DPI notes: buttons are written once to an **app-owned
+onboard profile slot** (`0x02/0x0c`, ids `0x40..0x4b`; slot adopted via `0x05/0x81`/`0x05/0x02`,
+recorded in `OnboardSlot`); the user's existing slots are never written; no re-apply path exists.
+In `README.md`: add button remapping to the feature list.
 
 - [ ] **Step 4: Run the full suite one last time**
 
@@ -1429,7 +1436,7 @@ Expected: PASS.
 
 ```powershell
 git add CLAUDE.md README.md
-git commit -m "docs: Phase B button remapping shipped (volatile re-apply model)"
+git commit -m "docs: Phase B button remapping shipped (onboard app-owned slot model)"
 ```
 
 Afterwards: `.\scripts\install.ps1` to update the installed app, and finish the branch
