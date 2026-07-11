@@ -134,7 +134,11 @@ public static class ProbeCommand
         capture.Save();
         RunGridDiscovery(s, capture);
         capture.Save();
-        Console.WriteLine("(Steps 4-5 land in the next task.)");
+        RunPersistenceTest(s, capture);
+        capture.Save();
+        RunRestore(s, capture);
+        capture.Save();
+        PrintResultsTemplate(capture);
         return 0;
     }
 
@@ -338,6 +342,143 @@ public static class ProbeCommand
         foreach (var (pos, id) in positionToId.OrderBy(kv => kv.Key))
             Console.WriteLine($"    position {pos,2} -> 0x{id:x2}");
         Console.WriteLine();
+    }
+
+    /// <summary>Spike step 4 — profile-lifecycle-aware persistence test. Queries which onboard slots
+    /// exist (creating one if none - the likely "preamble"), has the user align the ACTIVE slot via
+    /// the bottom button + LED colour (no active-profile command is documented), then tests whether
+    /// a slot write survives a Synapse-free replug. The spike's one deliberate onboard-slot write.</summary>
+    private static void RunPersistenceTest(MouseSession s, ButtonCaptureFile capture)
+    {
+        Console.WriteLine("[4/5] Persistence test (volatile vs active onboard slot)");
+        if (capture.PositionToId.Count == 0)
+        {
+            Console.WriteLine("  no discovered grid ids - skipping.\n");
+            return;
+        }
+        var first = capture.PositionToId.OrderBy(kv => kv.Key).First();
+        int gridPos = first.Key;
+        byte gridId = first.Value;
+
+        byte slot = 0x01;
+        bool created = false;
+        var list = Exchange(s.Handle!, RazerProtocol.BuildGetProfileListBuffer(ButtonsTid));
+        if (list is not null && RazerProtocol.ParseProfileListReply(list, out byte cap, out byte[] slots) == ReplyResult.Success)
+        {
+            capture.ProfileNotes = $"capacity={cap} existing=[{Hex2(slots)}]";
+            Console.WriteLine($"  profile list: {capture.ProfileNotes}");
+            if (slots.Length > 0) slot = slots[0];
+            else
+            {
+                var create = Exchange(s.Handle!, RazerProtocol.BuildNewProfileBuffer(ButtonsTid, slot));
+                created = create is not null && create[1] == 0x02;
+                capture.ProfileNotes += $"; created slot {slot}: {(created ? "ok" : "REJECTED")}";
+                Console.WriteLine($"  no slots existed - created slot {slot}: status=0x{(create is null ? 0 : create[1]):x2} (likely the §6 'preamble')");
+            }
+        }
+        else
+        {
+            capture.ProfileNotes = "profile list unreadable";
+            Console.WriteLine($"  profile list unreadable [{(list is null ? "no reply" : Hex(list, 16))}] - trying slot 1 blind.");
+        }
+
+        Console.WriteLine($"\n  Use the BOTTOM profile button until the profile LED shows slot {slot}'s colour");
+        Console.WriteLine("  (1=white 2=red 3=green 4=blue 5=cyan), then press Enter.");
+        Console.ReadLine();
+
+        var getPrev = Exchange(s.Handle!, RazerProtocol.BuildGetButtonBuffer(ButtonsTid, slot, gridId, 0x00));
+        if (getPrev is not null && RazerProtocol.ParseButtonReply(getPrev, slot, gridId, 0x00,
+                out byte pc, out byte[] pd) == ReplyResult.Success)
+            capture.SlotPreviousAction = new CapturedAction(pc, pd);
+
+        var set = Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, slot, gridId, 0x00,
+            RazerProtocol.FnKeyboard, new byte[] { 0x00, 0x6a })); // F15 = usage 0x6a, the slot marker
+        Console.WriteLine($"  slot write (grid pos {gridPos}, id 0x{gridId:x2} -> F15): status=0x{(set is null ? 0 : set[1]):x2}");
+        capture.SlotTested = slot;
+        capture.SlotButtonId = gridId;
+        capture.SlotWasCreated = created;
+        capture.Save();
+
+        Console.WriteLine("\n  Unplug/replug (or power-cycle) the mouse - with NO Razer software running -");
+        Console.WriteLine("  then press Enter.");
+        Console.ReadLine();
+        if (!s.WaitForReconnect()) return;
+
+        Console.WriteLine($"  Press grid button {gridPos} now. (Esc = nothing typed)");
+        var key = Console.ReadKey(intercept: true);
+        bool persisted = key.Key == ConsoleKey.F15;
+        capture.SlotPersisted = persisted;
+        Console.WriteLine(persisted
+            ? "  -> F15 SURVIVED: the onboard slot persists across replug (onboard-slot model viable)."
+            : $"  -> captured {key.Key}: the slot write did NOT survive, or the slot isn't active (re-apply model).");
+        Console.WriteLine();
+    }
+
+    /// <summary>Spike step 5 — put the mouse back. Volatile binds clear on replug (canonical restore);
+    /// the slot test is undone here (delete the slot we created, or rewrite its previous action).</summary>
+    private static void RunRestore(MouseSession s, ButtonCaptureFile capture)
+    {
+        Console.WriteLine("[5/5] Restore");
+        if (capture.SlotTested is byte slot && capture.SlotButtonId is byte id)
+        {
+            if (capture.SlotWasCreated)
+            {
+                var del = Exchange(s.Handle!, RazerProtocol.BuildDeleteProfileBuffer(ButtonsTid, slot));
+                Console.WriteLine($"  deleted the slot the spike created ({slot}): status=0x{(del is null ? 0 : del[1]):x2}");
+            }
+            else if (capture.SlotPreviousAction is { } prev)
+            {
+                var res = Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, slot, id, 0x00, prev.Category, prev.Data));
+                Console.WriteLine($"  rewrote slot {slot} button 0x{id:x2}'s previous action: status=0x{(res is null ? 0 : res[1]):x2}");
+            }
+            else
+                Console.WriteLine($"  slot {slot}'s previous action was unreadable - if button 0x{id:x2} still types F15 on that profile, rerun --probe-buttons --reset or fix it in Synapse once.");
+        }
+        Console.WriteLine("  Volatile-profile binds: one final unplug/replug clears them (canonical restore).");
+        Console.WriteLine($"  Capture saved to {ButtonCaptureFile.PathFor()} (used by --probe-buttons --reset).\n");
+    }
+
+    /// <summary>Prints the spec §6 results rows, ready to paste.</summary>
+    private static void PrintResultsTemplate(ButtonCaptureFile c)
+    {
+        static string YN(bool? v) => v is null ? "_TBD_" : (v.Value ? "**yes**" : "**no**");
+        Console.WriteLine("== Spec §6 results (paste into the table) ==");
+        Console.WriteLine($"| Device mode at spike start | {(c.DeviceModeAtStart is byte m ? $"0x{m:x2}" : "_TBD_")} |");
+        Console.WriteLine($"| Does the V2 Pro accept 0x020c? | {YN(c.SetAccepted)} |");
+        string ids = c.PositionToId.Count == 0 ? "_TBD_"
+            : string.Join(", ", c.PositionToId.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}→0x{kv.Value:x2}"));
+        Console.WriteLine($"| The 12 thumb-grid button IDs | {ids} |");
+        Console.WriteLine($"| Volatile (profile 0) applies instantly? | {YN(c.AcceptancePassed)} |");
+        Console.WriteLine($"| Profile 0 clears on replug (volatile)? | {YN(c.Profile0Volatile)} |");
+        Console.WriteLine($"| Onboard profile list / creation needed? | {c.ProfileNotes ?? "_TBD_"} |");
+        Console.WriteLine($"| Active onboard slot persists across replug? | {YN(c.SlotPersisted)} |");
+        Console.WriteLine("| Required preamble/handshake / input-feel | (from the run notes: device mode + profile creation lines above) |");
+    }
+
+    /// <summary>--probe-buttons --reset: best-effort no-replug restore from the capture file.</summary>
+    public static int RunButtonsReset()
+    {
+        Console.WriteLine("Naga Battery Tray - --probe-buttons --reset (best-effort; a replug is the canonical restore)\n");
+        var capture = ButtonCaptureFile.Load();
+        if (capture is null || (capture.PreviousActions.Count == 0 && capture.SlotTested is null))
+        {
+            Console.WriteLine("No usable capture file - unplug/replug the mouse instead (volatile binds clear on replug).");
+            return 1;
+        }
+        using var s = new MouseSession();
+        if (!s.Open()) { Console.WriteLine("No live mouse collection found."); return 1; }
+
+        int ok = 0, fail = 0;
+        foreach (var (id, prev) in capture.PreviousActions)
+        {
+            var res = Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, RazerProtocol.ButtonProfileDirect,
+                id, 0x00, prev.Category, prev.Data));
+            if (res is not null && res[1] == 0x02) ok++;
+            else { fail++; Console.WriteLine($"  id 0x{id:x2}: restore failed (status=0x{(res is null ? 0 : res[1]):x2})"); }
+        }
+        RunRestore(s, capture);
+        Console.WriteLine($"Rewrote {ok} previous actions ({fail} failed). If anything is still odd: unplug/replug.");
+        return fail == 0 ? 0 : 1;
     }
 
     /// <summary>Opens the live mouse control collection: wired PID first, then wireless (a stale dongle
