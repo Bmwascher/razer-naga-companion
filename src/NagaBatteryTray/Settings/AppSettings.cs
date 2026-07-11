@@ -15,4 +15,10 @@ public sealed class AppSettings
     /// <summary>The onboard profile slot this app created and owns (bindings are written there and
     /// persist in the mouse's own memory). Null = not adopted yet. Never a user's pre-existing slot.</summary>
     public int? OnboardSlot { get; set; } = null;
+
+    /// <summary>Active theme preset name (Ui/Themes). Unknown value → Porcelain at apply time.</summary>
+    public string Theme { get; set; } = "Porcelain";
+
+    /// <summary>App-side one-click DPI presets shown in the dashboard's DPI card.</summary>
+    public List<int> DpiPresets { get; set; } = new() { 800, 1600, 3200 };
 }

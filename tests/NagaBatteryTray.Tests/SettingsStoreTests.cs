@@ -86,4 +86,26 @@ public class SettingsStoreTests
         Assert.Equal(NagaBatteryTray.Hid.ButtonActionKind.Disabled, reloaded.Settings.ButtonBindings[5].Kind);
         Assert.Contains("\"Kind\": \"Key\"", File.ReadAllText(path)); // enum stored as a readable string
     }
+
+    [Fact]
+    public void Theme_defaults_porcelain_and_round_trips()
+    {
+        var path = TempFile();
+        var store = new JsonSettingsStore(path);
+        Assert.Equal("Porcelain", store.Settings.Theme);
+        store.Settings.Theme = "Ember";
+        store.Save();
+        Assert.Equal("Ember", new JsonSettingsStore(path).Settings.Theme);
+    }
+
+    [Fact]
+    public void DpiPresets_default_and_round_trip()
+    {
+        var path = TempFile();
+        var store = new JsonSettingsStore(path);
+        Assert.Equal(new[] { 800, 1600, 3200 }, store.Settings.DpiPresets);
+        store.Settings.DpiPresets = new List<int> { 400, 12000 };
+        store.Save();
+        Assert.Equal(new[] { 400, 12000 }, new JsonSettingsStore(path).Settings.DpiPresets);
+    }
 }
