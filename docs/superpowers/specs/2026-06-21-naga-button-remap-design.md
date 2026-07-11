@@ -32,8 +32,9 @@ must come from a hardware **feasibility spike** that gates everything downstream
   and (c) tests **which write modes persist** (volatile "direct" profile vs. onboard slot). The high-churn
   discovery loop prefers the **volatile** profile (its value is the free replug-restore safety net; it falls
   back to per-candidate restores if profile 0 isn't volatile on this firmware — §5.2 step 2); only the
-  persistence test deliberately writes an onboard slot (one binding, plus profile creation `0x05/0x02` if
-  the firmware requires it). CLI path only; no resident-app behavior change.
+  persistence test deliberately writes an onboard slot — a **scratch slot it creates and deletes itself,
+  never an existing profile** (one binding, plus the profile create/delete). CLI path only; no
+  resident-app behavior change.
 - **Stage 2 — minimal remap feature** (built only on a spike PASS): bind each of the 12 grid buttons to a
   **keyboard key (+modifiers)** or **disabled**, persisted in `settings.json`, applied through the
   existing device/monitor layer, configured from a new **Settings-window "Buttons" section**.
@@ -62,7 +63,7 @@ must come from a hardware **feasibility spike** that gates everything downstream
   Basilisk ID (e.g. wheel-click) to a marker key visibly takes effect → **V2 Pro accepts the write**.
 - The diagnostic records the **device mode** at start (§5.2 step 1), captures a recorded
   **physical-position → button-ID table** (+ each button's previous action) for all 12 grid buttons
-  (§6), and records **which write modes persist** (volatile applies instantly; does the **active
+  (§6), and records **which write modes persist** (volatile applies instantly; does a **scratch
   onboard slot** survive an unplug/replug with **all Razer software absent**?).
 - An **unplug/replug fully restores** normal behaviour at any time (discovery touches **only** the
   volatile profile); `--probe-buttons --reset` is a **best-effort** no-replug convenience (§5.2 step 5).
@@ -217,23 +218,31 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
    §6 table — position → ID **and each button's recorded previous action** (so restore needs no assumption
    about the default layout). Every write is volatile (or per-candidate-restored under the step 2 fallback);
    the loop's write count is bounded by the range.
-4. **Persistence test (profile-lifecycle-aware).** Onboard profiles have a lifecycle: `0x05/0x81` lists
-   which slots exist and `0x05/0x02` creates one (`0x05/0x03` deletes) — writing button functions into a never-created
-   slot may simply be rejected (profile creation is the likeliest §6 "preamble"). There is **no documented
-   command to read or set the *active* profile**; the V2 Pro switches profiles with its **bottom button**
-   and shows the slot by LED colour (1–5 = white/red/green/blue/cyan). So: **query the profile list first**,
-   create a slot if none exists, and have the user confirm via the bottom button + LED colour that the
-   **tested slot is the active one** — otherwise a good write lands in an inactive profile and reads back
-   as a false FAIL. Then write **one** discovered binding to the **volatile** profile (applies instantly?)
-   **and** to the **active onboard slot** (survives **unplug/replug with all Razer software closed**?).
-   Record both — this selects Stage 2's persistence model. This is the spike's **one** deliberate
-   onboard-slot write (plus profile creation, if required).
+4. **Persistence test (scratch slot — existing profiles are NEVER written).** Onboard profiles have a
+   lifecycle: `0x05/0x81` lists which slots exist and `0x05/0x02` creates one (`0x05/0x03` deletes) —
+   writing button functions into a never-created slot may simply be rejected (profile creation is the
+   likeliest §6 "preamble"). There is **no documented command to read or set the *active* profile**; the
+   V2 Pro switches profiles with its **bottom button** and shows the slot by LED colour (1–5 = white/
+   red/green/blue/cyan). The user's own onboard profile (their Synapse-era bindings) must never be at
+   risk, so the test touches **only a scratch slot the spike itself creates**: query the profile list,
+   pick the first **unused** slot number, confirm with the user (`[y/N]`, default skip), create it, and
+   have the user switch to it via the bottom button + LED colour (otherwise a good write lands in an
+   inactive profile and reads back as a false FAIL). If the list is unreadable, creation is rejected,
+   all slots are in use, or the user declines → the slot test is **SKIPPED** (recorded in §6; Stage 2
+   then defaults to the re-apply model) — never a blind write into an existing slot.
+   **Journal-before-write gate:** the scratch slot's current binding is read back (`GetButton`,
+   echo-checked) and saved to the capture file **on disk before** the one SET goes out; an unreadable
+   binding skips the write. Then write **one** discovered binding to the **volatile** profile (applies
+   instantly?) **and** to the **scratch slot** (survives **unplug/replug with all Razer software
+   closed**?). Record both — this selects Stage 2's persistence model. Restore = switch back to the
+   original profile and **delete the scratch slot** (step 5).
 5. **Restore.** Because discovery wrote **only** the volatile profile (or restored per candidate under the
    fallback), an **unplug/replug fully restores** normal behaviour at any time — the **canonical** restore.
-   `--probe-buttons --reset` is a **best-effort** convenience that rewrites each button's **recorded
-   previous action** (from step 3) without a replug and restores the slot test button; if the pre-write
-   reads returned nothing usable (possible on the direct profile), it says so and directs the user to
-   replug instead — the mouse is never left stranded.
+   The scratch slot is **deleted** after the user switches back to their own profile — no existing slot
+   was ever written. `--probe-buttons --reset` is a **best-effort** convenience that rewrites each
+   button's **recorded previous action** (from step 3) without a replug and repeats the scratch-slot
+   cleanup; if the pre-write reads returned nothing usable (possible on the direct profile), it says so
+   and directs the user to replug instead — the mouse is never left stranded.
 
 ### 5.3 Stage 2 — device & monitor (`Hid/IRazerDevice.cs`, `Hid/RazerDevice.cs`, `Monitoring/BatteryMonitor.cs`)
 
@@ -312,7 +321,7 @@ driver) from openrazer's `razerchromacommon.c`.
 | The 12 thumb-grid button IDs (physical position → id) + recorded previous actions | _TBD_ |
 | Does a **volatile** (profile 0) write apply instantly? | _TBD_ |
 | Onboard profile list (`0x05/0x81`); was profile creation (`0x05/0x02`) required? | _TBD_ |
-| Does an **active onboard slot** write **persist** across unplug/replug with **no Razer software**? | _TBD_ |
+| Does a **scratch onboard slot** write **persist** across unplug/replug with **no Razer software**? | _TBD_ |
 | Required preamble/handshake before a write is accepted? **and does it alter normal input** (see gate) | _TBD_ |
 
 **Gate:** PASS = command accepted **and** the 12 IDs captured **and** at least the volatile write honored →

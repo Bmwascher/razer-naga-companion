@@ -344,13 +344,13 @@ public static class ProbeCommand
         Console.WriteLine();
     }
 
-    /// <summary>Spike step 4 — profile-lifecycle-aware persistence test. Queries which onboard slots
-    /// exist (creating one if none - the likely "preamble"), has the user align the ACTIVE slot via
-    /// the bottom button + LED colour (no active-profile command is documented), then tests whether
-    /// a slot write survives a Synapse-free replug. The spike's one deliberate onboard-slot write.</summary>
+    /// <summary>Spike step 4 — scratch-slot persistence test. Existing onboard profiles are NEVER
+    /// written: the test creates its own scratch slot (and is skipped entirely if the list is
+    /// unreadable, creation is rejected, all slots are in use, or the user declines), and nothing is
+    /// written before its previous content is read, echo-checked, and journaled to disk.</summary>
     private static void RunPersistenceTest(MouseSession s, ButtonCaptureFile capture)
     {
-        Console.WriteLine("[4/5] Persistence test (volatile vs active onboard slot)");
+        Console.WriteLine("[4/5] Persistence test (scratch onboard slot - existing profiles are never written)");
         if (capture.PositionToId.Count == 0)
         {
             Console.WriteLine("  no discovered grid ids - skipping.\n");
@@ -360,79 +360,111 @@ public static class ProbeCommand
         int gridPos = first.Key;
         byte gridId = first.Value;
 
-        byte slot = 0x01;
-        bool created = false;
         var list = Exchange(s.Handle!, RazerProtocol.BuildGetProfileListBuffer(ButtonsTid));
-        if (list is not null && RazerProtocol.ParseProfileListReply(list, out byte cap, out byte[] slots) == ReplyResult.Success)
+        byte cap = 0; byte[] slots = Array.Empty<byte>();
+        if (list is null || RazerProtocol.ParseProfileListReply(list, out cap, out slots) != ReplyResult.Success)
         {
-            capture.ProfileNotes = $"capacity={cap} existing=[{Hex2(slots)}]";
-            Console.WriteLine($"  profile list: {capture.ProfileNotes}");
-            if (slots.Length > 0) slot = slots[0];
-            else
-            {
-                var create = Exchange(s.Handle!, RazerProtocol.BuildNewProfileBuffer(ButtonsTid, slot));
-                created = create is not null && create[1] == 0x02;
-                capture.ProfileNotes += $"; created slot {slot}: {(created ? "ok" : "REJECTED")}";
-                Console.WriteLine($"  no slots existed - created slot {slot}: status=0x{(create is null ? 0 : create[1]):x2} (likely the §6 'preamble')");
-            }
+            capture.ProfileNotes = "profile list unreadable - slot test SKIPPED (no blind writes into existing slots)";
+            Console.WriteLine($"  profile list unreadable [{(list is null ? "no reply" : Hex(list, 16))}] - slot test skipped.\n");
+            return;
         }
-        else
+        capture.ProfileNotes = $"capacity={cap} existing=[{Hex2(slots)}]";
+        Console.WriteLine($"  profile list: {capture.ProfileNotes}");
+
+        byte slot = 0;
+        for (byte n = 1; n <= cap; n++)
+            if (Array.IndexOf(slots, n) < 0) { slot = n; break; }
+        if (slot == 0)
         {
-            capture.ProfileNotes = "profile list unreadable";
-            Console.WriteLine($"  profile list unreadable [{(list is null ? "no reply" : Hex(list, 16))}] - trying slot 1 blind.");
+            capture.ProfileNotes += "; all slots in use - slot test SKIPPED";
+            Console.WriteLine("  all onboard slots hold profiles - skipping (existing profiles are never overwritten).\n");
+            return;
         }
+
+        Console.Write($"\n  Create scratch slot {slot} and run the onboard persistence test? [y/N] ");
+        var confirm = Console.ReadKey(intercept: true);
+        Console.WriteLine();
+        if (confirm.Key != ConsoleKey.Y)
+        {
+            capture.ProfileNotes += "; slot test declined by user";
+            Console.WriteLine("  skipped on request (Stage 2 then defaults to the re-apply model).\n");
+            return;
+        }
+
+        var create = Exchange(s.Handle!, RazerProtocol.BuildNewProfileBuffer(ButtonsTid, slot));
+        bool created = create is not null && create[1] == 0x02;
+        capture.ProfileNotes += $"; created scratch slot {slot}: {(created ? "ok" : "REJECTED")}";
+        Console.WriteLine($"  create scratch slot {slot}: status=0x{(create is null ? 0 : create[1]):x2} (creation itself is the likely §6 'preamble')");
+        if (!created)
+        {
+            Console.WriteLine("  creation rejected - slot test skipped (nothing was written).\n");
+            return;
+        }
+        capture.SlotTested = slot;
+        capture.SlotWasCreated = true;
+        capture.Save(); // the scratch slot's existence is journaled before anything else happens
 
         Console.WriteLine($"\n  Use the BOTTOM profile button until the profile LED shows slot {slot}'s colour");
         Console.WriteLine("  (1=white 2=red 3=green 4=blue 5=cyan), then press Enter.");
         Console.ReadLine();
 
+        // journal-before-write gate: never write a binding whose previous content wasn't read + saved
         var getPrev = Exchange(s.Handle!, RazerProtocol.BuildGetButtonBuffer(ButtonsTid, slot, gridId, 0x00));
-        if (getPrev is not null && RazerProtocol.ParseButtonReply(getPrev, slot, gridId, 0x00,
-                out byte pc, out byte[] pd) == ReplyResult.Success)
-            capture.SlotPreviousAction = new CapturedAction(pc, pd);
+        byte pc = 0; byte[] pd = Array.Empty<byte>();
+        bool readOk = getPrev is not null && RazerProtocol.ParseButtonReply(getPrev, slot, gridId, 0x00,
+            out pc, out pd) == ReplyResult.Success;
+        if (!readOk)
+        {
+            capture.ProfileNotes += "; scratch read failed - slot write skipped";
+            Console.WriteLine("  could not read the scratch slot's current binding - slot write SKIPPED");
+            Console.WriteLine("  (journal-before-write gate); the scratch slot is deleted in step 5.\n");
+            return;
+        }
+        capture.SlotButtonId = gridId;
+        capture.SlotPreviousAction = new CapturedAction(pc, pd);
+        capture.Save(); // journal hits disk BEFORE the write
 
         var set = Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, slot, gridId, 0x00,
             RazerProtocol.FnKeyboard, new byte[] { 0x00, 0x6a })); // F15 = usage 0x6a, the slot marker
-        Console.WriteLine($"  slot write (grid pos {gridPos}, id 0x{gridId:x2} -> F15): status=0x{(set is null ? 0 : set[1]):x2}");
-        capture.SlotTested = slot;
-        capture.SlotButtonId = gridId;
-        capture.SlotWasCreated = created;
-        capture.Save();
+        Console.WriteLine($"  scratch-slot write (grid pos {gridPos}, id 0x{gridId:x2} -> F15): status=0x{(set is null ? 0 : set[1]):x2}");
 
         Console.WriteLine("\n  Unplug/replug (or power-cycle) the mouse - with NO Razer software running -");
         Console.WriteLine("  then press Enter.");
         Console.ReadLine();
         if (!s.WaitForReconnect()) return;
 
-        Console.WriteLine($"  Press grid button {gridPos} now. (Esc = nothing typed)");
+        Console.WriteLine($"  With the profile LED still on slot {slot}'s colour, press grid button {gridPos} now. (Esc = nothing typed)");
         var key = Console.ReadKey(intercept: true);
         bool persisted = key.Key == ConsoleKey.F15;
         capture.SlotPersisted = persisted;
         Console.WriteLine(persisted
-            ? "  -> F15 SURVIVED: the onboard slot persists across replug (onboard-slot model viable)."
+            ? "  -> F15 SURVIVED: an onboard slot persists across replug (onboard-slot model viable)."
             : $"  -> captured {key.Key}: the slot write did NOT survive, or the slot isn't active (re-apply model).");
         Console.WriteLine();
     }
 
     /// <summary>Spike step 5 — put the mouse back. Volatile binds clear on replug (canonical restore);
-    /// the slot test is undone here (delete the slot we created, or rewrite its previous action).</summary>
+    /// the scratch slot is deleted after the user switches back to their own profile. An existing slot
+    /// is only ever rewritten from its journaled previous action (legacy captures; never reached by the
+    /// scratch-slot flow).</summary>
     private static void RunRestore(MouseSession s, ButtonCaptureFile capture)
     {
         Console.WriteLine("[5/5] Restore");
-        if (capture.SlotTested is byte slot && capture.SlotButtonId is byte id)
+        if (capture.SlotTested is byte slot)
         {
             if (capture.SlotWasCreated)
             {
+                Console.WriteLine($"  Switch the BOTTOM profile button back OFF slot {slot} (to your usual profile),");
+                Console.WriteLine("  then press Enter.");
+                Console.ReadLine();
                 var del = Exchange(s.Handle!, RazerProtocol.BuildDeleteProfileBuffer(ButtonsTid, slot));
-                Console.WriteLine($"  deleted the slot the spike created ({slot}): status=0x{(del is null ? 0 : del[1]):x2}");
+                Console.WriteLine($"  deleted the scratch slot the spike created ({slot}): status=0x{(del is null ? 0 : del[1]):x2}");
             }
-            else if (capture.SlotPreviousAction is { } prev)
+            else if (capture.SlotButtonId is byte id && capture.SlotPreviousAction is { } prev)
             {
                 var res = Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, slot, id, 0x00, prev.Category, prev.Data));
                 Console.WriteLine($"  rewrote slot {slot} button 0x{id:x2}'s previous action: status=0x{(res is null ? 0 : res[1]):x2}");
             }
-            else
-                Console.WriteLine($"  slot {slot}'s previous action was unreadable - if button 0x{id:x2} still types F15 on that profile, rerun --probe-buttons --reset or fix it in Synapse once.");
         }
         Console.WriteLine("  Volatile-profile binds: one final unplug/replug clears them (canonical restore).");
         Console.WriteLine($"  Capture saved to {ButtonCaptureFile.PathFor()} (used by --probe-buttons --reset).\n");
@@ -451,7 +483,7 @@ public static class ProbeCommand
         Console.WriteLine($"| Volatile (profile 0) applies instantly? | {YN(c.AcceptancePassed)} |");
         Console.WriteLine($"| Profile 0 clears on replug (volatile)? | {YN(c.Profile0Volatile)} |");
         Console.WriteLine($"| Onboard profile list / creation needed? | {c.ProfileNotes ?? "_TBD_"} |");
-        Console.WriteLine($"| Active onboard slot persists across replug? | {YN(c.SlotPersisted)} |");
+        Console.WriteLine($"| Scratch onboard slot persists across replug? | {YN(c.SlotPersisted)} |");
         Console.WriteLine("| Required preamble/handshake / input-feel | (from the run notes: device mode + profile creation lines above) |");
     }
 
