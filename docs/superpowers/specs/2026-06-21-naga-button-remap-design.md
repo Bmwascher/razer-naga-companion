@@ -218,7 +218,7 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
    about the default layout). Every write is volatile (or per-candidate-restored under the step 2 fallback);
    the loop's write count is bounded by the range.
 4. **Persistence test (profile-lifecycle-aware).** Onboard profiles have a lifecycle: `0x05/0x81` lists
-   which slots exist and `0x05/0x02` creates/deletes one — writing button functions into a never-created
+   which slots exist and `0x05/0x02` creates one (`0x05/0x03` deletes) — writing button functions into a never-created
    slot may simply be rejected (profile creation is the likeliest §6 "preamble"). There is **no documented
    command to read or set the *active* profile**; the V2 Pro switches profiles with its **bottom button**
    and shows the slot by LED colour (1–5 = white/red/green/blue/cyan). So: **query the profile list first**,
@@ -299,7 +299,7 @@ browser via WebHID `send/receiveFeatureReport` only — an environment that stru
 input. **Do not** assume the keyboard `0x0d` non-analog id applies to the mouse (mouse uses `0x0c`), and
 **do not** mistake the LED custom-frame command (`0x03/0x0b`) for remapping. The spike's **auxiliary
 commands** are equally sourced: profile lifecycle (`0x05/0x80` available-count, `0x05/0x81` list,
-`0x05/0x02` create/delete — and the **absence** of any documented active-profile get/set) from the same
+`0x05/0x02` create, `0x05/0x03` delete — and the **absence** of any documented active-profile get/set) from the same
 razerqdhid `cmd_profile` doc; device mode (`0x00/0x04` set / `0x00/0x84` get; `0x00` normal, `0x03`
 driver) from openrazer's `razerchromacommon.c`.
 
@@ -392,7 +392,8 @@ HyperShift, per-app profiles, Type-Text, and Launch-Program remain **permanently
 - **HID:** VID `0x1532`; mouse PID `0x00A8`/`0x00A7`; 90-byte report, 91-byte feature buffer; CRC XOR
   `[2..87]`; tx `0x1f`. Remap: class `0x02`, set `0x0c` / get `0x8c`, `data_size 0x0a`,
   args `[profile,buttonId,hypershift,category,len,d0..d4]`. Spike aux: device mode get `0x00/0x84` /
-  set `0x00/0x04` (`0x00` normal, `0x03` driver); profile list `0x05/0x81`, create `0x05/0x02`.
+  set `0x00/0x04` (`0x00` normal, `0x03` driver); profile list `0x05/0x81`, create `0x05/0x02`,
+  delete `0x05/0x03`.
 - **Lightweight + zero mouse-input-latency are hard, gating requirements** (§3.1): one passive
   control-endpoint feature write per changed button, off-UI, serialized on the one `_readLock`,
   user-action-triggered (or re-applied via the existing event-driven device-change/startup path — no new
