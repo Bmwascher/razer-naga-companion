@@ -108,4 +108,14 @@ public class SettingsStoreTests
         store.Save();
         Assert.Equal(new[] { 400, 12000 }, new JsonSettingsStore(path).Settings.DpiPresets);
     }
+
+    [Fact]
+    public void Theme_and_DpiPresets_default_when_old_files_load_without_those_fields()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, """{ "PollIntervalSeconds": 60 }"""); // pre-theme/DPI-presets settings file
+        var store = new JsonSettingsStore(path);
+        Assert.Equal("Porcelain", store.Settings.Theme);
+        Assert.Equal(new[] { 800, 1600, 3200 }, store.Settings.DpiPresets);
+    }
 }
