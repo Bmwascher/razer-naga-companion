@@ -24,7 +24,10 @@ defeats it. How this is upheld (keep it this way):
   bypasses that clamp (a hand-edited `settings.json` already can).
 - Blocking `HidD_*Feature` calls run **off the UI thread** (`Task.Run`); battery + DPI serialize
   through one shared lock (`BatteryMonitor._readLock`, a `SemaphoreSlim`). The **Dashboard** window
-  releases on close (`StateChanged` unsubscribed + `_dashboard = null`) so idle returns to baseline; the **popup** is a cached
+  releases on close (`StateChanged` unsubscribed + `_dashboard = null`) followed by a one-shot post-close
+  trim (double GC — the window is finalizable, one GC only queues it — then a working-set trim, 2 s
+  after Closed, skipped on reopen; without it WPF idles at ~85 MB after the first dashboard open) so idle
+  returns to baseline; the **popup** is a cached
   singleton that only hides — don't make it release-on-close (re-creating it per tray click adds cost).
 - Acceptance gates (not aspirations): footprint back to baseline + measured input latency
   unchanged before/during/after operations. Binds ALL phases, especially button remapping (B).

@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -119,6 +120,7 @@ public sealed class AppHost
             vm.ApplyTo(_settings.Settings);
             _settings.Save();
             _dashboard = null; // release-on-close: idle memory returns to baseline
+            _ = TrimAfterCloseAsync();
         };
         vm.ApplyState(_monitor.State);
         _dashboard = win;
@@ -287,4 +289,25 @@ public sealed class AppHost
         _tray.Dispose();
         _app.Shutdown();
     }
+
+    /// <summary>The dashboard is heavy for a tray app: WPF holds ~60 MB of native/GC memory after the
+    /// window closes, and an idle process never reclaims it (no allocation pressure → no GC, no
+    /// decommit — measured steady at ~85 MB private WS vs the ~23 MB §3.1 gate). One-shot, event-driven
+    /// trim: two GCs (the window is finalizable, so the first collection only queues it; the second
+    /// frees it) then a working-set trim so idle RAM returns to baseline. The 2 s delay lets WPF's
+    /// render thread finish teardown; skipped if the dashboard was reopened meanwhile (trimming under
+    /// a live window causes a visible hiccup). The app sits in no input path, so paging cold pages
+    /// out cannot add mouse latency.</summary>
+    private async Task TrimAfterCloseAsync()
+    {
+        await Task.Delay(2000);
+        if (_dashboard is not null) return; // reopened — don't trim under a live window
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        SetProcessWorkingSetSize(System.Diagnostics.Process.GetCurrentProcess().Handle, -1, -1);
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern bool SetProcessWorkingSetSize(IntPtr process, nint min, nint max);
 }
