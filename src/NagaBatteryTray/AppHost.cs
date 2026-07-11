@@ -7,6 +7,7 @@ using NagaBatteryTray.Monitoring;
 using NagaBatteryTray.Settings;
 using NagaBatteryTray.Startup;
 using NagaBatteryTray.Ui;
+using NagaBatteryTray.Ui.Dashboard;
 using Wpf.Ui.Appearance;
 using Wpf.Ui.Markup;
 using Application = System.Windows.Application;
@@ -175,6 +176,57 @@ public sealed class AppHost
         _settings.Settings.OnboardSlot = free;
         _settings.Save();
         return free;
+    }
+
+    /// <summary>The dashboard's instant-apply write: one binding into the app-owned slot
+    /// (ensure slot → write → read-back verify → persist). Kind=Default writes the factory action
+    /// and drops the table entry. Returns false on any failure (nothing persisted).</summary>
+    private async Task<bool> WriteBindingAsync(int position, ButtonActionKind kind, byte modifiers, byte usage)
+    {
+        if (await EnsureOnboardSlotAsync() is not { } slot) return false;
+
+        var binding = kind == ButtonActionKind.Default
+            ? NagaV2ProButtons.FactoryBindingForPosition(position)
+            : new ButtonBinding(NagaV2ProButtons.IdForPosition(position), kind, modifiers, usage);
+        var (category, data) = binding.ToWire();
+
+        bool ok = await Task.Run(() => _monitor.SetButtonAsync(slot, binding.ButtonId, category, data));
+        if (ok)
+        {
+            var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, binding.ButtonId));
+            ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
+        }
+        if (!ok) return false;
+
+        if (kind == ButtonActionKind.Default) _settings.Settings.ButtonBindings.Remove(position);
+        else _settings.Settings.ButtonBindings[position] = new ButtonBindingSetting
+             { Kind = kind, Modifiers = modifiers, HidUsage = usage };
+        _settings.Save();
+        return true;
+    }
+
+    /// <summary>Profile-card liveness (spec §4.4): one effective read (profile 0) compared against the
+    /// app slot's stored binding. Only called on dashboard open / explicit refresh — never polled.</summary>
+    private async Task<ProfileLivenessState> CheckLivenessAsync()
+    {
+        var s = _settings.Settings;
+        if (s.OnboardSlot is null) return ProfileLivenessState.NotAdopted;
+        var probe = s.ButtonBindings.OrderBy(kv => kv.Key).FirstOrDefault();
+        if (probe.Value is null) return ProfileLivenessState.Unchecked;
+
+        var expected = new ButtonBinding(NagaV2ProButtons.IdForPosition(probe.Key),
+            probe.Value.Kind, probe.Value.Modifiers, probe.Value.HidUsage).ToWire();
+        var effective = await Task.Run(() =>
+            _monitor.GetButtonAsync(RazerProtocol.ButtonProfileDirect, NagaV2ProButtons.IdForPosition(probe.Key)));
+        return ProfileLiveness.Evaluate(s.OnboardSlot, expected, effective);
+    }
+
+    /// <summary>Settings-overlay "Reset all to factory": Default-write every grid button via the
+    /// per-chip pipeline so each chip shows its own verified result.</summary>
+    private async Task ResetAllButtonsAsync(DashboardViewModel vm)
+    {
+        for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
+            await vm.Callout(pos).DefaultAsync();
     }
 
     /// <summary>A just-created slot starts EMPTY — its grid buttons read back as no action (this
