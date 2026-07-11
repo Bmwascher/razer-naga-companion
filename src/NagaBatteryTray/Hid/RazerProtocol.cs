@@ -35,6 +35,22 @@ public static class RazerProtocol
     public const byte FnDisabled = 0x00;
     public const byte FnKeyboard = 0x02;           // data = [modifierBitmask, hidUsage]
 
+    // Spike aux commands (spec §5.2 steps 1 & 4). Device mode: openrazer razerchromacommon.c.
+    // Profile lifecycle: razerqdhid cmd_profile (no active-profile get/set is documented).
+    public const byte CommandClassInfo = 0x00;
+    public const byte CommandIdSetDeviceMode = 0x04;
+    public const byte CommandIdGetDeviceMode = 0x84;
+    public const byte DataSizeDeviceMode = 0x02;
+    public const byte DeviceModeNormal = 0x00;
+    public const byte DeviceModeDriver = 0x03;
+
+    public const byte CommandClassProfile = 0x05;
+    public const byte CommandIdGetProfileList = 0x81;
+    public const byte CommandIdNewProfile = 0x02;
+    public const byte CommandIdDeleteProfile = 0x03;
+    public const byte DataSizeProfileList = 0x06;  // 1 capacity byte + up to 5 slot numbers
+    public const byte DataSizeProfileEdit = 0x01;
+
     public static readonly byte[] TransactionIdProbeSet =
         { 0x1f, 0x3f, 0x00, 0xff, 0x08, 0x88, 0x1d, 0x9f };
 
@@ -126,6 +142,66 @@ public static class RazerProtocol
         data = new byte[len];
         Array.Copy(buffer91, 14, data, 0, len);
         return ReplyResult.Success;
+    }
+
+    public static byte[] BuildGetDeviceModeBuffer(byte transactionId)
+    {
+        Span<byte> args = stackalloc byte[2]; // zeroed
+        return BuildReport(transactionId, DataSizeDeviceMode, CommandClassInfo, CommandIdGetDeviceMode, args);
+    }
+
+    public static byte[] BuildSetDeviceModeBuffer(byte transactionId, byte mode)
+    {
+        Span<byte> args = stackalloc byte[2];
+        args[0] = mode; // args[1] = 0x00 param
+        return BuildReport(transactionId, DataSizeDeviceMode, CommandClassInfo, CommandIdSetDeviceMode, args);
+    }
+
+    /// <summary>Decodes a get-device-mode reply; mode is report arg[0] (buffer[9]).</summary>
+    public static ReplyResult ParseDeviceModeReply(byte[] buffer91, out byte mode)
+    {
+        mode = 0;
+        var r = ValidateReply(buffer91);
+        if (r != ReplyResult.Success) return r;
+        mode = buffer91[9];
+        return ReplyResult.Success;
+    }
+
+    public static byte[] BuildGetProfileListBuffer(byte transactionId)
+    {
+        Span<byte> args = stackalloc byte[6]; // zeroed
+        return BuildReport(transactionId, DataSizeProfileList, CommandClassProfile, CommandIdGetProfileList, args);
+    }
+
+    /// <summary>Decodes a profile-list reply: capacity at buffer[9], then the existing (non-zero)
+    /// slot numbers. Capacity beyond the 5 the frame can carry is treated as wrong-layout → Failed
+    /// (the probe still prints raw hex, so nothing is lost on a surprise).</summary>
+    public static ReplyResult ParseProfileListReply(byte[] buffer91, out byte capacity, out byte[] slots)
+    {
+        capacity = 0; slots = Array.Empty<byte>();
+        var r = ValidateReply(buffer91);
+        if (r != ReplyResult.Success) return r;
+        capacity = buffer91[9];
+        if (capacity > 5) return ReplyResult.Failed;
+        var list = new List<byte>();
+        for (int i = 0; i < capacity; i++)
+            if (buffer91[10 + i] != 0) list.Add(buffer91[10 + i]);
+        slots = list.ToArray();
+        return ReplyResult.Success;
+    }
+
+    public static byte[] BuildNewProfileBuffer(byte transactionId, byte slot)
+    {
+        Span<byte> args = stackalloc byte[1];
+        args[0] = slot;
+        return BuildReport(transactionId, DataSizeProfileEdit, CommandClassProfile, CommandIdNewProfile, args);
+    }
+
+    public static byte[] BuildDeleteProfileBuffer(byte transactionId, byte slot)
+    {
+        Span<byte> args = stackalloc byte[1];
+        args[0] = slot;
+        return BuildReport(transactionId, DataSizeProfileEdit, CommandClassProfile, CommandIdDeleteProfile, args);
     }
 
     /// <summary>Validates a 91-byte reply: status byte then XOR CRC over buffer[3..88] vs buffer[89].</summary>

@@ -280,4 +280,79 @@ public class RazerProtocolTests
         reply[89] ^= 0xFF;
         Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseButtonReply(reply, 0x00, 0x34, 0x00, out _, out _));
     }
+
+    [Fact]
+    public void DeviceMode_get_and_set_buffers_have_correct_layout()
+    {
+        byte[] get = RazerProtocol.BuildGetDeviceModeBuffer(0x1f);
+        Assert.Equal(0x02, get[6]); // data_size
+        Assert.Equal(0x00, get[7]); // class (info)
+        Assert.Equal(0x84, get[8]); // id (GET)
+
+        byte[] set = RazerProtocol.BuildSetDeviceModeBuffer(0x1f, RazerProtocol.DeviceModeNormal);
+        Assert.Equal(0x02, set[6]);
+        Assert.Equal(0x00, set[7]);
+        Assert.Equal(0x04, set[8]); // id (SET)
+        Assert.Equal(0x00, set[9]);  // mode
+        Assert.Equal(0x00, set[10]); // param
+    }
+
+    [Fact]
+    public void ParseDeviceModeReply_decodes_mode()
+    {
+        var buf = new byte[91];
+        buf[1] = 0x02; buf[2] = 0x1f; buf[6] = 0x02; buf[7] = 0x00; buf[8] = 0x84;
+        buf[9] = 0x03; // driver mode
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        buf[89] = crc;
+        Assert.Equal(ReplyResult.Success, RazerProtocol.ParseDeviceModeReply(buf, out byte mode));
+        Assert.Equal(RazerProtocol.DeviceModeDriver, mode);
+    }
+
+    [Fact]
+    public void ProfileList_buffer_and_parse_roundtrip()
+    {
+        byte[] req = RazerProtocol.BuildGetProfileListBuffer(0x1f);
+        Assert.Equal(0x06, req[6]); // data_size = 1 capacity byte + up to 5 slot bytes
+        Assert.Equal(0x05, req[7]); // class (profile)
+        Assert.Equal(0x81, req[8]); // id (list)
+
+        var reply = new byte[91];
+        reply[1] = 0x02; reply[2] = 0x1f; reply[6] = 0x06; reply[7] = 0x05; reply[8] = 0x81;
+        reply[9] = 5;                     // capacity
+        reply[10] = 1; reply[11] = 3;     // slots 1 and 3 exist; rest zero
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= reply[i];
+        reply[89] = crc;
+        Assert.Equal(ReplyResult.Success, RazerProtocol.ParseProfileListReply(reply, out byte cap, out byte[] slots));
+        Assert.Equal(5, cap);
+        Assert.Equal(new byte[] { 1, 3 }, slots);
+    }
+
+    [Fact]
+    public void ParseProfileListReply_capacity_over_5_is_failed()
+    {
+        var reply = new byte[91];
+        reply[1] = 0x02; reply[2] = 0x1f; reply[6] = 0x06; reply[7] = 0x05; reply[8] = 0x81;
+        reply[9] = 200; // nonsense capacity -> wrong-layout guard
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= reply[i];
+        reply[89] = crc;
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseProfileListReply(reply, out _, out _));
+    }
+
+    [Fact]
+    public void Profile_new_and_delete_buffers_have_correct_layout()
+    {
+        byte[] create = RazerProtocol.BuildNewProfileBuffer(0x1f, 0x01);
+        Assert.Equal(0x01, create[6]); // data_size
+        Assert.Equal(0x05, create[7]); // class
+        Assert.Equal(0x02, create[8]); // id (new)
+        Assert.Equal(0x01, create[9]); // slot
+
+        byte[] del = RazerProtocol.BuildDeleteProfileBuffer(0x1f, 0x01);
+        Assert.Equal(0x03, del[8]);    // id (delete)
+        Assert.Equal(0x01, del[9]);    // slot
+    }
 }
