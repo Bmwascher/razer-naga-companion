@@ -30,8 +30,10 @@ must come from a hardware **feasibility spike** that gates everything downstream
 - **Stage 1 — feasibility spike:** a `--probe-buttons` diagnostic that (a) proves the V2 Pro accepts our
   remap write using a **known** shared Basilisk button ID, (b) **discovers the 12 thumb-grid button IDs**,
   and (c) tests **which write modes persist** (volatile "direct" profile vs. onboard slot). The high-churn
-  discovery loop uses the **volatile** profile → **no flash wear from the scan**; only the persistence test
-  makes one deliberate onboard-slot write. CLI path only; no resident-app behavior change.
+  discovery loop prefers the **volatile** profile (its value is the free replug-restore safety net; it falls
+  back to per-candidate restores if profile 0 isn't volatile on this firmware — §5.2 step 2); only the
+  persistence test deliberately writes an onboard slot (one binding, plus profile creation `0x05/0x02` if
+  the firmware requires it). CLI path only; no resident-app behavior change.
 - **Stage 2 — minimal remap feature** (built only on a spike PASS): bind each of the 12 grid buttons to a
   **keyboard key (+modifiers)** or **disabled**, persisted in `settings.json`, applied through the
   existing device/monitor layer, configured from a new **Settings-window "Buttons" section**.
@@ -58,11 +60,12 @@ must come from a hardware **feasibility spike** that gates everything downstream
 **Stage 1 (the gate):**
 - `--probe-buttons` builds and sends `RazerProtocol.BuildSetButtonBuffer(...)`; binding a **known**
   Basilisk ID (e.g. wheel-click) to a marker key visibly takes effect → **V2 Pro accepts the write**.
-- The diagnostic captures a recorded **physical-position → button-ID table** for all 12 grid buttons
-  (§6), and records **which write modes persist** (volatile applies instantly; does slot 1 survive an
-  unplug/replug with **all Razer software absent**?).
-- `--probe-buttons --reset` restores the grid to factory keys; discovery touches **only** the volatile
-  profile, so a replug also fully restores factory behaviour at any time.
+- The diagnostic records the **device mode** at start (§5.2 step 1), captures a recorded
+  **physical-position → button-ID table** (+ each button's previous action) for all 12 grid buttons
+  (§6), and records **which write modes persist** (volatile applies instantly; does the **active
+  onboard slot** survive an unplug/replug with **all Razer software absent**?).
+- An **unplug/replug fully restores** normal behaviour at any time (discovery touches **only** the
+  volatile profile); `--probe-buttons --reset` is a **best-effort** no-replug convenience (§5.2 step 5).
 
 **Stage 2 (only if the gate passes):**
 - From the Settings "Buttons" section, a user binds a thumb button to a key (+modifiers) or disables it;
@@ -92,7 +95,9 @@ so it is handled with *more* care than DPI, never less:
   `DeviceChangeWatcher` debounced-refresh** path — still event-driven, no new persistent timer.
 - **Flash-wear discipline:** onboard flash has finite write-endurance. Writes are **deliberate**
   (explicit user Apply), **read-back-verified**, and **coalesced** (write only buttons that changed). The
-  spike uses the **volatile** profile for the high-churn discovery loop.
+  spike prefers the **volatile** profile for the high-churn discovery loop — though its real value is the
+  free replug-restore safety net; a bounded scan's wear (~50–100 writes vs. 10k+ cycle endurance) is
+  immaterial either way.
 - **No new dependencies.**
 
 **Verification (gating acceptance — see §9):** footprint back to baseline after a remap, and mouse input
@@ -149,10 +154,12 @@ public const byte FnDisabled = 0x00, FnKeyboard = 0x02;
 public static byte[] BuildSetButtonBuffer(byte tid, byte profile, byte buttonId, byte hypershift,
                                           byte category, ReadOnlySpan<byte> data)
 {
+    if (data.Length > 5)
+        throw new ArgumentOutOfRangeException(nameof(data)); // a truncated binding must never reach the device
     Span<byte> args = stackalloc byte[10];
     args[0] = profile; args[1] = buttonId; args[2] = hypershift;
-    args[3] = category; args[4] = (byte)Math.Min(data.Length, 5);
-    for (int i = 0; i < data.Length && i < 5; i++) args[5 + i] = data[i];
+    args[3] = category; args[4] = (byte)data.Length;
+    for (int i = 0; i < data.Length; i++) args[5 + i] = data[i];
     return BuildReport(tid, DataSizeButton, CommandClassButton, CommandIdSetButton, args);
 }
 ```
@@ -166,8 +173,11 @@ public static byte[] BuildSetButtonBuffer(byte tid, byte profile, byte buttonId,
   This locks the layout independently of the spike.
 - **Stage 2 read-back:** `BuildGetButtonBuffer(tid, profile, buttonId, hypershift)` reuses `DataSizeButton`
   (`0x0a`) and a **10-byte zero-padded** arg span with only `[0]=profile, [1]=buttonId, [2]=hypershift` set
-  — mirroring `BuildGetDpiBuffer` (id `0x8c`). `ParseButtonReply(buffer91, out category, out data)` reuses
-  the existing `ValidateReply` (status + CRC over `buffer[3..88]`). Guards a wrong-layout reply like `ParseDpiReply`.
+  — mirroring `BuildGetDpiBuffer` (id `0x8c`). `ParseButtonReply(buffer91, expectedProfile, expectedButtonId,
+  expectedHypershift, out category, out data)` reuses the existing `ValidateReply` (status + CRC over
+  `buffer[3..88]`), then guards layout via the **echo check**: a Razer GET reply echoes the request args, so
+  the reply's `[profile, buttonId, hypershift]` must match the request and `dataLen ≤ 5`, else `Failed`
+  (buttons have no DPI-style numeric range to validate against).
 
 ### 5.2 Stage 1 — `Diagnostics/ProbeCommand.cs` (`--probe-buttons`)
 
@@ -176,28 +186,54 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
 `RunButtonsReset()`. It opens the **mouse** control path exactly as the existing probes do (zero-access,
 `GetMaxFeatureReportLength()==91`, auto-probed tx id). Steps, all on **volatile profile 0** unless noted:
 
-1. **Acceptance + volatility probe.** Bind a **known** Basilisk ID (e.g. wheel-click `0x03`) → marker key
+1. **Device-mode check.** Read the device mode (class `0x00`, id `0x84`; openrazer-documented values:
+   `0x00` = normal, `0x03` = driver) and record it in §6. Onboard bindings apply in **normal mode**;
+   **driver mode** is Synapse's software-resident model where software synthesizes input — a mouse left
+   in driver mode by a past Synapse install would make a perfectly good onboard write look dead (a false
+   FAIL). If driver mode is found, set it back to normal (`0x00/0x04`, a standard openrazer-documented
+   operation), note it, and continue.
+2. **Acceptance + volatility probe.** Bind a **known** Basilisk ID (e.g. wheel-click `0x03`) → marker key
    (`F13`) on **volatile profile 0**. Prompt the user to press it; capture the emitted key via
    `Console.ReadKey`. *(Reading the console's own keystrokes through the normal OS input stack is orthogonal
    to the gating constraint, which forbids claiming the **mouse's** HID input collection — not ordinary
    keyboard input.)* `F13` ⇒ **firmware accepts our write** — disambiguating "rejected" from "wrong ID"
    before any grid guess. Then **confirm profile 0 is genuinely volatile/no-flash** (the bind clears on
-   replug; a read-back shows the factory action) **before** the bulk scan. **If the write is rejected, or
-   profile 0 is not volatile, abort** — do not run step 2.
-2. **Grid discovery (bounded).** Across a **hard-bounded** candidate-ID scan range (a small documented
-   window around the expected grid IDs; the plan pins the exact range and a max-writes ceiling), for each
-   candidate ID: **first read its current factory action via `GetButton` and record it**, then bind it to a
-   **distinct** marker key on **volatile profile 0**. Walk the user through pressing each of the **12 grid
-   buttons in labeled order**; `Console.ReadKey` per press decodes **physical-position → button-ID**. Output
-   is the §6 table — position → ID **and each button's captured factory action** (so restore needs no
-   assumption about the default layout). Every write is volatile; the loop's write count is bounded by the range.
-3. **Persistence test.** Write **one** discovered binding to the **volatile** profile (applies instantly?)
-   **and** to **onboard slot 1** (does it survive **unplug/replug with all Razer software closed**?). Record
-   both — this selects Stage 2's persistence model. This is the spike's **one** deliberate onboard-slot write.
-4. **Restore.** Because discovery wrote **only** the volatile profile, an **unplug/replug fully restores**
-   factory behaviour at any time. `--probe-buttons --reset` is a convenience that rewrites each button's
-   **captured factory action** (from step 2) without a replug, and restores the single slot-1 test button —
-   so the mouse is never left stranded.
+   replug; a read-back shows the prior action). **If the write is rejected outright, abort.** If profile 0
+   is accepted but **not volatile**, don't abort: **fall back** to discovery on the **active onboard slot**
+   with a restore write per candidate — a bounded scan is ~50–100 writes against 10k+ cycle NOR endurance,
+   so the volatile profile is preferred for its replug-restore safety net, not because the wear is material.
+3. **Grid discovery (bounded, batched).** Across a **hard-bounded** candidate-ID scan range (a small
+   documented window around the expected grid IDs; the plan pins the exact range and a max-writes ceiling),
+   for each candidate ID: **first read its current action via `GetButton` and record it** as the button's
+   **previous action** — not "factory": a past Synapse install may have stored custom bindings, and a
+   pre-write read of the direct profile may return nothing meaningful (record the absence too) — then bind
+   it to a **distinct** marker key on **volatile profile 0**. Walk the user through pressing each of the
+   **12 grid buttons in labeled order**; `Console.ReadKey` per press decodes **physical-position →
+   button-ID**. Console mechanics the plan must pin: a dedicated **skip key** so a grid button that emits
+   nothing (its ID is outside the window) can't block `ReadKey` forever; a **marker alphabet excluding**
+   the grid's factory emissions (`1–9 0 - =` — digits are unusable as markers) and console-hostile chords
+   (a `Ctrl+C` marker would SIGINT the probe mid-scan); the ~38 usable unambiguous keys (letters +
+   `F13`–`F24`) bound the batch size, so a wider window runs in **batches** with re-prompts. Output is the
+   §6 table — position → ID **and each button's recorded previous action** (so restore needs no assumption
+   about the default layout). Every write is volatile (or per-candidate-restored under the step 2 fallback);
+   the loop's write count is bounded by the range.
+4. **Persistence test (profile-lifecycle-aware).** Onboard profiles have a lifecycle: `0x05/0x81` lists
+   which slots exist and `0x05/0x02` creates/deletes one — writing button functions into a never-created
+   slot may simply be rejected (profile creation is the likeliest §6 "preamble"). There is **no documented
+   command to read or set the *active* profile**; the V2 Pro switches profiles with its **bottom button**
+   and shows the slot by LED colour (1–5 = white/red/green/blue/cyan). So: **query the profile list first**,
+   create a slot if none exists, and have the user confirm via the bottom button + LED colour that the
+   **tested slot is the active one** — otherwise a good write lands in an inactive profile and reads back
+   as a false FAIL. Then write **one** discovered binding to the **volatile** profile (applies instantly?)
+   **and** to the **active onboard slot** (survives **unplug/replug with all Razer software closed**?).
+   Record both — this selects Stage 2's persistence model. This is the spike's **one** deliberate
+   onboard-slot write (plus profile creation, if required).
+5. **Restore.** Because discovery wrote **only** the volatile profile (or restored per candidate under the
+   fallback), an **unplug/replug fully restores** normal behaviour at any time — the **canonical** restore.
+   `--probe-buttons --reset` is a **best-effort** convenience that rewrites each button's **recorded
+   previous action** (from step 3) without a replug and restores the slot test button; if the pre-write
+   reads returned nothing usable (possible on the direct profile), it says so and directs the user to
+   replug instead — the mouse is never left stranded.
 
 ### 5.3 Stage 2 — device & monitor (`Hid/IRazerDevice.cs`, `Hid/RazerDevice.cs`, `Monitoring/BatteryMonitor.cs`)
 
@@ -261,20 +297,26 @@ firmware accepts and *persists* a directly-written map (the precise things the s
 proof the model needs no input interception: `razerqdhid` performs these onboard writes from a sandboxed
 browser via WebHID `send/receiveFeatureReport` only — an environment that structurally cannot subscribe to
 input. **Do not** assume the keyboard `0x0d` non-analog id applies to the mouse (mouse uses `0x0c`), and
-**do not** mistake the LED custom-frame command (`0x03/0x0b`) for remapping.
+**do not** mistake the LED custom-frame command (`0x03/0x0b`) for remapping. The spike's **auxiliary
+commands** are equally sourced: profile lifecycle (`0x05/0x80` available-count, `0x05/0x81` list,
+`0x05/0x02` create/delete — and the **absence** of any documented active-profile get/set) from the same
+razerqdhid `cmd_profile` doc; device mode (`0x00/0x04` set / `0x00/0x84` get; `0x00` normal, `0x03`
+driver) from openrazer's `razerchromacommon.c`.
 
 **Gating spike — Stage 1 results (must be recorded before Stage 2 is trusted):**
 
 | Question | Result (to fill from hardware) |
 | --- | --- |
+| Device mode at spike start (`0x00/0x84`: `0x00` normal / `0x03` driver) | _TBD_ |
 | Does the V2 Pro accept `0x020c` (known-ID acceptance probe)? | _TBD_ |
-| The 12 thumb-grid button IDs (physical position → id) | _TBD_ |
+| The 12 thumb-grid button IDs (physical position → id) + recorded previous actions | _TBD_ |
 | Does a **volatile** (profile 0) write apply instantly? | _TBD_ |
-| Does an **onboard slot** (profile 1) write **persist** across unplug/replug with **no Razer software**? | _TBD_ |
+| Onboard profile list (`0x05/0x81`); was profile creation (`0x05/0x02`) required? | _TBD_ |
+| Does an **active onboard slot** write **persist** across unplug/replug with **no Razer software**? | _TBD_ |
 | Required preamble/handshake before a write is accepted? **and does it alter normal input** (see gate) | _TBD_ |
 
 **Gate:** PASS = command accepted **and** the 12 IDs captured **and** at least the volatile write honored →
-Stage 2 proceeds (persistence model chosen from rows 3–4). FAIL = the firmware rejects the write, or no
+Stage 2 proceeds (persistence model chosen from the volatile/onboard rows). FAIL = the firmware rejects the write, or no
 write mode persists without a Synapse-class arbiter → **Phase B is closed out as non-viable on this
 firmware** (documented like the Phase C dock relay), since the only durable alternative — a resident input
 interceptor — violates §3.1. `--probe-buttons` is kept as the re-test tool.
@@ -282,7 +324,10 @@ interceptor — violates §3.1. `--probe-buttons` is kept as the re-test tool.
 **Input-feel acceptance (a §3.1 gate, not mere overhead):** if a write-preamble/handshake is required,
 verify the mouse keeps emitting normal movement/clicks with **no input-feel change** throughout the
 handshake→write→handshake window. A handshake that suspends or alters normal input is a **§3.1 FAIL /
-close-out**, not "a few extra reports."
+close-out**, not "a few extra reports." The known input-altering mechanism is **driver mode**
+(`0x00/0x04` = `0x03`) — Synapse's software-resident model; remaps must apply in **normal mode** (`0x00`),
+and any path that *requires* driver mode is the close-out condition. Profile **creation** (`0x05/0x02`),
+by contrast, is one-time onboard housekeeping and is an acceptable preamble.
 
 ## 7. Error handling & edge cases
 
@@ -293,8 +338,10 @@ close-out**, not "a few extra reports."
   model) the binding re-asserts on the next device-change/connect.
 - **Firmware doesn't persist (slot model):** caught by the spike → either ship the **re-apply** model or, if
   nothing persists, close the phase. Not papered over.
-- **Unknown/again-default button:** "Default" rewrites the factory key; a never-touched button is never
-  written (flash-wear discipline).
+- **Unknown/again-default button:** "Default" rewrites the stock action recorded in §6; a never-touched
+  button is never written (flash-wear discipline).
+- **Mouse left in driver mode** (past Synapse install): detected and reset to normal in the spike (§5.2
+  step 1); Stage 2 assumes normal mode — it never sets driver mode.
 - **Synapse running concurrently:** may override at runtime; documented (§4). We do not fight it.
 - **Wireless vs wired link:** writes target whichever interface is **live** (the existing wired-first,
   verify-it-answers selection); the spike checks both links, since an onboard write while wired could
@@ -317,7 +364,9 @@ acceptance, capture the 12 IDs, record which write modes persist; `--probe-butto
 **Stage 2 (unit, via `IRazerDevice` + `FakeRazerDevice`):**
 - `BuildSetButtonBuffer` reproduces the Basilisk vectors byte-for-byte; CRC over `[2..87]`; `DataSizeButton`
   and class/id correct. (Runs **now**, pre-spike.)
-- `BuildGetButtonBuffer`/`ParseButtonReply` round-trip; a wrong-layout reply → `Failed`.
+- `BuildGetButtonBuffer`/`ParseButtonReply` round-trip; a reply failing the **echo check** (wrong
+  profile/buttonId/hypershift echoed, or dataLen > 5) → `Failed`; `BuildSetButtonBuffer` with data > 5
+  bytes **throws** (a truncated binding must never reach the device).
 - `SetButtonAsync` routes the binding to the device and returns its result; `GetButtonAsync` decodes it.
 - (Re-apply model) `ApplyRemapsAsync` writes every configured binding on connect; an empty table writes
   nothing (assert zero device calls — protects the no-extra-I/O invariant).
@@ -342,7 +391,8 @@ HyperShift, per-app profiles, Type-Text, and Launch-Program remain **permanently
 - **Target** `net10.0-windows10.0.19041.0`; WPF + WinForms; WPF-UI 4.3.0 — **no new dependencies.**
 - **HID:** VID `0x1532`; mouse PID `0x00A8`/`0x00A7`; 90-byte report, 91-byte feature buffer; CRC XOR
   `[2..87]`; tx `0x1f`. Remap: class `0x02`, set `0x0c` / get `0x8c`, `data_size 0x0a`,
-  args `[profile,buttonId,hypershift,category,len,d0..d4]`.
+  args `[profile,buttonId,hypershift,category,len,d0..d4]`. Spike aux: device mode get `0x00/0x84` /
+  set `0x00/0x04` (`0x00` normal, `0x03` driver); profile list `0x05/0x81`, create `0x05/0x02`.
 - **Lightweight + zero mouse-input-latency are hard, gating requirements** (§3.1): one passive
   control-endpoint feature write per changed button, off-UI, serialized on the one `_readLock`,
   user-action-triggered (or re-applied via the existing event-driven device-change/startup path — no new
@@ -358,7 +408,7 @@ HyperShift, per-app profiles, Type-Text, and Launch-Program remain **permanently
 Stage 1 (spike):
 Modify:
   src/NagaBatteryTray/Hid/RazerProtocol.cs            BuildSetButtonBuffer (+ button class/id/data-size consts)
-  src/NagaBatteryTray/Diagnostics/ProbeCommand.cs     RunButtons()/RunButtonsReset(): acceptance, discovery, persistence, restore
+  src/NagaBatteryTray/Diagnostics/ProbeCommand.cs     RunButtons()/RunButtonsReset(): device-mode check, acceptance, discovery, persistence, restore
   src/NagaBatteryTray/Program.cs                      dispatch --probe-buttons [--reset]
   tests/NagaBatteryTray.Tests/RazerProtocolTests.cs   BuildSetButtonBuffer vs Basilisk vectors + CRC (pre-spike)
 
