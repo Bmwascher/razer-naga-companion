@@ -51,8 +51,8 @@ public static class IconRenderer
             g.Clear(Color.Transparent);
 
             // Coin: a filled dark disc is the whole gauge body (digits + ring both sit on it).
-            // Inset ~2% so the antialiased circle edge doesn't clip against the canvas bounds.
-            float coinMargin = render * 0.02f;
+            // Inset ~1.5% so the antialiased circle edge doesn't clip against the canvas bounds.
+            float coinMargin = render * 0.015f;
             var coinRect = new RectangleF(coinMargin, coinMargin, render - 2f * coinMargin, render - 2f * coinMargin);
             using (var coinBrush = new SolidBrush(CoinFill))
                 g.FillEllipse(coinBrush, coinRect);
@@ -61,7 +61,7 @@ public static class IconRenderer
             // o'clock and is colored by battery level (green/amber/red, green while charging).
             // Inset by half its own width beyond the coin margin so the ring reads as the coin's
             // rim rather than floating separately from it.
-            float ringW = render * 0.10f;
+            float ringW = render * 0.14f;
             float ringInset = coinMargin + ringW / 2f;
             var ringRect = new RectangleF(ringInset, ringInset, render - 2f * ringInset, render - 2f * ringInset);
             using (var track = new Pen(Color.FromArgb(45, 255, 255, 255), ringW))
@@ -84,8 +84,10 @@ public static class IconRenderer
             var ink = path.GetBounds();
             if (ink.Width > 0 && ink.Height > 0)
             {
-                float pad = render * 0.04f;
-                float targetHeight = render * 0.52f;
+                float pad = render * 0.03f;
+                // 3-digit "100" gets a shorter target so its condensed width still clears the
+                // rim (the reference drops 56% -> 42% for 3 digits; same idea).
+                float targetHeight = render * (text.Length >= 3 ? 0.44f : 0.56f);
                 float maxWidth = render - 2f * ringW - 2f * pad;
 
                 float scaleX, scaleY;
