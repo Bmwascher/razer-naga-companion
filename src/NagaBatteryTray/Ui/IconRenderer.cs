@@ -53,8 +53,9 @@ public static class IconRenderer
             g.Clear(Color.Transparent);
 
             // Coin: a filled dark disc is the whole gauge body (digits + ring both sit on it).
-            // Inset ~1.5% so the antialiased circle edge doesn't clip against the canvas bounds.
-            float coinMargin = render * 0.015f;
+            // No inset — every pixel of a 16 px tray slot counts; the in-app downscale below
+            // keeps the edge clean without a guard margin.
+            float coinMargin = 0f;
             var coinRect = new RectangleF(coinMargin, coinMargin, render - 2f * coinMargin, render - 2f * coinMargin);
             using (var coinBrush = new SolidBrush(CoinFill))
                 g.FillEllipse(coinBrush, coinRect);
@@ -63,7 +64,7 @@ public static class IconRenderer
             // o'clock and is colored by battery level (green/amber/red, green while charging).
             // Inset by half its own width beyond the coin margin so the ring reads as the coin's
             // rim rather than floating separately from it.
-            float ringW = render * 0.15f;
+            float ringW = render * 0.12f;
             float ringInset = coinMargin + ringW / 2f;
             var ringRect = new RectangleF(ringInset, ringInset, render - 2f * ringInset, render - 2f * ringInset);
             using (var track = new Pen(Color.FromArgb(45, 255, 255, 255), ringW))
@@ -86,10 +87,10 @@ public static class IconRenderer
             var ink = path.GetBounds();
             if (ink.Width > 0 && ink.Height > 0)
             {
-                float pad = render * 0.02f;
+                float pad = render * 0.015f;
                 // 3-digit "100" gets a shorter target so its condensed width still clears the
                 // rim (the reference drops 56% -> 42% for 3 digits; same idea).
-                float targetHeight = render * (text.Length >= 3 ? 0.44f : 0.56f);
+                float targetHeight = render * (text.Length >= 3 ? 0.46f : 0.60f);
                 float maxWidth = render - 2f * ringW - 2f * pad;
 
                 float scaleX, scaleY;
