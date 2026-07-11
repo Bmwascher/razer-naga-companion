@@ -178,6 +178,47 @@ public sealed class RazerDevice : IRazerDevice
         }
     }
 
+    public async Task<bool> SetButtonAsync(byte buttonId, byte category, byte[] data, CancellationToken ct)
+    {
+        try
+        {
+            byte tid = await EnsureConnectedAsync(ct);
+            if (tid == 0) return false;
+            var reply = await ExchangeAsync(RazerProtocol.BuildSetButtonBuffer(
+                tid, RazerProtocol.ButtonProfileDirect, buttonId, 0x00, category, data), ct);
+            // SET ack: status-only (the spike-proven check); correctness is covered by read-back verify.
+            return reply is not null && reply[1] == 0x02;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CloseHandle();
+            LogOnce(ex);
+            return false;
+        }
+    }
+
+    public async Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct)
+    {
+        try
+        {
+            byte tid = await EnsureConnectedAsync(ct);
+            if (tid == 0) return null;
+            var reply = await ExchangeAsync(RazerProtocol.BuildGetButtonBuffer(
+                tid, RazerProtocol.ButtonProfileDirect, buttonId, 0x00), ct);
+            if (reply is null) return null;
+            if (RazerProtocol.ParseButtonReply(reply, RazerProtocol.ButtonProfileDirect, buttonId, 0x00,
+                    out byte category, out byte[] data) != ReplyResult.Success)
+                return null;
+            return new RawButtonAction(category, data);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CloseHandle();
+            LogOnce(ex);
+            return null;
+        }
+    }
+
     private void CloseHandle()
     {
         _handle?.Dispose();

@@ -18,6 +18,20 @@ public sealed class FakeRazerDevice : IRazerDevice
         return Task.FromResult(SetDpiResult);
     }
 
+    public sealed record ButtonWrite(byte ButtonId, byte Category, byte[] Data);
+    public List<ButtonWrite> ButtonWrites { get; } = new();
+    public bool SetButtonResult { get; set; } = true;
+    public Dictionary<byte, RawButtonAction> ButtonActions { get; } = new();
+
+    public Task<bool> SetButtonAsync(byte buttonId, byte category, byte[] data, CancellationToken ct)
+    {
+        ButtonWrites.Add(new ButtonWrite(buttonId, category, data));
+        return Task.FromResult(SetButtonResult);
+    }
+
+    public Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct) =>
+        Task.FromResult(ButtonActions.TryGetValue(buttonId, out var a) ? a : (RawButtonAction?)null);
+
     public int ResetCount { get; private set; }
     public void Reset() => ResetCount++;
 
