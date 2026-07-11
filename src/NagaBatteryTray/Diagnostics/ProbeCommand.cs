@@ -132,7 +132,9 @@ public static class ProbeCommand
         capture.Save();
         if (!RunAcceptanceProbe(s, capture)) { capture.Save(); return 1; }
         capture.Save();
-        Console.WriteLine("(Steps 3-5 land in the next tasks.)");
+        RunGridDiscovery(s, capture);
+        capture.Save();
+        Console.WriteLine("(Steps 4-5 land in the next task.)");
         return 0;
     }
 
@@ -234,6 +236,108 @@ public static class ProbeCommand
         }
         Console.WriteLine();
         return true;
+    }
+
+    private const int MaxScanWrites = 200;
+
+    // Marker alphabet: letters + F13..F24. Excludes the grid's factory emissions (1-9, 0, -, = -
+    // digits are meaningful scan output, not markers) and console-hostile chords (a Ctrl+C marker
+    // would SIGINT the probe mid-scan). 38 markers bound each batch.
+    private static readonly (ConsoleKey Key, byte Usage)[] Markers = BuildMarkers();
+
+    private static (ConsoleKey, byte)[] BuildMarkers()
+    {
+        var list = new List<(ConsoleKey, byte)>();
+        for (int i = 0; i < 26; i++) list.Add(((ConsoleKey)((int)ConsoleKey.A + i), (byte)(0x04 + i))); // A..Z
+        for (int i = 0; i < 12; i++) list.Add(((ConsoleKey)((int)ConsoleKey.F13 + i), (byte)(0x68 + i))); // F13..F24
+        return list.ToArray();
+    }
+
+    /// <summary>Hard-bounded candidate ids: the gap between the known Basilisk ids (0x06..0x33,
+    /// skipping wheel up/down 0x09/0x0a), then a fallback window 0x36..0x5f if the grid isn't found.</summary>
+    private static IEnumerable<byte> CandidateIds()
+    {
+        for (byte id = 0x06; id <= 0x33; id++)
+            if (id != 0x09 && id != 0x0a) yield return id;
+        for (byte id = 0x36; id <= 0x5f; id++) yield return id;
+    }
+
+    /// <summary>Spike step 3 — batched volatile scan. Each batch binds up to 38 candidates to distinct
+    /// markers; the user presses the 12 grid buttons in labeled order; markers decode position -> id.
+    /// Esc skips a silent button (its id isn't in the batch); a digit means "factory emission - not in
+    /// this batch". Between batches a replug clears the markers (or, when profile 0 turned out
+    /// persistent, each candidate is restored from its recorded previous action).</summary>
+    private static void RunGridDiscovery(MouseSession s, ButtonCaptureFile capture)
+    {
+        Console.WriteLine("[3/5] Grid discovery - batched volatile scan of candidate button ids");
+        var positionToId = new Dictionary<int, byte>();
+        int writes = 0;
+        var pending = CandidateIds().ToList();
+        bool volatile0 = capture.Profile0Volatile != false;
+
+        while (pending.Count > 0 && positionToId.Count < 12 && writes < MaxScanWrites)
+        {
+            var batch = new Dictionary<ConsoleKey, byte>(); // marker -> candidate id
+            int take = Math.Min(Markers.Length, pending.Count);
+            foreach (byte id in pending.Take(take).ToArray())
+            {
+                var (marker, usage) = Markers[batch.Count];
+                var get = Exchange(s.Handle!, RazerProtocol.BuildGetButtonBuffer(ButtonsTid, RazerProtocol.ButtonProfileDirect, id, 0x00));
+                if (get is not null && RazerProtocol.ParseButtonReply(get, RazerProtocol.ButtonProfileDirect, id, 0x00,
+                        out byte cat, out byte[] data) == ReplyResult.Success)
+                    capture.PreviousActions[id] = new CapturedAction(cat, data);
+
+                var set = Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, RazerProtocol.ButtonProfileDirect,
+                    id, 0x00, RazerProtocol.FnKeyboard, new byte[] { 0x00, usage }));
+                writes++;
+                if (set is null || set[1] != 0x02) { Console.WriteLine($"  id 0x{id:x2}: SET rejected (skipped)"); continue; }
+                batch[marker] = id;
+            }
+            pending.RemoveRange(0, take);
+
+            Console.WriteLine($"\n  Batch bound ({batch.Count} candidates, {writes} writes so far).");
+            Console.WriteLine("  For each grid button below: press it once. Esc = nothing typed (skip).");
+            for (int pos = 1; pos <= 12; pos++)
+            {
+                if (positionToId.ContainsKey(pos)) continue;
+                Console.Write($"    grid button {pos,2}: press it now... ");
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Escape) { Console.WriteLine("skipped"); continue; }
+                if (batch.TryGetValue(key.Key, out byte id))
+                {
+                    positionToId[pos] = id;
+                    Console.WriteLine($"marker {key.Key} -> id 0x{id:x2}");
+                }
+                else
+                    Console.WriteLine($"'{key.Key}' is not a marker (factory emission - id not in this batch)");
+            }
+
+            if (pending.Count > 0 && positionToId.Count < 12)
+            {
+                if (volatile0)
+                {
+                    Console.WriteLine("\n  Replug/power-cycle the mouse to clear this batch, then press Enter.");
+                    Console.ReadLine();
+                    if (!s.WaitForReconnect()) break;
+                }
+                else
+                {
+                    foreach (var (_, id) in batch)
+                        if (capture.PreviousActions.TryGetValue(id, out var prev))
+                        {
+                            Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, RazerProtocol.ButtonProfileDirect,
+                                id, 0x00, prev.Category, prev.Data));
+                            writes++;
+                        }
+                }
+            }
+        }
+
+        capture.PositionToId = positionToId;
+        Console.WriteLine($"\n  Discovery done: {positionToId.Count}/12 identified, {writes} writes.");
+        foreach (var (pos, id) in positionToId.OrderBy(kv => kv.Key))
+            Console.WriteLine($"    position {pos,2} -> 0x{id:x2}");
+        Console.WriteLine();
     }
 
     /// <summary>Opens the live mouse control collection: wired PID first, then wireless (a stale dongle
