@@ -67,7 +67,10 @@ public sealed class ButtonRowViewModel : INotifyPropertyChanged
     private void Stage(ButtonActionKind kind, byte modifiers, byte usage)
     {
         IsCapturing = false;
-        if (kind == _appliedKind && modifiers == _appliedModifiers && usage == _appliedUsage)
+        // Default always stages: the table can't prove what the slot actually holds, so an explicit
+        // Default click is honored as a factory rewrite — it doubles as the repair path.
+        if (kind != ButtonActionKind.Default
+            && kind == _appliedKind && modifiers == _appliedModifiers && usage == _appliedUsage)
             _pendingKind = null; // staged back to what's already applied — nothing to do
         else
         {
@@ -77,8 +80,7 @@ public sealed class ButtonRowViewModel : INotifyPropertyChanged
         Notify(nameof(CurrentText));
     }
 
-    /// <summary>The op Apply should perform for this row; null = nothing staged. Default staged on a
-    /// row that was never remapped is a no-op.</summary>
+    /// <summary>The op Apply should perform for this row; null = nothing staged.</summary>
     public ButtonOp? ToOp()
     {
         if (_pendingKind is not { } kind) return null;

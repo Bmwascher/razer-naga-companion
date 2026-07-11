@@ -45,12 +45,16 @@ public class ButtonRowViewModelTests
     }
 
     [Fact]
-    public void Default_on_an_untouched_row_produces_no_op()
+    public void Default_is_stageable_even_on_an_untouched_row()
     {
-        // an untouched button is never written (flash/§3.1 discipline)
+        // onboard model: the table can't prove what the slot holds (e.g. after a failed restore),
+        // so an explicit Default click always produces a factory rewrite — it's the repair path
         var row = new ButtonRowViewModel(4);
         row.StageDefault();
-        Assert.Null(row.ToOp());
+        var op = row.ToOp();
+        Assert.NotNull(op);
+        Assert.Equal(ButtonOpKind.RestoreDefault, op!.Value.OpKind);
+        Assert.Contains("pending", row.CurrentText);
     }
 
     [Fact]

@@ -147,8 +147,8 @@ public sealed class AppHost
 
     /// <summary>Returns the app-owned onboard slot, adopting one on first use: re-creates the recorded
     /// slot if the mouse lost it (e.g. factory reset), else creates the first FREE slot — a user's
-    /// existing slots are never taken or written. Null = mouse unreachable, create refused, or no
-    /// free slot.</summary>
+    /// existing slots are never taken or written. Every created slot is seeded with the factory map.
+    /// Null = mouse unreachable, create refused, or no free slot.</summary>
     private async Task<byte?> EnsureOnboardSlotAsync()
     {
         if (await Task.Run(() => _monitor.GetProfileListAsync()) is not { } list) return null;
@@ -157,7 +157,9 @@ public sealed class AppHost
         {
             byte r = (byte)recorded;
             if (Array.IndexOf(list.Slots, r) >= 0) return r;
-            return await Task.Run(() => _monitor.CreateProfileAsync(r)) ? r : null;
+            if (!await Task.Run(() => _monitor.CreateProfileAsync(r))) return null;
+            await SeedFactoryMapAsync(r);
+            return r;
         }
 
         byte free = 0;
@@ -165,15 +167,32 @@ public sealed class AppHost
             if (Array.IndexOf(list.Slots, n) < 0) { free = n; break; }
         if (free == 0) return null; // every slot holds someone else's profile — never overwrite
         if (!await Task.Run(() => _monitor.CreateProfileAsync(free))) return null;
+        await SeedFactoryMapAsync(free);
         _settings.Settings.OnboardSlot = free;
         _settings.Save();
         return free;
     }
 
+    /// <summary>A just-created slot starts EMPTY — its grid buttons read back as no action (this
+    /// surfaced in acceptance: "Default" restored nothingness). Seed the factory digits row once at
+    /// creation so the app's profile behaves like a factory mouse before any user binding lands.
+    /// Best-effort: a failed write here shows up later as that button doing nothing, and an explicit
+    /// per-row Default rewrites it.</summary>
+    private async Task SeedFactoryMapAsync(byte slot)
+    {
+        for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
+        {
+            var factory = NagaV2ProButtons.FactoryBindingForPosition(pos);
+            var (category, data) = factory.ToWire();
+            await Task.Run(() => _monitor.SetButtonAsync(slot, factory.ButtonId, category, data));
+        }
+    }
+
     /// <summary>Apply staged button ops into the app-owned ONBOARD slot (spec §5.3): adopt the slot on
-    /// first use, snapshot a button's factory action at its first-ever remap, write the binding,
-    /// read-back verify, persist. The mouse itself holds the bindings — they survive power-cycles with
-    /// no software involvement. Every HID call runs off the UI thread via the monitor's shared lock.</summary>
+    /// first use, write the binding, read-back verify, persist. "Default" writes the baked-in factory
+    /// action (a fresh slot reads back empty, so there is no snapshot to restore). The mouse itself
+    /// holds the bindings — they survive power-cycles with no software involvement. Every HID call
+    /// runs off the UI thread via the monitor's shared lock.</summary>
     private async Task ApplyButtonsAsync(SettingsWindow win, IReadOnlyList<ButtonOp> ops)
     {
         Dispatch(() => win.SetButtonsStatus("Applying…"));
@@ -191,58 +210,28 @@ public sealed class AppHost
         foreach (var op in ops)
         {
             var row = win.ButtonRow(op.Position);
-            byte id = NagaV2ProButtons.IdForPosition(op.Position);
-            bool ok;
+            var binding = op.OpKind == ButtonOpKind.RestoreDefault
+                ? NagaV2ProButtons.FactoryBindingForPosition(op.Position)
+                : new ButtonBinding(NagaV2ProButtons.IdForPosition(op.Position), op.Kind, op.Modifiers, op.HidUsage);
+            var (category, data) = binding.ToWire();
 
-            if (op.OpKind == ButtonOpKind.RestoreDefault)
+            bool ok = await Task.Run(() => _monitor.SetButtonAsync(slot, binding.ButtonId, category, data));
+            if (ok)
             {
-                table.TryGetValue(op.Position, out var entry);
-                bool stockUnknown = entry is not null && !entry.HasStock;
-                ok = entry is null || !entry.HasStock
-                     || await Task.Run(() => _monitor.SetButtonAsync(slot, id, entry.StockCategory, entry.StockData));
-                if (ok)
-                {
-                    table.Remove(op.Position);
-                    Dispatch(() =>
-                    {
-                        row.MarkApplied();
-                        if (stockUnknown) row.Status = "Stock unknown — button keeps its last binding";
-                    });
-                }
-                else Dispatch(() => row.MarkFailed("Restore failed — retry"));
+                var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, binding.ButtonId));
+                ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
             }
-            else
+            if (ok)
             {
-                if (!table.TryGetValue(op.Position, out var entry))
+                if (op.OpKind == ButtonOpKind.RestoreDefault) table.Remove(op.Position);
+                else table[op.Position] = new ButtonBindingSetting
                 {
-                    entry = new ButtonBindingSetting();
-                    // first-ever remap of this button: the app slot still holds its factory action —
-                    // snapshot it (from the slot, not the active profile) for instant Default later
-                    var stock = await Task.Run(() => _monitor.GetButtonAsync(slot, id));
-                    if (stock is { } s)
-                    {
-                        entry.StockCategory = s.Category;
-                        entry.StockData = s.Data;
-                        entry.HasStock = true;
-                    }
-                }
-                var binding = new ButtonBinding(id, op.Kind, op.Modifiers, op.HidUsage);
-                var (category, data) = binding.ToWire();
-                ok = await Task.Run(() => _monitor.SetButtonAsync(slot, id, category, data));
-                if (ok)
-                {
-                    var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, id));
-                    ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
-                }
-                if (ok)
-                {
-                    entry.Kind = op.Kind; entry.Modifiers = op.Modifiers; entry.HidUsage = op.HidUsage;
-                    table[op.Position] = entry;
-                    Dispatch(row.MarkApplied);
-                }
-                else Dispatch(() => row.MarkFailed("Not applied — wiggle the mouse and retry"));
+                    Kind = op.Kind, Modifiers = op.Modifiers, HidUsage = op.HidUsage,
+                };
+                Dispatch(row.MarkApplied);
+                okCount++;
             }
-            if (ok) okCount++;
+            else Dispatch(() => row.MarkFailed("Not applied — wiggle the mouse and retry"));
         }
 
         _settings.Save();

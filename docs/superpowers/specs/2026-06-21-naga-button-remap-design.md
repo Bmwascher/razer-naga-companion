@@ -275,8 +275,15 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
   button I/O.
 - **Onboard app-owned-slot model (as shipped — final, chosen by the user after the slot test passed):**
   on the first Apply the app **adopts a slot**: it queries the profile list, picks the first **free**
-  slot number (a user's existing slots are **never** taken or written), creates it, and records the
-  number in `settings.json` (`OnboardSlot`). Every binding write targets that slot; the **firmware**
+  slot number (a user's existing slots are **never** taken or written), creates it, records the
+  number in `settings.json` (`OnboardSlot`), and **seeds it with the factory map** — a freshly created
+  slot reads back **empty** (hardware-observed 2026-07-11 during acceptance: its buttons hold no
+  action, so a stock-snapshot "Default" restored nothingness and the grid played dead), so the app
+  writes the digits row (`1..9 0 - =`, keyboard usages `0x1e..0x27, 0x2d, 0x2e`) once at creation to
+  make the slot behave like a factory mouse. "**Default**" likewise writes the **baked-in factory
+  action** for that position — deterministic, no snapshot — and an explicit Default click is always
+  honored even on a never-remapped row (it doubles as the repair path for a slot in an unknown state).
+  Every binding write targets that slot; the **firmware**
   then holds the bindings through power-cycles, replugs, and reboots with **no software involvement** —
   Synapse parity, and instant (the re-apply model left the mouse on stock bindings for up to a poll
   interval after a silent wireless power-cycle). If the mouse later loses the recorded slot (factory
@@ -291,8 +298,9 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
 
 - `ButtonBinding` (a small value type: `buttonId`, `ActionKind { Default, Disabled, Key }`, `modifiers`,
   `hidUsage`) and a sparse `RemapTable` keyed by grid position (only non-Default buttons are stored).
-  Each stored entry also carries a **stock-action snapshot** (`category`+`data`, read from the direct
-  profile **before that button's first-ever write**) so "Default" can restore instantly and offline.
+  "Default" needs no stored state: it writes the position's **baked-in factory action**
+  (`NagaV2ProButtons.FactoryBindingForPosition`) — the original stock-snapshot design was dropped when
+  acceptance showed a fresh slot reads back empty (snapshotting it captured nothingness).
   Persisted in `settings.json` (Roaming), corrupt/missing → defaults, exactly as today. The discovered
   `NagaV2ProButtons` ID table is a baked-in constant (`0x40..0x4b`, §6), so the stored table is
   position-indexed and firmware-id-stable. `AppSettings.OnboardSlot` (nullable) records the adopted
@@ -358,7 +366,9 @@ driver) from openrazer's `razerchromacommon.c`.
 set was rejected with a non-`0x02` status (76 volatile writes total, zero onboard writes), so a stray write
 cannot bind a nonexistent button. Besides the grid, ids **`0x0e`** and **`0x50`..`0x55`** also accepted
 writes but were not emitted by any grid press — other physical controls or reserved slots, left
-unidentified for now (Stage 2 only writes the 12 known grid ids).
+unidentified for now (Stage 2 only writes the 12 known grid ids). From the acceptance run: a **freshly
+created profile slot is EMPTY** — its buttons read back as no action and do nothing; new slots must be
+seeded with the factory map (§5.3).
 
 **Result: PASS** — Stage 2 ships the **onboard app-owned-slot** persistence model (§5.3): bindings are
 written once into a slot the app creates and owns; the firmware persists them itself. (The re-apply
@@ -389,11 +399,11 @@ by contrast, is one-time onboard housekeeping and is an acceptable preamble.
 - **Mouse lost the app's slot** (factory reset): Apply re-creates the recorded slot number; a user's
   slots are never candidates. Unreadable profile list or all slots foreign-occupied → Apply fails
   visibly, never a blind write.
-- **Unknown/again-default button:** "Default" rewrites the button's **stock action snapshotted at its
-  first-ever remap** (read from the app's slot before our first write; persisted beside the binding);
-  if that snapshot read failed (rare device hiccup), Default drops the table entry and says honestly
-  that the button keeps its last binding in the slot. A never-touched button is never written
-  (flash-wear/§3.1 discipline).
+- **Unknown/again-default button:** "Default" writes the position's **baked-in factory action** (the
+  digits row) and drops the table entry — deterministic, works offline-persisted, and an explicit
+  Default click is honored even on a never-remapped row (repair path). A button the user never stages
+  is never written on Apply; the only non-staged writes are the **one-time factory seeding at slot
+  creation** (12 deliberate writes into the app's own fresh slot — flash-wear immaterial).
 - **Mouse left in driver mode** (past Synapse install): detected and reset to normal in the spike (§5.2
   step 1); Stage 2 assumes normal mode — it never sets driver mode.
 - **Synapse running concurrently:** may override at runtime; documented (§4). We do not fight it.

@@ -44,4 +44,27 @@ public class ButtonBindingTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => NagaV2ProButtons.IdForPosition(position));
     }
+
+    [Theory]
+    [InlineData(1, 0x1e)]   // "1"
+    [InlineData(9, 0x26)]   // "9"
+    [InlineData(10, 0x27)]  // "0"
+    [InlineData(11, 0x2d)]  // "-"
+    [InlineData(12, 0x2e)]  // "="
+    public void FactoryBindingForPosition_is_the_unmodified_digits_row(int position, byte usage)
+    {
+        var b = NagaV2ProButtons.FactoryBindingForPosition(position);
+        Assert.Equal(NagaV2ProButtons.IdForPosition(position), b.ButtonId);
+        var (category, data) = b.ToWire();
+        Assert.Equal(RazerProtocol.FnKeyboard, category);
+        Assert.Equal(new byte[] { 0x00, usage }, data);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(13)]
+    public void FactoryBindingForPosition_rejects_out_of_range(int position)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => NagaV2ProButtons.FactoryBindingForPosition(position));
+    }
 }

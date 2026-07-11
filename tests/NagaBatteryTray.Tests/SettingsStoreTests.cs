@@ -70,9 +70,6 @@ public class SettingsStoreTests
             Kind = NagaBatteryTray.Hid.ButtonActionKind.Key,
             Modifiers = 0x01,
             HidUsage = 0x06, // Ctrl+C
-            StockCategory = 0x02,
-            StockData = new byte[] { 0x00, 0x3a }, // stock was F1
-            HasStock = true,
         };
         store.Settings.ButtonBindings[5] = new ButtonBindingSetting
         {
@@ -86,8 +83,6 @@ public class SettingsStoreTests
         Assert.Equal(NagaBatteryTray.Hid.ButtonActionKind.Key, b1.Kind);
         Assert.Equal(0x01, b1.Modifiers);
         Assert.Equal(0x06, b1.HidUsage);
-        Assert.True(b1.HasStock);
-        Assert.Equal(new byte[] { 0x00, 0x3a }, b1.StockData);
         Assert.Equal(NagaBatteryTray.Hid.ButtonActionKind.Disabled, reloaded.Settings.ButtonBindings[5].Kind);
         Assert.Contains("\"Kind\": \"Key\"", File.ReadAllText(path)); // enum stored as a readable string
     }

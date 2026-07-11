@@ -34,4 +34,14 @@ public static class NagaV2ProButtons
         position is >= 1 and <= Count
             ? (byte)(0x3f + position)
             : throw new ArgumentOutOfRangeException(nameof(position));
+
+    // The grid's factory emissions: the keyboard digits row 1..9, 0, -, = (HUT 1.5 usages).
+    private static readonly byte[] FactoryUsages =
+        { 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2d, 0x2e };
+
+    /// <summary>The factory action for a grid position — what "Default" writes. A freshly created
+    /// onboard slot reads back EMPTY (hardware-observed 2026-07-11), so restoring a snapshot taken
+    /// from it restores nothingness; the factory map is the only true default.</summary>
+    public static ButtonBinding FactoryBindingForPosition(int position) =>
+        new(IdForPosition(position), ButtonActionKind.Key, 0, FactoryUsages[position - 1]);
 }
