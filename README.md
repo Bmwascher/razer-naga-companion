@@ -97,8 +97,10 @@ launches it. Re-run it any time to update after pulling new code.
 
 ### Run at login
 
-`install.ps1` wires this up automatically (a per-user `HKCU\…\Run` entry). You can also
-toggle it from the tray icon's right-click menu → **Run at startup**.
+`install.ps1` wires this up automatically (a per-user logon **scheduled task** with a
+1-minute delay — not the `HKCU\…\Run` key, which fires too early in boot for Smart App
+Control to clear an unsigned binary). You can also toggle it from the tray icon's
+right-click menu → **Run at startup**.
 
 ### 🔄 Update
 

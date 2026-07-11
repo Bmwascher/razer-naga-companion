@@ -31,6 +31,14 @@ internal static class Program
             return Diagnostics.ProbeCommand.RunDock();
         }
 
+        // Headless run-at-login registration (used by install.ps1). Registers a
+        // delayed logon scheduled task pointing at this exe, then exits.
+        if (args.Length > 0 && args[0] == "--enable-startup")
+        {
+            try { new Startup.StartupRegistration().Enable(); return 0; }
+            catch { return 1; }
+        }
+
         using var mutex = new Mutex(initiallyOwned: true, MutexName, out bool createdNew);
         if (!createdNew) return 0; // already running
 

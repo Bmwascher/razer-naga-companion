@@ -9,8 +9,14 @@
     2. Stops any running instance (so the exe isn't locked).
     3. Copies the runtime files (everything except the .pdb) to
        %LOCALAPPDATA%\Programs\NagaBatteryTray.
-    4. Points the HKCU "Run" key at the installed exe (run at login).
+    4. Registers a delayed logon scheduled task (run at login) and clears any
+       legacy HKCU "Run" entry.
     5. Launches the installed exe.
+
+  Run-at-login uses a Scheduled Task with a 1-minute logon delay, NOT the Run key:
+  Smart App Control vetoes the unsigned exe when the Run key fires ~52 s into boot
+  (the ISG cloud-reputation lookup isn't ready yet). The delayed task launches once
+  the machine is online and the hash is judged reputable. See StartupRegistration.cs.
 
   No admin rights required - everything is per-user.
 
@@ -49,9 +55,14 @@ Write-Host "Installing to $installDir ..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Get-ChildItem $publish | Where-Object { $_.Extension -ne '.pdb' } | Copy-Item -Destination $installDir -Force
 
-Write-Host "Registering run-at-login..." -ForegroundColor Cyan
-Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
-  -Name 'NagaBatteryTray' -Value "`"$installExe`""
+Write-Host "Registering run-at-login (delayed logon scheduled task)..." -ForegroundColor Cyan
+# The exe self-registers the task (single source of truth: StartupRegistration.cs).
+# -Wait works for the windowless GUI exe and surfaces the exit code.
+$reg = Start-Process -FilePath $installExe -ArgumentList '--enable-startup' -Wait -PassThru
+if ($reg.ExitCode -ne 0) { throw "Run-at-login registration failed (exit $($reg.ExitCode))." }
+# Remove the legacy Run-key entry so it doesn't keep tripping SAC at every boot.
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
+  -Name 'NagaBatteryTray' -ErrorAction SilentlyContinue
 
 Write-Host "Launching..." -ForegroundColor Cyan
 Start-Process $installExe

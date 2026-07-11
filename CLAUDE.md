@@ -44,11 +44,18 @@ the exe (single-file leaves them out of the bundle; copying the exe alone → Dl
 
 **Smart App Control (this machine):** SAC enforcement can block *loading* a freshly-built unsigned binary
 by hash (`0x800711C7`) — building still works (the signed SDK compiles), but launching a fresh Release exe
-(or loading a fresh Debug DLL) may be vetoed, and run-at-login can be blocked until the hash earns cloud
-reputation. For dev runs, launch the Debug build via the signed host (`& $dotnet "…\bin\Debug\…\NagaBatteryTray.dll"`);
+(or loading a fresh Debug DLL) may be vetoed until the hash earns cloud reputation. For dev runs, launch the
+Debug build via the signed host (`& $dotnet "…\bin\Debug\…\NagaBatteryTray.dll"`);
 .NET builds are deterministic (same source → same hash → same verdict), so add `-p:Deterministic=false` to
 mint a new hash and retry until one clears. The installed Release exe never shows a console; `dotnet …dll`
 does, so launch it `-WindowStyle Hidden`.
+- **Run-at-login was a SAC casualty (fixed 2026-06-25):** the old HKCU `Run` key fired ~52 s into boot, before
+  the network was up, so SAC's ISG cloud-reputation lookup failed *closed* and vetoed the load (CodeIntegrity
+  events 3033/3077) — even though the *same* hash launches fine once online. It is NOT a permanent veto of a
+  reputable hash, just a boot-time race. Fix: run-at-login is now a logon scheduled task with a `PT1M` delay
+  (see `StartupRegistration.cs`), so it launches after the machine is online. Keep this — don't revert to the
+  Run key. A rebuilt exe still gets a new (unproven) hash, so prefer keeping the known-good installed exe over
+  republishing just to re-register startup.
 
 ## Architecture
 - `Hid/RazerProtocol.cs` — pure 90-byte report build/parse + XOR CRC (over bytes `[2..87]`).
@@ -92,7 +99,9 @@ does, so launch it `-WindowStyle Hidden`.
   `DBT_DEVNODES_CHANGED` → debounced refresh); `SettingsWindow`/`SettingsViewModel`, `Notifications`
   (low-battery toast), `DoubleIntConverter`. `AppHost.cs` lifecycle (owns the monitor, tray, and
   device-change hook) / `Program.cs` single-instance (named Mutex); run-at-login is
-  `Startup/StartupRegistration.cs`; `Diagnostics/ProbeCommand.cs` backs `--probe`/`--probe-dpi`/`--probe-dock`.
+  `Startup/StartupRegistration.cs` (a **delayed-logon scheduled task** named `NagaBatteryTray`, registered
+  via `schtasks /XML`; the exe self-registers through the `--enable-startup` switch that `install.ps1` calls);
+  `Diagnostics/ProbeCommand.cs` backs `--probe`/`--probe-dpi`/`--probe-dock`.
 - Design specs + implementation plans live in `docs/superpowers/`.
 
 ## References / prior art (Razer HID protocol)

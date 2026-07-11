@@ -13,7 +13,10 @@ Write-Host "Stopping app..." -ForegroundColor Cyan
 Get-Process -Name 'NagaBatteryTray' -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 
-Write-Host "Removing run-at-login entry..." -ForegroundColor Cyan
+Write-Host "Removing run-at-login..." -ForegroundColor Cyan
+# Delete the logon scheduled task (matches the name in StartupRegistration.cs).
+schtasks /Delete /TN 'NagaBatteryTray' /F 2>$null | Out-Null
+# Also clear any legacy Run-key entry from older installs.
 Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
   -Name 'NagaBatteryTray' -ErrorAction SilentlyContinue
 
