@@ -89,6 +89,17 @@ public static class IconRenderer
                 using var m = new Matrix(scaleX, 0f, 0f, scaleY, offX, offY);
                 path.Transform(m);
 
+                // Halo knockout: erase a transparent clearance band around the digit ink so the ring
+                // passes visibly BEHIND the digits with a clean gap, instead of antialiasing smearing
+                // the arc into the digit strokes at small tray sizes. Round joins/caps avoid spike
+                // artifacts on the digits' sharp corners.
+                float haloWidth = ringW * 2f;
+                g.CompositingMode = CompositingMode.SourceCopy;
+                using (var knockout = new Pen(Color.Transparent, haloWidth)
+                       { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    g.DrawPath(knockout, path);
+                g.CompositingMode = CompositingMode.SourceOver;
+
                 using var brush = new SolidBrush(color);
                 g.FillPath(brush, path);
             }
