@@ -57,6 +57,7 @@ public sealed class AppHost
         _deviceWatcher.DeviceChanged += OnDeviceChanged;
 
         _monitor.Start();
+        _ = Task.Run(ReapplyBindingsAsync); // re-assert remaps once at startup (no-op when table empty)
     }
 
     private void Dispatch(Action action) => _app.Dispatcher.Invoke(action);
@@ -77,6 +78,7 @@ public sealed class AppHost
             try { await Task.Delay(DeviceSettleMs, ct); }
             catch (OperationCanceledException) { return; }
             await _monitor.RefreshNowAsync();
+            await ReapplyBindingsAsync(); // volatile remaps clear on replug — re-assert them
         }, ct);
     }
 
@@ -104,6 +106,7 @@ public sealed class AppHost
         win.SaveRequested += () => { win.ApplyTo(_settings.Settings); _settings.Save(); };
         win.StartupToggled += enable => { SetStartup(enable); _tray.SetStartupChecked(enable); };
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(win, dpi);
+        win.ApplyButtonsRequested += ops => _ = ApplyButtonsAsync(win, ops);
         win.Closed += (_, _) => _settingsWindow = null;
         win.SetDevicePresent(_monitor.State.Status == DeviceStatus.Online);
         _settingsWindow = win;
@@ -136,6 +139,88 @@ public sealed class AppHost
                 win.SetDpiStatus("Couldn't confirm — wiggle the mouse and retry");
             }
         });
+    }
+
+    /// <summary>Re-assert configured remaps (re-apply model). Rides startup + the debounced
+    /// device-change refresh — never a new timer; an empty table makes zero device calls.</summary>
+    private async Task ReapplyBindingsAsync()
+    {
+        var table = _settings.Settings.ButtonBindings;
+        if (table.Count == 0) return;
+        var bindings = new List<ButtonBinding>(table.Count);
+        foreach (var (pos, b) in table)
+            bindings.Add(new ButtonBinding(NagaV2ProButtons.IdForPosition(pos), b.Kind, b.Modifiers, b.HidUsage));
+        await _monitor.ApplyRemapsAsync(bindings);
+    }
+
+    /// <summary>Apply staged button ops: snapshot the stock action at a button's first-ever remap,
+    /// write the binding (volatile profile), read-back verify, persist. Default restores the snapshot
+    /// and drops the entry. Every HID call runs off the UI thread via the monitor's shared lock.</summary>
+    private async Task ApplyButtonsAsync(SettingsWindow win, IReadOnlyList<ButtonOp> ops)
+    {
+        Dispatch(() => win.SetButtonsStatus("Applying…"));
+        var table = _settings.Settings.ButtonBindings;
+        int okCount = 0;
+
+        foreach (var op in ops)
+        {
+            var row = win.ButtonRow(op.Position);
+            byte id = NagaV2ProButtons.IdForPosition(op.Position);
+            bool ok;
+
+            if (op.OpKind == ButtonOpKind.RestoreDefault)
+            {
+                table.TryGetValue(op.Position, out var entry);
+                bool deferred = entry is not null && !entry.HasStock;
+                ok = entry is null || !entry.HasStock
+                     || await Task.Run(() => _monitor.SetButtonAsync(id, entry.StockCategory, entry.StockData));
+                if (ok)
+                {
+                    table.Remove(op.Position);
+                    Dispatch(() =>
+                    {
+                        row.MarkApplied();
+                        if (deferred) row.Status = "Default after next reconnect";
+                    });
+                }
+                else Dispatch(() => row.MarkFailed("Restore failed — retry"));
+            }
+            else
+            {
+                if (!table.TryGetValue(op.Position, out var entry))
+                {
+                    entry = new ButtonBindingSetting();
+                    // first-ever remap of this button: it has never been written, so the direct-profile
+                    // read returns its stock action — snapshot it for instant Default later
+                    var stock = await Task.Run(() => _monitor.GetButtonAsync(id));
+                    if (stock is { } s)
+                    {
+                        entry.StockCategory = s.Category;
+                        entry.StockData = s.Data;
+                        entry.HasStock = true;
+                    }
+                }
+                var binding = new ButtonBinding(id, op.Kind, op.Modifiers, op.HidUsage);
+                var (category, data) = binding.ToWire();
+                ok = await Task.Run(() => _monitor.SetButtonAsync(id, category, data));
+                if (ok)
+                {
+                    var readBack = await Task.Run(() => _monitor.GetButtonAsync(id));
+                    ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
+                }
+                if (ok)
+                {
+                    entry.Kind = op.Kind; entry.Modifiers = op.Modifiers; entry.HidUsage = op.HidUsage;
+                    table[op.Position] = entry;
+                    Dispatch(row.MarkApplied);
+                }
+                else Dispatch(() => row.MarkFailed("Not applied — wiggle the mouse and retry"));
+            }
+            if (ok) okCount++;
+        }
+
+        _settings.Save();
+        Dispatch(() => win.SetButtonsStatus(okCount == ops.Count ? "Applied" : $"{okCount}/{ops.Count} applied"));
     }
 
     private void SetStartup(bool enable)

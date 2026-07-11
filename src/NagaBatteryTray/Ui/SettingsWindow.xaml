@@ -70,6 +70,49 @@
           </StackPanel>
         </ui:CardControl>
 
+        <!-- Buttons: thumb-grid remap -->
+        <ui:CardExpander Margin="0,0,0,8" Icon="{ui:SymbolIcon AppsList24}">
+          <ui:CardExpander.Header>
+            <StackPanel>
+              <TextBlock Text="Buttons" FontWeight="Medium"/>
+              <TextBlock Text="Remap the 12-button thumb grid" Opacity="0.7" FontSize="12"/>
+            </StackPanel>
+          </ui:CardExpander.Header>
+          <StackPanel Margin="0,4,0,0">
+            <TextBlock Text="Rebind captures the next key you press (hold modifiers with it). Bindings live on the mouse and are re-applied when it reconnects. Synapse must not be running."
+                       Opacity="0.7" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <ItemsControl ItemsSource="{Binding Buttons}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,2">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="70"/>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Label}" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0">
+                      <TextBlock Text="{Binding CurrentText}" FontSize="12"/>
+                      <TextBlock Text="{Binding Status}" FontSize="11" Opacity="0.7"/>
+                    </StackPanel>
+                    <ui:Button Grid.Column="2" Content="Rebind" Margin="4,0,0,0" FontSize="12" Padding="8,4" Click="OnRebindButton"/>
+                    <ui:Button Grid.Column="3" Content="Disable" Margin="4,0,0,0" FontSize="12" Padding="8,4" Click="OnDisableButton"/>
+                    <ui:Button Grid.Column="4" Content="Default" Margin="4,0,0,0" FontSize="12" Padding="8,4" Click="OnDefaultButton"/>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+              <ui:Button Content="Apply buttons" Appearance="Primary" Click="OnApplyButtons"
+                         IsEnabled="{Binding DevicePresent}"/>
+              <TextBlock Text="{Binding ButtonsStatus}" VerticalAlignment="Center" Margin="10,0,0,0"
+                         Opacity="0.8" FontSize="12"/>
+            </StackPanel>
+          </StackPanel>
+        </ui:CardExpander>
+
         <!-- Advanced: polling cadence -->
         <ui:CardExpander Margin="0,0,0,8" Icon="{ui:SymbolIcon Settings24}">
           <ui:CardExpander.Header>
