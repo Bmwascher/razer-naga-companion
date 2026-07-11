@@ -95,6 +95,7 @@ public sealed class AppHost
     private PopupWindow CreatePopup()
     {
         var p = new PopupWindow();
+        p.SetProfile(_settings.Settings.OnboardSlot);
         p.RefreshRequested += () => _ = _monitor.RefreshNowAsync();
         p.SettingsRequested += OpenDashboard;
         _monitor.StateChanged += (_, state) => p.ApplyState(state); // live-update the popup while it's open
@@ -225,6 +226,7 @@ public sealed class AppHost
         else _settings.Settings.ButtonBindings[position] = new ButtonBindingSetting
              { Kind = kind, Modifiers = modifiers, HidUsage = usage };
         _settings.Save();
+        Dispatch(() => _popup?.SetProfile(_settings.Settings.OnboardSlot));
         return true;
     }
 

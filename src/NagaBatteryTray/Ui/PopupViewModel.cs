@@ -15,6 +15,8 @@ public sealed class PopupViewModel : INotifyPropertyChanged
     private double _barFraction;
     private Media.Brush _accent = Media.Brushes.Gray;
     private bool _charging;
+    private string _profileText = "";
+    private bool _hasProfile;
 
     public string PercentText { get => _percentText; private set => Set(ref _percentText, value); }
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -26,6 +28,14 @@ public sealed class PopupViewModel : INotifyPropertyChanged
     public double BarPixelWidth => BarFraction * BarTrackWidth;
     public Media.Brush Accent { get => _accent; private set => Set(ref _accent, value); }
     public bool Charging { get => _charging; private set => Set(ref _charging, value); }
+    public string ProfileText { get => _profileText; private set => Set(ref _profileText, value); }
+    public bool HasProfile { get => _hasProfile; private set => Set(ref _hasProfile, value); }
+
+    public void SetProfile(int? slot)
+    {
+        HasProfile = slot is not null;
+        ProfileText = slot is { } n ? $"Profile {n} · {Dashboard.DashboardViewModel.SlotColour(n)}" : "";
+    }
 
     public void Apply(DeviceState s)
     {

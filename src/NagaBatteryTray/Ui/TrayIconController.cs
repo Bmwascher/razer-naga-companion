@@ -27,7 +27,7 @@ public sealed class TrayIconController : IDisposable
         _startupItem = new ToolStripMenuItem("Run at startup") { CheckOnClick = true };
         _startupItem.CheckedChanged += OnStartupChanged;
         menu.Items.Add(_startupItem);
-        menu.Items.Add("Settings", null, (_, _) => SettingsRequested?.Invoke());
+        menu.Items.Add("Dashboard", null, (_, _) => SettingsRequested?.Invoke());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => QuitRequested?.Invoke());
 
