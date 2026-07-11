@@ -11,7 +11,8 @@
               MouseEnter="OnChipEnter" MouseLeave="OnChipLeave" Cursor="Hand"
               Focusable="True" KeyboardNavigation.IsTabStop="True"
               AutomationProperties.Name="{Binding Label, StringFormat=Button {0}}"
-              MouseLeftButtonUp="OnChipClick" KeyUp="OnChipKeyUp">
+              MouseLeftButtonUp="OnChipClick" KeyUp="OnChipKeyUp"
+              IsEnabled="{Binding DataContext.DeviceOnline, RelativeSource={RelativeSource AncestorType=UserControl}}">
         <Border.Style>
           <Style TargetType="Border" BasedOn="{StaticResource ChipBorder}">
             <Style.Triggers>
@@ -70,6 +71,15 @@
 
     <!-- stage: silhouette + grid keys -->
     <Viewbox Grid.Column="1" Stretch="Uniform" MaxHeight="440">
+      <Viewbox.Style>
+        <Style TargetType="Viewbox">
+          <Style.Triggers>
+            <DataTrigger Binding="{Binding DeviceOnline}" Value="False">
+              <Setter Property="Opacity" Value="0.45"/>
+            </DataTrigger>
+          </Style.Triggers>
+        </Style>
+      </Viewbox.Style>
       <Canvas Width="240" Height="360">
         <!-- side-view body: simple bezier silhouette, thumb side facing viewer -->
         <Path Canvas.Left="30" Canvas.Top="10" StrokeThickness="1.5"
@@ -93,7 +103,8 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate>
               <Border Width="26" Height="26" Margin="3" CornerRadius="5"
-                      MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave" MouseLeftButtonUp="OnChipClick">
+                      MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave" MouseLeftButtonUp="OnChipClick"
+                      IsEnabled="{Binding DataContext.DeviceOnline, RelativeSource={RelativeSource AncestorType=UserControl}}">
                 <Border.Style>
                   <Style TargetType="Border">
                     <Setter Property="Background" Value="{DynamicResource App.ChipFill}"/>
@@ -115,6 +126,20 @@
         </ItemsControl>
       </Canvas>
     </Viewbox>
+
+    <TextBlock Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
+               Text="mouse offline — reconnect to edit">
+      <TextBlock.Style>
+        <Style TargetType="TextBlock" BasedOn="{StaticResource SubtleText}">
+          <Setter Property="Visibility" Value="Collapsed"/>
+          <Style.Triggers>
+            <DataTrigger Binding="{Binding DeviceOnline}" Value="False">
+              <Setter Property="Visibility" Value="Visible"/>
+            </DataTrigger>
+          </Style.Triggers>
+        </Style>
+      </TextBlock.Style>
+    </TextBlock>
 
     <ItemsControl Grid.Column="2" x:Name="RightChips" VerticalAlignment="Center"
                   ItemTemplate="{StaticResource ChipTemplate}"/>
