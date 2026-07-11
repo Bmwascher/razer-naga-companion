@@ -1,9 +1,12 @@
 # Phase B: Button Remapping (Naga V2 Pro thumb grid) — Design
 
 **Date:** 2026-06-21
-**Status:** **DRAFT — spike-gated.** Stage 1 (`--probe-buttons` diagnostic) is built and run on hardware
-first; Stage 2 (the resident remap feature) is built **only** on what the spike confirms. A spike FAIL is
-a documented close-out (Phase C precedent), never a constraint-violating workaround.
+**Status:** **SPIKE RUN 2026-07-11 — PASS.** Stage 1 confirmed the remap command on hardware (§6): the
+12 grid ids are `0x40..0x4b` in physical order, volatile profile-0 writes apply instantly and clear on
+replug, **no preamble is required**, and input feel was unaffected throughout. The onboard-slot test was
+**declined by choice** (zero risk to the user's existing profiles) → **Stage 2 ships the re-apply
+persistence model.** (A spike FAIL would have been a documented close-out per the Phase C precedent,
+never a constraint-violating workaround.)
 **Builds on:** Phase 2-A (Settings + active DPI). Its §3.1 non-functional invariants
 (`2026-06-20-naga-settings-dpi-design.md`) bind this phase **unchanged**.
 
@@ -52,9 +55,11 @@ must come from a hardware **feasibility spike** that gates everything downstream
 - Per-button **RGB/lighting** (separate command class `0x03`; not stored onboard on this device).
 
 **Decided by the spike (not guessed here):**
-- The concrete **12-entry thumb-grid button-ID table** (`NagaV2ProButtons`).
+- The concrete **12-entry thumb-grid button-ID table** (`NagaV2ProButtons`). **Decided 2026-07-11:
+  `0x40`..`0x4b`, contiguous, physical order 1→12 (§6).**
 - The **persistence model** Stage 2 ships: *volatile direct + re-apply on connect* vs. *onboard slot,
-  written once*. The spike tests both; §6 records the result and §5.3/§5.4 branch on it.
+  written once*. **Decided 2026-07-11: the re-apply model** — the onboard-slot test was declined (zero
+  risk to existing profiles; §6), and re-apply needs no onboard writes at all.
 
 ## 3. Success criteria
 
@@ -314,15 +319,24 @@ driver) from openrazer's `razerchromacommon.c`.
 
 **Gating spike — Stage 1 results (must be recorded before Stage 2 is trusted):**
 
-| Question | Result (to fill from hardware) |
+| Question | Result (hardware run **2026-07-11**, wireless PID `0x00a8`, tid `0x1f`) |
 | --- | --- |
-| Device mode at spike start (`0x00/0x84`: `0x00` normal / `0x03` driver) | _TBD_ |
-| Does the V2 Pro accept `0x020c` (known-ID acceptance probe)? | _TBD_ |
-| The 12 thumb-grid button IDs (physical position → id) + recorded previous actions | _TBD_ |
-| Does a **volatile** (profile 0) write apply instantly? | _TBD_ |
-| Onboard profile list (`0x05/0x81`); was profile creation (`0x05/0x02`) required? | _TBD_ |
-| Does a **scratch onboard slot** write **persist** across unplug/replug with **no Razer software**? | _TBD_ |
-| Required preamble/handshake before a write is accepted? **and does it alter normal input** (see gate) | _TBD_ |
+| Device mode at spike start (`0x00/0x84`: `0x00` normal / `0x03` driver) | `0x00` normal |
+| Does the V2 Pro accept `0x020c` (known-ID acceptance probe)? | **Yes** — SET status `0x02`, read-back echoed `02 / 00 68`, F13 emitted on wheel-click. The get-before returned the true factory action (`category 0x01` mouse, `data 03` middle-click), so GET reads real data |
+| The 12 thumb-grid button IDs (physical position → id) + recorded previous actions | **`0x40`..`0x4b`, contiguous, physical order 1→12.** Previous actions journaled to `probe-buttons.json` (the active onboard profile carried custom Synapse-era keys — F4–F10/Oem/Enter, not factory digits) |
+| Does a **volatile** (profile 0) write apply instantly? | **Yes** — and it **clears on replug** (profile 0 confirmed volatile/no-flash) |
+| Onboard profile list (`0x05/0x81`); was profile creation (`0x05/0x02`) required? | List works: capacity 5, slots `[01 02]` exist. Creation untested (scratch test declined) |
+| Does a **scratch onboard slot** write **persist** across unplug/replug with **no Razer software**? | **Skipped by choice** (zero onboard risk). Re-runnable later if the onboard model is ever wanted; Stage 2 does not need it |
+| Required preamble/handshake before a write is accepted? **and does it alter normal input** (see gate) | **None.** Writes accepted directly in normal device mode; the mouse stayed fully functional throughout (movement, clicks, grid presses) — no input-feel change |
+
+**Extra findings (2026-07-11):** the firmware **validates button ids** — every candidate outside the real
+set was rejected with a non-`0x02` status (76 volatile writes total, zero onboard writes), so a stray write
+cannot bind a nonexistent button. Besides the grid, ids **`0x0e`** and **`0x50`..`0x55`** also accepted
+writes but were not emitted by any grid press — other physical controls or reserved slots, left
+unidentified for now (Stage 2 only writes the 12 known grid ids).
+
+**Result: PASS** — Stage 2 proceeds with the **re-apply** persistence model (volatile profile-0 writes,
+re-asserted on connect via the existing startup + `DeviceChangeWatcher` debounced-refresh path).
 
 **Gate:** PASS = command accepted **and** the 12 IDs captured **and** at least the volatile write honored →
 Stage 2 proceeds (persistence model chosen from the volatile/onboard rows). FAIL = the firmware rejects the write, or no

@@ -1235,14 +1235,14 @@ git commit -m "feat(probe): persistence test, restore + --reset, spec §6 output
   must run it in his own terminal with the mouse in hand** (`Console.ReadKey` + pressing physical
   buttons cannot be driven by an agent).
 
-- [ ] **Step 1: Prepare the run**
+- [x] **Step 1: Prepare the run**
 
 Quit the resident tray app (tray icon → Exit) and confirm no Razer software is running. Build fresh:
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build`
 Expected: Build succeeded.
 
-- [ ] **Step 2: Run the spike (user-driven, interactive)**
+- [x] **Step 2: Run the spike (user-driven, interactive)** — run 2026-07-11: PASS
 
 In a normal terminal window (the console must have focus for `ReadKey`):
 
@@ -1252,7 +1252,7 @@ Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" "src\NagaBatteryTray\bin
 Follow the prompts through all five steps. Save the complete console output (right-click title bar →
 Edit → Select All → Copy) — it is the spike's raw evidence.
 
-- [ ] **Step 3: Fill spec §6**
+- [x] **Step 3: Fill spec §6**
 
 Paste the `== Spec §6 results ==` rows into the §6 table of
 `docs/superpowers/specs/2026-06-21-naga-button-remap-design.md`, replacing the `_TBD_` values.
@@ -1265,7 +1265,7 @@ preamble/handshake row. Update the spec's **Status** line: `DRAFT — spike-gate
 All 12 grid buttons type `1-9, 0, -, =` again (or the user's own Synapse-era bindings); wheel-click
 middle-clicks. If not: run `--probe-buttons --reset`, then unplug/replug.
 
-- [ ] **Step 5: Commit the results**
+- [x] **Step 5: Commit the results** (step 4 pending: one final unplug/replug clears the volatile scan markers)
 
 ```powershell
 git add docs/superpowers/specs/2026-06-21-naga-button-remap-design.md
