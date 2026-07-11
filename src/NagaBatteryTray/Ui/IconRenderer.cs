@@ -10,6 +10,7 @@ public static class IconRenderer
     private static readonly Color Green = Color.FromArgb(0x44, 0xD6, 0x2C);
     private static readonly Color Amber = Color.FromArgb(0xE0, 0xA2, 0x3E);
     private static readonly Color Red = Color.FromArgb(0xE0, 0x47, 0x3E);
+    private static readonly Color CoinFill = Color.FromArgb(170, 16, 18, 22);
     private static readonly FontFamily Family = ResolveFamily();
 
     private static FontFamily ResolveFamily()
@@ -39,7 +40,7 @@ public static class IconRenderer
         int size = Math.Max(16, dpi * 16 / 96); // SM_CXSMICON scales with DPI
         int render = size * 2;                  // supersample 2x; Windows downscales -> crisper digits
         string text = state.Status == DeviceStatus.Unknown ? "-" : state.Percent.ToString();
-        Color color = state.Status == DeviceStatus.Unknown
+        Color ringColor = state.Status == DeviceStatus.Unknown
             ? Color.Gray
             : ColorForLevel(state.Percent, state.Charging);
 
@@ -49,38 +50,47 @@ public static class IconRenderer
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Color.Transparent);
 
-            // Battery ring, drawn BEHIND the digits (digits-win rule: digit layout is untouched).
-            // Depletes clockwise from 12 o'clock; track is a faint full circle. ~1 px at 16 px tray size.
-            float ringW = Math.Max(2f, render * 0.07f);
-            var ringRect = new RectangleF(ringW / 2f, ringW / 2f, render - ringW, render - ringW);
+            // Coin: a filled dark disc is the whole gauge body (digits + ring both sit on it).
+            // Inset ~2% so the antialiased circle edge doesn't clip against the canvas bounds.
+            float coinMargin = render * 0.02f;
+            var coinRect = new RectangleF(coinMargin, coinMargin, render - 2f * coinMargin, render - 2f * coinMargin);
+            using (var coinBrush = new SolidBrush(CoinFill))
+                g.FillEllipse(coinBrush, coinRect);
+
+            // Ring at the rim: track is a faint full circle; the arc depletes clockwise from 12
+            // o'clock and is colored by battery level (green/amber/red, green while charging).
+            // Inset by half its own width beyond the coin margin so the ring reads as the coin's
+            // rim rather than floating separately from it.
+            float ringW = render * 0.10f;
+            float ringInset = coinMargin + ringW / 2f;
+            var ringRect = new RectangleF(ringInset, ringInset, render - 2f * ringInset, render - 2f * ringInset);
             using (var track = new Pen(Color.FromArgb(45, 255, 255, 255), ringW))
                 g.DrawEllipse(track, ringRect);
             int pct = state.Status == DeviceStatus.Unknown ? 0 : Math.Clamp(state.Percent, 0, 100);
             if (pct > 0)
             {
-                if (state.Status != DeviceStatus.Unknown && state.Charging)
-                    using (var glow = new Pen(Color.FromArgb(70, color), ringW * 2f))
-                        g.DrawArc(glow, ringRect, -90f, 360f * pct / 100f);
-                using var arc = new Pen(color, ringW) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                using var arc = new Pen(ringColor, ringW) { StartCap = LineCap.Round, EndCap = LineCap.Round };
                 g.DrawArc(arc, ringRect, -90f, 360f * pct / 100f);
             }
 
-            // Lay the digits out as a path so we can size them by their true ink bounds. Digits have no
-            // descenders, so MeasureString leaves dead vertical space; the path's bounds don't. Fill the
-            // icon HEIGHT, then compress horizontally only when too wide — this keeps 3-digit "100" tall
-            // and legible instead of width-shrinking it into a tiny strip (the old FitEm behaviour).
+            // Digits sit INSIDE the coin, always white. Lay them out as a path so we can size by
+            // true ink bounds (digits have no descenders, so MeasureString would leave dead
+            // vertical space). Target ~52% of render tall; cap width to the coin's interior
+            // (inside the ring) so 3-digit "100" condenses horizontally instead of overflowing
+            // into the ring — same condense-when-too-wide approach as before, tighter box.
             using var fmt = new StringFormat(StringFormat.GenericTypographic);
             using var path = new GraphicsPath();
             path.AddString(text, Family, (int)FontStyle.Bold, 100f, PointF.Empty, fmt);
             var ink = path.GetBounds();
             if (ink.Width > 0 && ink.Height > 0)
             {
-                float margin = render * 0.04f; // hug the icon edges so the digits read as large as possible
-                float box = render - 2f * margin;
+                float pad = render * 0.04f;
+                float targetHeight = render * 0.52f;
+                float maxWidth = render - 2f * ringW - pad;
 
-                float scaleY = box / ink.Height;                          // fill the height
-                float scaleX = ink.Width * scaleY > box                   // overflow horizontally?
-                    ? box / ink.Width                                     //   compress width to fit
+                float scaleY = targetHeight / ink.Height;                 // fill the target height
+                float scaleX = ink.Width * scaleY > maxWidth              // overflow horizontally?
+                    ? maxWidth / ink.Width                                //   compress width to fit
                     : scaleY;                                             //   else stay uniform (no stretch)
 
                 float offX = (render - ink.Width * scaleX) / 2f - ink.Left * scaleX;
@@ -89,18 +99,7 @@ public static class IconRenderer
                 using var m = new Matrix(scaleX, 0f, 0f, scaleY, offX, offY);
                 path.Transform(m);
 
-                // Halo knockout: erase a transparent clearance band around the digit ink so the ring
-                // passes visibly BEHIND the digits with a clean gap, instead of antialiasing smearing
-                // the arc into the digit strokes at small tray sizes. Round joins/caps avoid spike
-                // artifacts on the digits' sharp corners.
-                float haloWidth = ringW * 2f;
-                g.CompositingMode = CompositingMode.SourceCopy;
-                using (var knockout = new Pen(Color.Transparent, haloWidth)
-                       { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
-                    g.DrawPath(knockout, path);
-                g.CompositingMode = CompositingMode.SourceOver;
-
-                using var brush = new SolidBrush(color);
+                using var brush = new SolidBrush(Color.White);
                 g.FillPath(brush, path);
             }
         }

@@ -113,10 +113,14 @@ does, so launch it `-WindowStyle Hidden`.
   holds cadences, low-battery threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), cached
   transaction id, the sparse `ButtonBindings` table (grid position → key/disabled), and the adopted
   `OnboardSlot`. Corrupt file → silently resets to defaults.
-- `Ui/` — `IconRenderer` (draws the tray battery digits from their **ink bounds via a `GraphicsPath`**,
-  sized to fill the icon height and only condensed horizontally when too wide, so 3-digit "100" stays
-  legible, plus a **circular battery-level ring** drawn first, behind the digits — digits win the space
-  contest; ring thickness ~7% of icon size, round caps, a glow pen while charging); `TrayIcon` (raw
+- `Ui/` — `IconRenderer` (a self-contained **coin gauge**: a filled dark disc (`Color.FromArgb(170, 16,
+  18, 22)`) covers the canvas, its **rim is the battery-level ring** (thickness ~10% of render size,
+  track a faint full circle, arc colored by level — green/amber/red, green while charging), and the
+  digits sit **inside** the coin, always **white**, laid out from their **ink bounds via a
+  `GraphicsPath`** at ~52% of render height and condensed horizontally only when too wide (so 3-digit
+  "100" stays legible) — composition adopted from HoroTW/RazerBatteryTray after the earlier
+  ring-behind-full-height-digits design left no room for digits and read as stray pixels at real tray
+  sizes (16–24 px)); `TrayIcon` (raw
   **Shell_NotifyIcon** keyed by a **stable GUID derived from the exe path** so
   Windows persists the taskbar position across restarts/sleep — fixes the position-reset bug; the
   path-derived GUID also differs between the installed exe and a dev-host run, dodging the shell's

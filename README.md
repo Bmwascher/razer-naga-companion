@@ -29,9 +29,9 @@ directly over HID with no Synapse, no driver, and no admin rights.
 
 ## ✨ Features
 
-- 🔋 **Battery % in the tray** — a battery number that stays sharp at any display
-  scaling (100%/150%/200%), fills the icon, and recolors by level (🟢 green → 🟡 amber →
-  🔴 red) inside a matching battery-level ring, turning green while charging.
+- 🔋 **Battery % in the tray** — a round gauge that stays sharp at any display scaling
+  (100%/150%/200%): white digits on a dark coin whose rim ring carries the level color
+  (🟢 green → 🟡 amber → 🔴 red, green while charging).
 - 🖱️ **Click for details** — a compact popup with the exact %, a charging chip, a level
   bar, the active link (Wired / Wireless / On battery), and Refresh + Open dashboard.
 - 🎨 **Themed dashboard** — one window replaces the old Settings dialog: a vector mouse
