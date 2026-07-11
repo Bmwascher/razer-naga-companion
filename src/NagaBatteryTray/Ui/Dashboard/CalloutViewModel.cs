@@ -78,7 +78,7 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
     {
         if (IsBusy) return;
         IsBusy = true;
-        Status = "";
+        Status = "Writing…";
         bool ok = await _write(Position, kind, modifiers, usage);
         IsBusy = false;
         if (!ok) { Status = "Not applied — wiggle the mouse and retry"; return; }

@@ -104,6 +104,35 @@ public class CalloutViewModelTests
     }
 
     [Fact]
+    public async Task Apply_shows_Writing_status_during_the_device_round_trip()
+    {
+        var tcs = new TaskCompletionSource<bool>();
+        var undo = new TaskCompletionSource();
+        var vm = new CalloutViewModel(1, (_, _, _, _) => tcs.Task, () => undo.Task);
+
+        var apply = vm.CaptureAsync(0x00, 0x04); // A
+        Assert.Equal("Writing…", vm.Status);
+
+        tcs.SetResult(true);
+        await apply;
+        Assert.Equal("Applied", vm.Status);
+    }
+
+    [Fact]
+    public async Task Apply_shows_Writing_status_then_failure_message()
+    {
+        var tcs = new TaskCompletionSource<bool>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) => tcs.Task);
+
+        var apply = vm.CaptureAsync(0x00, 0x04); // A
+        Assert.Equal("Writing…", vm.Status);
+
+        tcs.SetResult(false);
+        await apply;
+        Assert.Contains("Not applied", vm.Status);
+    }
+
+    [Fact]
     public void CancelCapture_returns_to_idle()
     {
         var (vm, rec, _) = NewVm();
