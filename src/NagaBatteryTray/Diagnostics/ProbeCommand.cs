@@ -130,7 +130,9 @@ public static class ProbeCommand
         var capture = new ButtonCaptureFile();
         CheckDeviceMode(s, capture);
         capture.Save();
-        Console.WriteLine("(Steps 2-5 land in the next tasks.)");
+        if (!RunAcceptanceProbe(s, capture)) { capture.Save(); return 1; }
+        capture.Save();
+        Console.WriteLine("(Steps 3-5 land in the next tasks.)");
         return 0;
     }
 
@@ -164,6 +166,74 @@ public static class ProbeCommand
             }
         }
         Console.WriteLine();
+    }
+
+    /// <summary>Spike step 2 — bind a KNOWN Basilisk id (wheel-click 0x03) -> F13 on volatile profile 0.
+    /// Disambiguates "firmware rejects the command" from "wrong grid id" before any guessing, then
+    /// checks whether profile 0 survives a replug (selects the discovery loop's restore strategy).</summary>
+    private static bool RunAcceptanceProbe(MouseSession s, ButtonCaptureFile capture)
+    {
+        Console.WriteLine("[2/5] Acceptance + volatility probe (wheel-click 0x03 -> F13, volatile profile 0)");
+
+        // read the current action first (restore data + first exercise of the GET command)
+        byte catBefore = 0; byte[] dataBefore = Array.Empty<byte>(); bool haveBefore = false;
+        var get = Exchange(s.Handle!, RazerProtocol.BuildGetButtonBuffer(ButtonsTid, RazerProtocol.ButtonProfileDirect, 0x03, 0x00));
+        if (get is not null)
+        {
+            var gr = RazerProtocol.ParseButtonReply(get, RazerProtocol.ButtonProfileDirect, 0x03, 0x00, out catBefore, out dataBefore);
+            haveBefore = gr == ReplyResult.Success;
+            Console.WriteLine($"  get-before: status=0x{get[1]:x2} {gr} category=0x{catBefore:x2} data=[{Hex2(dataBefore)}]  [{Hex(get, 20)}]");
+        }
+        else Console.WriteLine("  get-before: no reply");
+
+        // the write under test: F13 = HID usage 0x68, no modifiers
+        var set = Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, RazerProtocol.ButtonProfileDirect,
+            0x03, 0x00, RazerProtocol.FnKeyboard, new byte[] { 0x00, 0x68 }));
+        if (set is null || set[1] != 0x02)
+        {
+            Console.WriteLine($"  SET REJECTED (status=0x{(set is null ? 0 : set[1]):x2}) - record FAIL in spec §6.");
+            Console.WriteLine("  Replug the mouse to clear anything partial. Spike aborts here.");
+            capture.SetAccepted = false;
+            capture.AcceptancePassed = false;
+            return false;
+        }
+        capture.SetAccepted = true;
+        Console.WriteLine($"  set: status=0x{set[1]:x2} (accepted)");
+
+        var back = Exchange(s.Handle!, RazerProtocol.BuildGetButtonBuffer(ButtonsTid, RazerProtocol.ButtonProfileDirect, 0x03, 0x00));
+        if (back is not null && RazerProtocol.ParseButtonReply(back, RazerProtocol.ButtonProfileDirect, 0x03, 0x00,
+                out byte cat, out byte[] data) == ReplyResult.Success)
+            Console.WriteLine($"  read-back: category=0x{cat:x2} data=[{Hex2(data)}] (expect 02 / 00 68)");
+
+        Console.WriteLine("\n  Click the MOUSE WHEEL (middle-click) once, now.");
+        Console.WriteLine("  (If nothing appears within a beat, press Esc yourself.)");
+        var key = Console.ReadKey(intercept: true);
+        bool fired = key.Key == ConsoleKey.F13;
+        capture.AcceptancePassed = fired;
+        Console.WriteLine(fired
+            ? "  -> F13 captured: the V2 Pro APPLIES a volatile button write. ACCEPTANCE PASS."
+            : $"  -> captured {key.Key}: write accepted but did not fire - note it in spec §6.");
+
+        Console.WriteLine("\n  Now unplug/replug the mouse (wired) or power-cycle it (switch underneath),");
+        Console.WriteLine("  then press Enter.");
+        Console.ReadLine();
+        if (!s.WaitForReconnect()) return false;
+
+        Console.WriteLine("  Click the MOUSE WHEEL again. (Esc = it middle-clicked normally / nothing typed)");
+        var key2 = Console.ReadKey(intercept: true);
+        bool cleared = key2.Key != ConsoleKey.F13;
+        capture.Profile0Volatile = cleared;
+        Console.WriteLine(cleared
+            ? "  -> bind cleared on replug: profile 0 is VOLATILE. Discovery can proceed replug-safe."
+            : "  -> F13 SURVIVED the replug: profile 0 persists on this firmware. Discovery will restore each candidate after probing it.");
+        if (!cleared && haveBefore)
+        {
+            var restore = Exchange(s.Handle!, RazerProtocol.BuildSetButtonBuffer(ButtonsTid, RazerProtocol.ButtonProfileDirect,
+                0x03, 0x00, catBefore, dataBefore));
+            Console.WriteLine($"  restored wheel-click from get-before: status=0x{(restore is null ? 0 : restore[1]):x2}");
+        }
+        Console.WriteLine();
+        return true;
     }
 
     /// <summary>Opens the live mouse control collection: wired PID first, then wireless (a stale dongle
