@@ -251,9 +251,11 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
 
 ### 5.3 Stage 2 — device & monitor (`Hid/IRazerDevice.cs`, `Hid/RazerDevice.cs`, `Monitoring/BatteryMonitor.cs`)
 
-- `IRazerDevice` gains `Task<bool> SetButtonAsync(ButtonBinding b, CancellationToken ct)` and (for verify)
-  `Task<ButtonBinding?> GetButtonAsync(byte buttonId, CancellationToken ct)`. `FakeRazerDevice` implements
-  both with assertion fields (last write, call counts) — the unit seam, mirroring the DPI fakes.
+- `IRazerDevice` gains `Task<bool> SetButtonAsync(byte buttonId, byte category, byte[] data, CancellationToken ct)`
+  and `Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct)` — **raw category+data
+  both ways**: a Key-only `ButtonBinding` cannot carry the stock mouse-category actions that
+  Default-restore and read-back need. `FakeRazerDevice` implements both with assertion fields (write
+  log, canned reads) — the unit seam, mirroring the DPI fakes.
 - `RazerDevice` implements them over the **existing `ExchangeAsync`** (SET→`SetReadDelayMs` wait→GET,
   busy-retry, close-on-failure) — no new transport. `tid != 0` gating as battery/DPI already do.
 - `BatteryMonitor` gains `SetButtonAsync(...)` / `GetButtonAsync(...)` pass-throughs that acquire the
@@ -269,9 +271,12 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
 ### 5.4 Stage 2 — settings, model & wiring (`Settings/AppSettings.cs`, `AppHost.cs`)
 
 - `ButtonBinding` (a small value type: `buttonId`, `ActionKind { Default, Disabled, Key }`, `modifiers`,
-  `hidUsage`) and a 12-entry `RemapTable` keyed by grid position. Persisted in `settings.json` (Roaming),
-  corrupt/missing → defaults, exactly as today. The discovered `NagaV2ProButtons` ID table is a baked-in
-  constant (filled from §6), so the stored table is position-indexed and firmware-id-stable.
+  `hidUsage`) and a sparse `RemapTable` keyed by grid position (only non-Default buttons are stored).
+  Each stored entry also carries a **stock-action snapshot** (`category`+`data`, read from the direct
+  profile **before that button's first-ever write**) so "Default" can restore instantly and offline.
+  Persisted in `settings.json` (Roaming), corrupt/missing → defaults, exactly as today. The discovered
+  `NagaV2ProButtons` ID table is a baked-in constant (`0x40..0x4b`, §6), so the stored table is
+  position-indexed and firmware-id-stable.
 - `AppHost` loads the table and (re-apply model) applies it on startup/device-change; passes the monitor
   to the Settings window so Apply routes writes through `_readLock`.
 
@@ -361,8 +366,10 @@ by contrast, is one-time onboard housekeeping and is an acceptable preamble.
   model) the binding re-asserts on the next device-change/connect.
 - **Firmware doesn't persist (slot model):** caught by the spike → either ship the **re-apply** model or, if
   nothing persists, close the phase. Not papered over.
-- **Unknown/again-default button:** "Default" rewrites the stock action recorded in §6; a never-touched
-  button is never written (flash-wear discipline).
+- **Unknown/again-default button:** "Default" rewrites the button's **stock action snapshotted at its
+  first-ever remap** (read from the direct profile before our first write; persisted beside the binding);
+  if that snapshot read failed, Default = drop from the table + effective on next reconnect. A
+  never-touched button is never written (flash-wear/§3.1 discipline).
 - **Mouse left in driver mode** (past Synapse install): detected and reset to normal in the spike (§5.2
   step 1); Stage 2 assumes normal mode — it never sets driver mode.
 - **Synapse running concurrently:** may override at runtime; documented (§4). We do not fight it.
