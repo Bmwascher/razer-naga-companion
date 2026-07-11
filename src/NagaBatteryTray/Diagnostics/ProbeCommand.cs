@@ -487,6 +487,33 @@ public static class ProbeCommand
         Console.WriteLine("| Required preamble/handshake / input-feel | (from the run notes: device mode + profile creation lines above) |");
     }
 
+    /// <summary>--probe-buttons --slot-test: re-run only spike steps 4-5 (scratch-slot persistence +
+    /// restore) against the grid ids captured by a previous full run — revisits the persistence-model
+    /// decision without re-scanning the grid. Existing onboard profiles are never written.</summary>
+    public static int RunButtonsSlotTest()
+    {
+        Console.WriteLine("Naga Battery Tray - scratch-slot persistence test (--probe-buttons --slot-test)\n");
+        var capture = ButtonCaptureFile.Load();
+        if (capture is null || capture.PositionToId.Count == 0)
+        {
+            Console.WriteLine("No grid ids on file - run --probe-buttons (the full spike) first.");
+            return 1;
+        }
+        using var s = new MouseSession();
+        if (!s.Open())
+        {
+            Console.WriteLine("No live mouse collection found (connected? awake? tray app closed?).");
+            return 1;
+        }
+        Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");
+        RunPersistenceTest(s, capture);
+        capture.Save();
+        RunRestore(s, capture);
+        capture.Save();
+        PrintResultsTemplate(capture);
+        return 0;
+    }
+
     /// <summary>--probe-buttons --reset: best-effort no-replug restore from the capture file.</summary>
     public static int RunButtonsReset()
     {

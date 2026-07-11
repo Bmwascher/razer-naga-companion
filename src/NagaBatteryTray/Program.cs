@@ -34,8 +34,8 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--probe-buttons")
         {
             AllocConsoleIfNeeded();
-            return args.Length > 1 && args[1] == "--reset"
-                ? Diagnostics.ProbeCommand.RunButtonsReset()
+            return args.Length > 1 && args[1] == "--reset" ? Diagnostics.ProbeCommand.RunButtonsReset()
+                : args.Length > 1 && args[1] == "--slot-test" ? Diagnostics.ProbeCommand.RunButtonsSlotTest()
                 : Diagnostics.ProbeCommand.RunButtons();
         }
 
