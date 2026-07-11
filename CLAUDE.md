@@ -19,12 +19,12 @@ defeats it. How this is upheld (keep it this way):
   buttons only on explicit user action — **never poll DPI or buttons** (button bindings live in an
   onboard slot the firmware holds itself, so no re-apply/verify path exists). No new background timers/threads (the lone *persistent*
   timer is the battery poll; the USB **device-change hook** — `DeviceChangeWatcher` → debounced refresh —
-  is event-driven and idle-free: a one-shot `Task.Delay`, not a timer). The 15 s floor is a UI-input clamp (`SettingsViewModel.ApplyTo`, `Math.Max(15, …)`)
+  is event-driven and idle-free: a one-shot `Task.Delay`, not a timer). The 15 s floor is a UI-input clamp (`DashboardViewModel.ApplyTo`, `Math.Max(15, …)`)
   — `BatteryMonitor.ScheduleNext` reads the cadence unclamped, so don't add a poll-cadence path that
   bypasses that clamp (a hand-edited `settings.json` already can).
 - Blocking `HidD_*Feature` calls run **off the UI thread** (`Task.Run`); battery + DPI serialize
-  through one shared lock (`BatteryMonitor._readLock`, a `SemaphoreSlim`). The **Settings** window
-  releases on close (`_settingsWindow = null`) so idle returns to baseline; the **popup** is a cached
+  through one shared lock (`BatteryMonitor._readLock`, a `SemaphoreSlim`). The **Dashboard** window
+  releases on close (`StateChanged` unsubscribed + `_dashboard = null`) so idle returns to baseline; the **popup** is a cached
   singleton that only hides — don't make it release-on-close (re-creating it per tray click adds cost).
 - Acceptance gates (not aspirations): footprint back to baseline + measured input latency
   unchanged before/during/after operations. Binds ALL phases, especially button remapping (B).
@@ -101,9 +101,10 @@ does, so launch it `-WindowStyle Hidden`.
   with the factory map, recorded as `OnboardSlot` in settings; **the user's existing slots 01/02 are
   never taken or written**). The firmware holds bindings through power-cycles — no re-apply, no
   sentinel poll. No command exists to set the active slot: the user selects it once with the mouse's
-  bottom button (LED colour = slot: white/red/green/blue/cyan; the Apply status names it). Apply flow
-  in `AppHost.ApplyButtonsAsync`: ensure slot → write → read-back verify → persist; "Default" writes
-  the factory action (deterministic) and is stageable on any row (the repair path).
+  bottom button (LED colour = slot: white/red/green/blue/cyan; the dashboard's Profile card names it).
+  Write path is `AppHost.WriteBindingAsync` (per-chip instant apply): ensure slot → write → read-back
+  verify → persist; "Default" writes the factory action (deterministic) and is always available on any
+  chip (the repair path).
 - `Settings/` — `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at
   `%APPDATA%\NagaBatteryTray\settings.json` (Roaming — **not** the install dir under `%LOCALAPPDATA%`);
   holds cadences, low-battery threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), cached

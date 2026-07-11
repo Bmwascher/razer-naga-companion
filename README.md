@@ -70,7 +70,7 @@ Tray:  [95]   ← battery %, fills the icon, recolored by level — click to ope
 │  ███████████████████████████░    │
 │  Profile 1 · white               │
 │                                  │
-│  [   Refresh   ][ Open dashboard ]│
+│  [  Refresh   ][ Open dashboard ]│
 └──────────────────────────────────┘
 ```
 
