@@ -1391,7 +1391,7 @@ git commit -m "feat(ui): Buttons section with key capture + apply/re-apply orche
 **Interfaces:**
 - Consumes: the finished feature. **The acceptance checks need Brandon with the mouse** (Synapse absent).
 
-- [ ] **Step 1: Functional acceptance (spec §3 Stage 2) — RE-RUN for the onboard-slot model**
+- [x] **Step 1: Functional acceptance (spec §3 Stage 2) — RE-RUN for the onboard-slot model**
 
 > Rewritten 2026-07-11: the first run passed 1/2/4/5 on the re-apply model but exposed the wireless
 > power-cycle gap (#3). The scratch-slot probe then **passed**, so the shipped model is the
@@ -1410,14 +1410,14 @@ With the dev build running and the mouse connected:
 6. `settings.json` shows the sparse `ButtonBindings` table + `OnboardSlot`; your original profiles
    (slots 1–2) behave exactly as before when selected via the bottom button.
 
-- [ ] **Step 2: §3.1 gating acceptance (spec §9)**
+- [x] **Step 2: §3.1 gating acceptance (spec §9)**
 
 After a batch of applies: Task Manager shows idle CPU back to ~0% and private working set ~23 MB
 (Release install); mouse movement/click feel unchanged at idle and during Apply. Note the poll now
 does zero button I/O — strictly less runtime work than the first acceptance build. **A failure here
 is not shippable** — stop and investigate.
 
-- [ ] **Step 3: Update the docs**
+- [x] **Step 3: Update the docs**
 
 In `CLAUDE.md`: mark the roadmap line `- [ ] B — Button remapping` as
 `- [x] B — Button remapping (MVP: key+modifiers/disable, onboard app-owned slot — shipped YYYY-MM-DD)`
@@ -1427,12 +1427,12 @@ onboard profile slot** (`0x02/0x0c`, ids `0x40..0x4b`; slot adopted via `0x05/0x
 recorded in `OnboardSlot`); the user's existing slots are never written; no re-apply path exists.
 In `README.md`: add button remapping to the feature list.
 
-- [ ] **Step 4: Run the full suite one last time**
+- [x] **Step 4: Run the full suite one last time**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add CLAUDE.md README.md
