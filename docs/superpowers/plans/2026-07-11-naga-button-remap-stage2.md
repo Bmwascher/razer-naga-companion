@@ -85,7 +85,7 @@ Task 8  hardware acceptance (user) + CLAUDE.md/README docs + §3.1 gates
   `public readonly record struct ButtonBinding(byte ButtonId, ButtonActionKind Kind, byte Modifiers, byte HidUsage)` with `public (byte Category, byte[] Data) ToWire()` (throws `InvalidOperationException` on `Default`);
   `public static class NagaV2ProButtons { public const int Count = 12; public static byte IdForPosition(int position); }`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/NagaBatteryTray.Tests/ButtonBindingTests.cs`:
 
@@ -139,12 +139,12 @@ public class ButtonBindingTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~ButtonBindingTests"`
 Expected: **build error** — `ButtonBinding`/`ButtonActionKind`/`NagaV2ProButtons` not defined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/NagaBatteryTray/Hid/ButtonBinding.cs`:
 
@@ -184,12 +184,12 @@ public static class NagaV2ProButtons
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~ButtonBindingTests"`
 Expected: PASS (7 tests).
 
-- [ ] **Step 5: Refine the spec to match the raw seam + stock snapshot**
+- [x] **Step 5: Refine the spec to match the raw seam + stock snapshot**
 
 In `docs/superpowers/specs/2026-06-21-naga-button-remap-design.md`, three edits:
 
@@ -239,7 +239,7 @@ with:
   never-touched button is never written (flash-wear/§3.1 discipline).
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Hid/ButtonBinding.cs tests/NagaBatteryTray.Tests/ButtonBindingTests.cs docs/superpowers/specs/2026-06-21-naga-button-remap-design.md
@@ -264,7 +264,7 @@ git commit -m "feat(hid): button binding model + NagaV2ProButtons id table (spec
 This task has no new unit tests of its own (`RazerDevice` is the manual HID boundary; the fake is
 exercised by Task 3's tests) — its gate is a clean build with the existing suite green.
 
-- [ ] **Step 1: Extend the interface**
+- [x] **Step 1: Extend the interface**
 
 In `src/NagaBatteryTray/Hid/IRazerDevice.cs`, after `SetDpiAsync`:
 
@@ -278,7 +278,7 @@ In `src/NagaBatteryTray/Hid/IRazerDevice.cs`, after `SetDpiAsync`:
     Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct);
 ```
 
-- [ ] **Step 2: Implement in `RazerDevice`**
+- [x] **Step 2: Implement in `RazerDevice`**
 
 In `src/NagaBatteryTray/Hid/RazerDevice.cs`, after `SetDpiAsync`:
 
@@ -325,7 +325,7 @@ In `src/NagaBatteryTray/Hid/RazerDevice.cs`, after `SetDpiAsync`:
     }
 ```
 
-- [ ] **Step 3: Extend the fake**
+- [x] **Step 3: Extend the fake**
 
 In `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`, after the DPI members:
 
@@ -345,12 +345,12 @@ In `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`, after the DPI members
         Task.FromResult(ButtonActions.TryGetValue(buttonId, out var a) ? a : (RawButtonAction?)null);
 ```
 
-- [ ] **Step 4: Build + full suite green**
+- [x] **Step 4: Build + full suite green**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build` then `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: Build succeeded, 0 errors; all tests PASS (57 = 50 + 7 from Task 1).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Hid/IRazerDevice.cs src/NagaBatteryTray/Hid/RazerDevice.cs tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs
@@ -372,7 +372,7 @@ git commit -m "feat(hid): raw get/set-button device seam over the existing excha
   `public Task<RawButtonAction?> GetButtonAsync(byte buttonId)`;
   `public Task ApplyRemapsAsync(IReadOnlyList<ButtonBinding> bindings)` — batch under **one** `_readLock` hold; empty list ⇒ zero device calls; `Default` entries skipped defensively; individual failures ignored (best-effort; the next connect retries).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/NagaBatteryTray.Tests/BatteryMonitorTests.cs`:
 
@@ -438,12 +438,12 @@ Append to `tests/NagaBatteryTray.Tests/BatteryMonitorTests.cs`:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~BatteryMonitorTests"`
 Expected: **build error** — `BatteryMonitor` lacks the three methods.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs`, after `SetDpiAsync`:
 
@@ -491,12 +491,12 @@ In `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs`, after `SetDpiAsync`:
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~BatteryMonitorTests"`
 Expected: PASS (13 = 8 existing + 5 new).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Monitoring/BatteryMonitor.cs tests/NagaBatteryTray.Tests/BatteryMonitorTests.cs
@@ -519,7 +519,7 @@ git commit -m "feat(monitor): button pass-throughs + batch re-apply under the sh
   `public sealed class ButtonBindingSetting { ButtonActionKind Kind; byte Modifiers; byte HidUsage; byte StockCategory; byte[] StockData; bool HasStock; }` (Kind serialized as a string);
   `AppSettings.ButtonBindings : Dictionary<int, ButtonBindingSetting>` (keyed by grid position 1..12, **non-null, default empty**; a missing/old settings.json loads as empty).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/NagaBatteryTray.Tests/SettingsStoreTests.cs`:
 
@@ -567,12 +567,12 @@ Append to `tests/NagaBatteryTray.Tests/SettingsStoreTests.cs`:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~SettingsStoreTests"`
 Expected: **build error** — `ButtonBindingSetting`/`ButtonBindings` not defined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/NagaBatteryTray/Settings/ButtonBindingSetting.cs`:
 
@@ -609,12 +609,12 @@ In `src/NagaBatteryTray/Settings/AppSettings.cs`, add after `SetReadDelayMs`:
 (`AppSettings.cs` needs `using System.Collections.Generic;` only if implicit usings were off — they are
 on in this project, so no using is required.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~SettingsStoreTests"`
 Expected: PASS (5 = 3 existing + 2 new).
 
-- [ ] **Step 5: Fix the spec's test-file name**
+- [x] **Step 5: Fix the spec's test-file name**
 
 In the spec's file-structure block, replace:
 ```
@@ -625,7 +625,7 @@ with:
   tests/NagaBatteryTray.Tests/SettingsStoreTests.cs      RemapTable persistence round-trip + corrupt-JSON → defaults (existing store-test file)
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Settings/ButtonBindingSetting.cs src/NagaBatteryTray/Settings/AppSettings.cs tests/NagaBatteryTray.Tests/SettingsStoreTests.cs docs/superpowers/specs/2026-06-21-naga-button-remap-design.md
@@ -649,7 +649,7 @@ git commit -m "feat(settings): sparse button remap table with per-entry stock sn
   `public static byte ToModifierBits(ModifierKeys mods)`;
   `public static string Describe(byte modifiers, byte usage)` — e.g. `"Ctrl+Shift+F5"`; an unmapped usage renders as hex (`"0x68"`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/NagaBatteryTray.Tests/KeyToHidUsageTests.cs`:
 
@@ -717,7 +717,7 @@ public class KeyToHidUsageTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~KeyToHidUsageTests"`
 Expected: **build error** — `KeyToHidUsage` not defined. (If instead `Key`/`ModifierKeys` fail to
@@ -725,7 +725,7 @@ resolve in the test project, add `<UseWPF>true</UseWPF>` to the `PropertyGroup` 
 `tests/NagaBatteryTray.Tests/NagaBatteryTray.Tests.csproj` — the WPF framework reference usually flows
 transitively from the app project, but this pins it.)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/NagaBatteryTray/Ui/KeyToHidUsage.cs`:
 
@@ -800,12 +800,12 @@ public static class KeyToHidUsage
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~KeyToHidUsageTests"`
 Expected: PASS (22 test cases).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Ui/KeyToHidUsage.cs tests/NagaBatteryTray.Tests/KeyToHidUsageTests.cs
@@ -829,7 +829,7 @@ git commit -m "feat(ui): WPF key to HID usage map with modifier bits + display n
   `public sealed class ButtonRowViewModel : INotifyPropertyChanged` — `int Position`, `string Label`, `string CurrentText`, `string Status`, `bool IsCapturing`, `void SetApplied(ButtonActionKind, byte, byte)`, `void StageKey(byte modifiers, byte usage)`, `void StageDisabled()`, `void StageDefault()`, `ButtonOp? ToOp()`, `void MarkApplied()`, `void MarkFailed(string)`;
   `SettingsViewModel`: `IReadOnlyList<ButtonRowViewModel> Buttons` (12 rows seeded from `AppSettings.ButtonBindings`), `List<ButtonOp> GetPendingButtonOps()`, `ButtonRowViewModel Row(int position)`, `string ButtonsStatus` (bindable).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/NagaBatteryTray.Tests/ButtonRowViewModelTests.cs`:
 
@@ -955,12 +955,12 @@ Append to `tests/NagaBatteryTray.Tests/SettingsViewModelTests.cs`:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~ButtonRowViewModelTests|FullyQualifiedName~SettingsViewModelTests"`
 Expected: **build error** — `ButtonRowViewModel`/`ButtonOp` and the new `SettingsViewModel` members not defined.
 
-- [ ] **Step 3: Implement the row VM**
+- [x] **Step 3: Implement the row VM**
 
 Create `src/NagaBatteryTray/Ui/ButtonRowViewModel.cs`:
 
@@ -1076,7 +1076,7 @@ Note the `StageDefault`-on-untouched-row case: `Stage` compares against the appl
 (`Default`, 0, 0) and clears the pending change, so `ToOp()` returns null — exactly the "never write an
 untouched button" test.
 
-- [ ] **Step 4: Extend `SettingsViewModel`**
+- [x] **Step 4: Extend `SettingsViewModel`**
 
 In `src/NagaBatteryTray/Ui/SettingsViewModel.cs`:
 
@@ -1117,12 +1117,12 @@ And in the constructor, after the existing assignments:
         Buttons = rows;
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: full suite PASS (all prior + 8 row tests + 2 VM tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Ui/ButtonRowViewModel.cs src/NagaBatteryTray/Ui/SettingsViewModel.cs tests/NagaBatteryTray.Tests/ButtonRowViewModelTests.cs tests/NagaBatteryTray.Tests/SettingsViewModelTests.cs
@@ -1146,7 +1146,7 @@ git commit -m "feat(ui): button row view-model with staged ops + settings seedin
 
 This is the WPF/manual boundary (spec §9): gate = build + full suite green + a UI smoke run.
 
-- [ ] **Step 1: Add the Buttons section to the XAML**
+- [x] **Step 1: Add the Buttons section to the XAML**
 
 In `src/NagaBatteryTray/Ui/SettingsWindow.xaml`, insert between the `<!-- Mouse DPI -->` card's closing
 `</ui:CardControl>` and the `<!-- Advanced: polling cadence -->` comment:
@@ -1196,7 +1196,7 @@ In `src/NagaBatteryTray/Ui/SettingsWindow.xaml`, insert between the `<!-- Mouse 
         </ui:CardExpander>
 ```
 
-- [ ] **Step 2: Wire capture + events in the code-behind**
+- [x] **Step 2: Wire capture + events in the code-behind**
 
 In `src/NagaBatteryTray/Ui/SettingsWindow.xaml.cs`:
 
@@ -1252,7 +1252,7 @@ Add `using System.Windows.Input;` and `using System.Collections.Generic;` to the
     }
 ```
 
-- [ ] **Step 3: Orchestrate in `AppHost`**
+- [x] **Step 3: Orchestrate in `AppHost`**
 
 In `src/NagaBatteryTray/AppHost.cs`:
 
@@ -1360,12 +1360,12 @@ Add the two methods after `ApplyDpiAsync`:
     }
 ```
 
-- [ ] **Step 4: Build + full suite green**
+- [x] **Step 4: Build + full suite green**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build` then `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: Build succeeded, 0 errors; all tests PASS.
 
-- [ ] **Step 5: UI smoke run (no mouse required)**
+- [x] **Step 5: UI smoke run (no mouse required)**
 
 Quit the installed tray app, then:
 `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" "src\NagaBatteryTray\bin\Debug\net10.0-windows10.0.19041.0\NagaBatteryTray.dll"`
@@ -1374,7 +1374,7 @@ Open Settings from the tray icon → the "Buttons" expander shows 12 rows saying
 with the mouse absent reports "Not applied — wiggle the mouse and retry" (row status) rather than a false
 success. Quit the dev instance and relaunch the installed app when done.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Ui/SettingsWindow.xaml src/NagaBatteryTray/Ui/SettingsWindow.xaml.cs src/NagaBatteryTray/AppHost.cs
