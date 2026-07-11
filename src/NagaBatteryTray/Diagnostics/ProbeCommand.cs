@@ -109,6 +109,166 @@ public static class ProbeCommand
         return 0;
     }
 
+    // ---- Phase B Stage 1: --probe-buttons feasibility spike (spec §5.2) ----
+
+    private const byte ButtonsTid = 0x1f;
+
+    public static int RunButtons()
+    {
+        Console.WriteLine("Naga Battery Tray - button remap feasibility spike (--probe-buttons)\n");
+        Console.WriteLine("Writes below target the VOLATILE direct profile unless stated; an unplug/replug");
+        Console.WriteLine("(or power-cycle via the switch underneath) restores normal behaviour at any time.\n");
+
+        using var s = new MouseSession();
+        if (!s.Open())
+        {
+            Console.WriteLine("No live mouse collection found (connected? awake? tray app closed?).");
+            return 1;
+        }
+        Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");
+
+        var capture = new ButtonCaptureFile();
+        CheckDeviceMode(s, capture);
+        capture.Save();
+        Console.WriteLine("(Steps 2-5 land in the next tasks.)");
+        return 0;
+    }
+
+    /// <summary>Spike step 1 — read (and offer to normalize) the device mode. Driver mode is Synapse's
+    /// software-resident model; a leftover would make good onboard writes look dead (false FAIL).</summary>
+    private static void CheckDeviceMode(MouseSession s, ButtonCaptureFile capture)
+    {
+        Console.WriteLine("[1/5] Device-mode check (0x00/0x84; 0x00 = normal, 0x03 = driver)");
+        var reply = Exchange(s.Handle!, RazerProtocol.BuildGetDeviceModeBuffer(ButtonsTid));
+        if (reply is null)
+        {
+            Console.WriteLine("  no reply - record 'device mode: unreadable' in spec §6 and continue.\n");
+            return;
+        }
+        var r = RazerProtocol.ParseDeviceModeReply(reply, out byte mode);
+        Console.WriteLine($"  status=0x{reply[1]:x2} {r} mode=0x{mode:x2}  [{Hex(reply, 16)}]");
+        if (r == ReplyResult.Success)
+        {
+            capture.DeviceModeAtStart = mode;
+            if (mode == RazerProtocol.DeviceModeDriver)
+            {
+                Console.WriteLine("  DRIVER MODE detected (a Synapse leftover) - onboard bindings may not fire.");
+                Console.Write("  Set back to normal mode now? [y/N] ");
+                var k = Console.ReadKey(intercept: true);
+                Console.WriteLine();
+                if (k.Key == ConsoleKey.Y)
+                {
+                    var set = Exchange(s.Handle!, RazerProtocol.BuildSetDeviceModeBuffer(ButtonsTid, RazerProtocol.DeviceModeNormal));
+                    Console.WriteLine($"  set-normal: status=0x{(set is null ? 0 : set[1]):x2}");
+                }
+            }
+        }
+        Console.WriteLine();
+    }
+
+    /// <summary>Opens the live mouse control collection: wired PID first, then wireless (a stale dongle
+    /// collection stays enumerated when the mouse goes wired), verifying each candidate answers a
+    /// battery query before committing - mirrors RazerDevice.EnsureConnectedAsync.</summary>
+    private static SafeFileHandle? OpenLiveMouse(out int pidOpened)
+    {
+        foreach (int pid in new[] { RazerProtocol.MousePidWired, RazerProtocol.MousePidWireless })
+            foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
+            {
+                int max = -1;
+                try { max = dev.GetMaxFeatureReportLength(); } catch { }
+                if (max != RazerProtocol.BufferLength) continue;
+                var h = CreateFile(dev.DevicePath, 0, 0x3, IntPtr.Zero, 0x3, 0, IntPtr.Zero);
+                if (h.IsInvalid) { h.Dispose(); continue; }
+                var probe = Exchange(h, RazerProtocol.BuildFeatureBuffer(ButtonsTid, RazerProtocol.CommandIdBattery));
+                if (probe is not null && probe[1] == 0x02) { pidOpened = pid; return h; }
+                h.Dispose();
+            }
+        pidOpened = 0;
+        return null;
+    }
+
+    /// <summary>SET -> wait -> GET with busy retry (same pacing as DockOneShot). Null on transport failure.</summary>
+    private static byte[]? Exchange(SafeFileHandle h, byte[] request)
+    {
+        if (!HidD_SetFeature(h, request, request.Length)) return null;
+        for (int tries = 0; tries < 10; tries++)
+        {
+            Thread.Sleep(tries == 0 ? 400 : 200);
+            var reply = new byte[RazerProtocol.BufferLength];
+            if (!HidD_GetFeature(h, reply, reply.Length)) return null;
+            if (reply[1] != 0x01) return reply; // not busy
+        }
+        return null;
+    }
+
+    private static string Hex(byte[] buf, int n) => string.Join(" ", buf.Take(n).Select(b => b.ToString("x2")));
+    private static string Hex2(byte[] data) => string.Join(" ", data.Select(b => b.ToString("x2")));
+
+    private sealed class MouseSession : IDisposable
+    {
+        public SafeFileHandle? Handle { get; private set; }
+        public int Pid { get; private set; }
+
+        public bool Open()
+        {
+            Handle?.Dispose();
+            Handle = OpenLiveMouse(out int pid);
+            Pid = pid;
+            return Handle is not null;
+        }
+
+        /// <summary>Blocks until the mouse answers again after an unplug/replug (1 s poll, 60 s cap).</summary>
+        public bool WaitForReconnect()
+        {
+            Console.WriteLine("  waiting for the mouse to come back...");
+            for (int i = 0; i < 60; i++)
+            {
+                Thread.Sleep(1000);
+                if (Open()) { Console.WriteLine($"  reconnected (PID 0x{Pid:x4})."); return true; }
+            }
+            Console.WriteLine("  mouse did not come back within 60 s.");
+            return false;
+        }
+
+        public void Dispose() => Handle?.Dispose();
+    }
+
+    private sealed record CapturedAction(byte Category, byte[] Data);
+
+    /// <summary>Spike results persisted to %APPDATA%\NagaBatteryTray\probe-buttons.json so
+    /// --probe-buttons --reset works across processes (best-effort; replug is canonical).</summary>
+    private sealed class ButtonCaptureFile
+    {
+        public Dictionary<int, byte> PositionToId { get; set; } = new();          // grid position 1..12 -> button id
+        public Dictionary<byte, CapturedAction> PreviousActions { get; set; } = new(); // volatile-profile pre-write reads
+        public byte? DeviceModeAtStart { get; set; }
+        public bool? SetAccepted { get; set; }       // firmware answered 0x02 to the SET
+        public bool? AcceptancePassed { get; set; }  // ...and the bound key actually fired
+        public bool? Profile0Volatile { get; set; }
+        public bool? SlotPersisted { get; set; }
+        public byte? SlotTested { get; set; }
+        public byte? SlotButtonId { get; set; }
+        public CapturedAction? SlotPreviousAction { get; set; }
+        public bool SlotWasCreated { get; set; }
+        public string? ProfileNotes { get; set; }
+
+        public static string PathFor() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "NagaBatteryTray", "probe-buttons.json");
+
+        public void Save()
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PathFor())!);
+            File.WriteAllText(PathFor(), System.Text.Json.JsonSerializer.Serialize(this));
+        }
+
+        public static ButtonCaptureFile? Load()
+        {
+            try { return System.Text.Json.JsonSerializer.Deserialize<ButtonCaptureFile>(File.ReadAllText(PathFor())); }
+            catch { return null; }
+        }
+    }
+
     private static string OneShot(SafeFileHandle h, byte tid)
     {
         try
