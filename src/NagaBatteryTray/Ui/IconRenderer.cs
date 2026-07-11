@@ -122,6 +122,23 @@ public static class IconRenderer
                 using var m = new Matrix(scaleX, 0f, 0f, scaleY, offX, offY);
                 path.Transform(m);
 
+                // Knockout: where digit ink reaches the ring (the box corners of wide pairs pass
+                // ~0.47R; the ring starts at 0.38R), repaint a band around the glyph outline in
+                // EXACT coin color (SourceCopy) so the ring reads as passing BEHIND the numbers
+                // with a clean break instead of touching them. Clipped to the coin so the band
+                // can't smear coin color outside the disc edge.
+                using (var coinClip = new GraphicsPath())
+                {
+                    coinClip.AddEllipse(coinRect);
+                    g.SetClip(coinClip);
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    using (var breakPen = new Pen(CoinFill, render * 0.09f)
+                           { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+                        g.DrawPath(breakPen, path);
+                    g.CompositingMode = CompositingMode.SourceOver;
+                    g.ResetClip();
+                }
+
                 // Fill + a same-color stroke: Segoe UI Bold is too light once the digits are
                 // ~9 px tall on the final icon. Keep the stroke subtle — it also SHRINKS the
                 // digit counters (the holes in 0/9), which is what kills legibility first;
