@@ -49,6 +49,22 @@ public static class IconRenderer
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Color.Transparent);
 
+            // Battery ring, drawn BEHIND the digits (digits-win rule: digit layout is untouched).
+            // Depletes clockwise from 12 o'clock; track is a faint full circle. ~1 px at 16 px tray size.
+            float ringW = Math.Max(2f, render * 0.07f);
+            var ringRect = new RectangleF(ringW / 2f, ringW / 2f, render - ringW, render - ringW);
+            using (var track = new Pen(Color.FromArgb(45, 255, 255, 255), ringW))
+                g.DrawEllipse(track, ringRect);
+            int pct = state.Status == DeviceStatus.Unknown ? 0 : Math.Clamp(state.Percent, 0, 100);
+            if (pct > 0)
+            {
+                if (state.Status != DeviceStatus.Unknown && state.Charging)
+                    using (var glow = new Pen(Color.FromArgb(70, color), ringW * 2f))
+                        g.DrawArc(glow, ringRect, -90f, 360f * pct / 100f);
+                using var arc = new Pen(color, ringW) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                g.DrawArc(arc, ringRect, -90f, 360f * pct / 100f);
+            }
+
             // Lay the digits out as a path so we can size them by their true ink bounds. Digits have no
             // descenders, so MeasureString leaves dead vertical space; the path's bounds don't. Fill the
             // icon HEIGHT, then compress horizontally only when too wide — this keeps 3-digit "100" tall
