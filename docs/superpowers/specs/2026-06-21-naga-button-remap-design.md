@@ -96,9 +96,11 @@ so it is handled with *more* care than DPI, never less:
   process**. After the write the firmware emits the bound usage; **we are not in the input path at all.**
 - Writes are **off the UI thread** (`Task.Run`) and **serialized on the existing `BatteryMonitor._readLock`**
   (the same lock battery+DPI already share). Never a concurrent feature transfer.
-- Writes are **user-action-triggered only** (like `SetDpi`) — **no poll, no new timer/thread.** If the
-  spike selects the *re-apply* persistence model, re-application **piggybacks the existing startup +
-  `DeviceChangeWatcher` debounced-refresh** path — still event-driven, no new persistent timer.
+- Writes are **user-action-triggered or drift-triggered re-assertion only** — **no new timer/thread.**
+  Re-application **piggybacks the existing battery poll**: one sentinel `GetButton` per poll **only
+  while remaps are configured** (zero extra I/O otherwise), writes only when the volatile layer was
+  actually wiped. (Revised from pure event-driven re-apply during Stage 2 acceptance: a wireless
+  power-cycle emits **no** USB device-change, so an event-only design silently loses bindings.)
 - **Flash-wear discipline:** onboard flash has finite write-endurance. Writes are **deliberate**
   (explicit user Apply), **read-back-verified**, and **coalesced** (write only buttons that changed). The
   spike prefers the **volatile** profile for the high-churn discovery loop — though its real value is the
@@ -260,13 +262,19 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
   busy-retry, close-on-failure) — no new transport. `tid != 0` gating as battery/DPI already do.
 - `BatteryMonitor` gains `SetButtonAsync(...)` / `GetButtonAsync(...)` pass-throughs that acquire the
   **existing `_readLock`** (DPI blocks, poll skips-if-busy — unchanged). No cadence/timer change.
-- **If the spike picks the re-apply model:** `BatteryMonitor.ApplyRemapsAsync(table)` writes only the
-  bindings that **differ from factory default** (changed-only / idempotent) to the **volatile** profile;
-  `AppHost` calls it on **startup** and from the **existing `DeviceChangeWatcher` debounced refresh** (mouse
-  reconnect) — **no new persistent timer/thread**, and bounded by that **same existing debounce** so a
-  flapping link cannot produce a write storm.
-  **If the spike picks the onboard-slot model:** bindings are written **once on user Apply** to a slot; no
-  per-connect re-write.
+- **Re-apply model (as shipped — revised during Stage 2 hardware acceptance):** event-driven re-apply
+  alone is **insufficient**: a **wireless power-cycle emits no USB device-change** (the dongle stays
+  enumerated), so `DeviceChangeWatcher` never fires and the wiped volatile layer went unnoticed until
+  app restart. Instead, `AppHost` hands the persisted table to `BatteryMonitor.SetRemaps(...)` (at
+  startup and after every Apply), and **each successful battery poll/refresh sentinel-verifies**: one
+  `GetButton` on the first bound button — **only while remaps are configured; zero extra I/O
+  otherwise** — and re-asserts the whole set **only on drift** (a power-cycle wipes all volatile
+  bindings uniformly, so one sentinel suffices). No new timer/thread — it rides the existing poll;
+  wired/dongle replugs still re-assert via the existing debounced device-change refresh (which also
+  verifies); a silent wireless power-cycle self-heals within one poll interval or instantly via the
+  tray's "Refresh now". An unreadable sentinel writes nothing (retry next poll — never a blind write).
+  **The onboard-slot model** (bindings written once on user Apply to a slot; no re-write) was not
+  selected (§6: slot test declined).
 
 ### 5.4 Stage 2 — settings, model & wiring (`Settings/AppSettings.cs`, `AppHost.cs`)
 

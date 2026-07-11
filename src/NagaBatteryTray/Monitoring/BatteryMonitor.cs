@@ -81,26 +81,13 @@ public sealed class BatteryMonitor : IDisposable
         finally { _readLock.Release(); }
     }
 
-    /// <summary>Re-assert the configured remaps (connect-time re-apply model, spec §5.3). Best-effort
-    /// batch under one lock hold — an individual failure is retried at the next connect, not here. An
-    /// empty table makes zero device calls; Default entries are skipped (never written).</summary>
-    public async Task ApplyRemapsAsync(IReadOnlyList<ButtonBinding> bindings)
-    {
-        if (bindings.Count == 0) return;
-        try { await _readLock.WaitAsync(_cts.Token); }
-        catch (OperationCanceledException) { return; }
-        try
-        {
-            foreach (var b in bindings)
-            {
-                if (b.Kind == ButtonActionKind.Default) continue;
-                var (category, data) = b.ToWire();
-                await _device.SetButtonAsync(b.ButtonId, category, data, _cts.Token);
-            }
-        }
-        catch (OperationCanceledException) { }
-        finally { _readLock.Release(); }
-    }
+    /// <summary>The remaps the mouse should hold (re-apply model, spec §5.3). Default entries are
+    /// filtered out — they are never written. Each subsequent poll/refresh verifies one sentinel button
+    /// and re-asserts the set only on drift; an empty set adds zero button I/O to the poll.</summary>
+    public void SetRemaps(IEnumerable<ButtonBinding> remaps) =>
+        _remaps = remaps.Where(b => b.Kind != ButtonActionKind.Default).ToArray();
+
+    private IReadOnlyList<ButtonBinding> _remaps = Array.Empty<ButtonBinding>();
 
     private async Task PollAsync(bool reconnect = false)
     {
@@ -111,9 +98,30 @@ public sealed class BatteryMonitor : IDisposable
             var reading = await _device.ReadAsync(_cts.Token);
             ProcessReading(reading);
             ScheduleNext(reading);
+            if (reading.IsPresent) await VerifyRemapsAsync(); // still under the same lock hold
         }
         catch (OperationCanceledException) { }
         finally { _readLock.Release(); }
+    }
+
+    /// <summary>Re-assert remaps when the volatile layer was wiped: a wireless power-cycle emits NO USB
+    /// device-change (the dongle stays enumerated), so event-driven re-apply cannot see it. Piggybacks
+    /// the existing poll/refresh — no new timer; one sentinel GET per poll only while remaps are
+    /// configured, writes only on drift. An unreadable sentinel writes nothing (retries next poll).</summary>
+    private async Task VerifyRemapsAsync()
+    {
+        var remaps = _remaps;
+        if (remaps.Count == 0) return;
+        var sentinel = remaps[0];
+        var (expectedCategory, expectedData) = sentinel.ToWire();
+        var current = await _device.GetButtonAsync(sentinel.ButtonId, _cts.Token);
+        if (current is not { } c) return;
+        if (c.Category == expectedCategory && c.Data.AsSpan().SequenceEqual(expectedData)) return;
+        foreach (var b in remaps)
+        {
+            var (category, data) = b.ToWire();
+            await _device.SetButtonAsync(b.ButtonId, category, data, _cts.Token);
+        }
     }
 
     private void ScheduleNext(BatteryReading reading)

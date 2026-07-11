@@ -1397,8 +1397,10 @@ With the dev build running and the mouse connected:
 1. Settings → Buttons → Rebind button 1 → press `Ctrl+F5` → Apply. Row shows "Applied"; pressing
    **grid button 1 emits Ctrl+F5** in any app.
 2. Disable button 2 → Apply → pressing grid button 2 does nothing.
-3. Power-cycle the mouse → within ~1 s of reconnect (existing debounce) both bindings work again
-   **without opening Settings** (re-apply path).
+3. Power-cycle the mouse → bindings re-assert **without opening Settings**: instantly on a wired/dongle
+   replug (device-change refresh), and after a silent **wireless** power-cycle — which emits **no USB
+   event** (found in the first acceptance run) — within one battery-poll interval, or immediately via
+   tray icon → **Refresh now** (both paths sentinel-verify and re-assert on drift).
 4. Button 1 → Default → Apply → button 1 emits its stock action again instantly.
 5. Restart the app → bindings still listed (persisted) and re-applied on startup.
 6. `settings.json` shows the sparse `ButtonBindings` table; deleting it restores no-remap behaviour.

@@ -29,8 +29,13 @@ public sealed class FakeRazerDevice : IRazerDevice
         return Task.FromResult(SetButtonResult);
     }
 
-    public Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct) =>
-        Task.FromResult(ButtonActions.TryGetValue(buttonId, out var a) ? a : (RawButtonAction?)null);
+    public int GetButtonCount { get; private set; }
+
+    public Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct)
+    {
+        GetButtonCount++;
+        return Task.FromResult(ButtonActions.TryGetValue(buttonId, out var a) ? a : (RawButtonAction?)null);
+    }
 
     public int ResetCount { get; private set; }
     public void Reset() => ResetCount++;

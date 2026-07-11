@@ -56,8 +56,8 @@ public sealed class AppHost
         _deviceWatcher = new DeviceChangeWatcher();
         _deviceWatcher.DeviceChanged += OnDeviceChanged;
 
+        _monitor.SetRemaps(CurrentBindings()); // first poll verifies + applies them (empty table = no-op)
         _monitor.Start();
-        _ = Task.Run(ReapplyBindingsAsync); // re-assert remaps once at startup (no-op when table empty)
     }
 
     private void Dispatch(Action action) => _app.Dispatcher.Invoke(action);
@@ -77,8 +77,7 @@ public sealed class AppHost
         {
             try { await Task.Delay(DeviceSettleMs, ct); }
             catch (OperationCanceledException) { return; }
-            await _monitor.RefreshNowAsync();
-            await ReapplyBindingsAsync(); // volatile remaps clear on replug — re-assert them
+            await _monitor.RefreshNowAsync(); // the refresh also sentinel-verifies + re-asserts remaps
         }, ct);
     }
 
@@ -141,16 +140,11 @@ public sealed class AppHost
         });
     }
 
-    /// <summary>Re-assert configured remaps (re-apply model). Rides startup + the debounced
-    /// device-change refresh — never a new timer; an empty table makes zero device calls.</summary>
-    private async Task ReapplyBindingsAsync()
+    /// <summary>The persisted remap table as wire-ready bindings — the monitor's sentinel-verify set.</summary>
+    private IEnumerable<ButtonBinding> CurrentBindings()
     {
-        var table = _settings.Settings.ButtonBindings;
-        if (table.Count == 0) return;
-        var bindings = new List<ButtonBinding>(table.Count);
-        foreach (var (pos, b) in table)
-            bindings.Add(new ButtonBinding(NagaV2ProButtons.IdForPosition(pos), b.Kind, b.Modifiers, b.HidUsage));
-        await _monitor.ApplyRemapsAsync(bindings);
+        foreach (var (pos, b) in _settings.Settings.ButtonBindings)
+            yield return new ButtonBinding(NagaV2ProButtons.IdForPosition(pos), b.Kind, b.Modifiers, b.HidUsage);
     }
 
     /// <summary>Apply staged button ops: snapshot the stock action at a button's first-ever remap,
@@ -220,6 +214,7 @@ public sealed class AppHost
         }
 
         _settings.Save();
+        _monitor.SetRemaps(CurrentBindings()); // keep the poll's sentinel-verify set in sync
         Dispatch(() => win.SetButtonsStatus(okCount == ops.Count ? "Applied" : $"{okCount}/{ops.Count} applied"));
     }
 
