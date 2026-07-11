@@ -64,7 +64,7 @@ public static class IconRenderer
             // o'clock and is colored by battery level (green/amber/red, green while charging).
             // Inset by half its own width beyond the coin margin so the ring reads as the coin's
             // rim rather than floating separately from it.
-            float ringW = render * 0.12f;
+            float ringW = render * 0.09f;
             float ringInset = coinMargin + ringW / 2f;
             var ringRect = new RectangleF(ringInset, ringInset, render - 2f * ringInset, render - 2f * ringInset);
             using (var track = new Pen(Color.FromArgb(45, 255, 255, 255), ringW))
@@ -88,10 +88,15 @@ public static class IconRenderer
             if (ink.Width > 0 && ink.Height > 0)
             {
                 float pad = render * 0.015f;
-                // 3-digit "100" gets a shorter target so its condensed width still clears the
-                // rim (the reference drops 56% -> 42% for 3 digits; same idea).
-                float targetHeight = render * (text.Length >= 3 ? 0.46f : 0.60f);
-                float maxWidth = render - 2f * ringW - 2f * pad;
+                // "Largest that clears": digits are sized so their ink box mathematically fits
+                // INSIDE the ring's inner circle — nothing ever touches, no knockout tricks
+                // (the reference's principle; its own icons measure 41% tall on a 6% ring, ours
+                // pushes both to the limit). 3 digits get a shorter target, same as the
+                // reference dropping 56% -> 42% for "100".
+                float targetHeight = render * (text.Length >= 3 ? 0.40f : 0.51f);
+                float rIn = render / 2f - ringW;               // ring's inner edge radius
+                float halfH = targetHeight / 2f;
+                float maxWidth = 2f * MathF.Sqrt(Math.Max(0f, rIn * rIn - halfH * halfH)) - pad;
 
                 float scaleX, scaleY;
                 if (state.Status == DeviceStatus.Unknown)
@@ -121,23 +126,6 @@ public static class IconRenderer
 
                 using var m = new Matrix(scaleX, 0f, 0f, scaleY, offX, offY);
                 path.Transform(m);
-
-                // Knockout: where digit ink reaches the ring (the box corners of wide pairs pass
-                // ~0.47R; the ring starts at 0.38R), repaint a band around the glyph outline in
-                // EXACT coin color (SourceCopy) so the ring reads as passing BEHIND the numbers
-                // with a clean break instead of touching them. Clipped to the coin so the band
-                // can't smear coin color outside the disc edge.
-                using (var coinClip = new GraphicsPath())
-                {
-                    coinClip.AddEllipse(coinRect);
-                    g.SetClip(coinClip);
-                    g.CompositingMode = CompositingMode.SourceCopy;
-                    using (var breakPen = new Pen(CoinFill, render * 0.09f)
-                           { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
-                        g.DrawPath(breakPen, path);
-                    g.CompositingMode = CompositingMode.SourceOver;
-                    g.ResetClip();
-                }
 
                 // Fill + a same-color stroke: Segoe UI Bold is too light once the digits are
                 // ~9 px tall on the final icon. Keep the stroke subtle — it also SHRINKS the
