@@ -1,8 +1,9 @@
 # Razer Naga Companion — project guide
 
 Featherweight Windows system-tray app — a minimal **Razer Synapse replacement** for the
-**Razer Naga V2 Pro**. Shows battery % in the tray and reads/sets the mouse's active
-hardware DPI. .NET 10 (`net10.0-windows10.0.19041.0`), C#, WPF + WinForms, WPF-UI 4.3.0
+**Razer Naga V2 Pro**. Shows battery % in the tray, reads/sets the mouse's active
+hardware DPI, and remaps the 12-button thumb grid (onboard, key+modifiers or disable).
+.NET 10 (`net10.0-windows10.0.19041.0`), C#, WPF + WinForms, WPF-UI 4.3.0
 (Fluent), HidSharp, CommunityToolkit.WinUI.Notifications (toasts), xUnit.
 Public repo: https://github.com/Bmwascher/razer-naga-companion
 
@@ -13,8 +14,9 @@ defeats it. How this is upheld (keep it this way):
 - Talk to the mouse only via HID **feature reports** (USB control endpoint). Never claim the
   OS-owned input collection. Open zero-access + `FILE_SHARE_READ|WRITE` (passive client) so the
   interrupt IN endpoint carrying movement/clicks is undisturbed.
-- Device I/O is on-demand or infrequent: battery poll cadence floor **15 s**; read/set DPI only
-  on explicit user action — **never poll DPI**. No new background timers/threads (the lone *persistent*
+- Device I/O is on-demand or infrequent: battery poll cadence floor **15 s**; read/set DPI or
+  buttons only on explicit user action — **never poll DPI or buttons** (button bindings live in an
+  onboard slot the firmware holds itself, so no re-apply/verify path exists). No new background timers/threads (the lone *persistent*
   timer is the battery poll; the USB **device-change hook** — `DeviceChangeWatcher` → debounced refresh —
   is event-driven and idle-free: a one-shot `Task.Delay`, not a timer). The 15 s floor is a UI-input clamp (`SettingsViewModel.ApplyTo`, `Math.Max(15, …)`)
   — `BatteryMonitor.ScheduleNext` reads the cadence unclamped, so don't add a poll-cadence path that
@@ -35,7 +37,9 @@ The SDK is at `%LOCALAPPDATA%\Microsoft\dotnet` (not on PATH; `DOTNET_ROOT` set 
 - Install: `.\scripts\install.ps1` — publishes Release (self-contained single-file), installs to
   `%LOCALAPPDATA%\Programs\NagaBatteryTray`, registers run-at-login, launches. Re-run to update.
   `.\scripts\uninstall.ps1` reverses it (leaves `%APPDATA%\NagaBatteryTray\settings.json`).
-- HID diagnostics: `NagaBatteryTray.exe --probe` (battery), `--probe-dpi` (raw DPI reply offsets).
+- HID diagnostics: `NagaBatteryTray.exe --probe` (battery), `--probe-dpi` (raw DPI reply offsets),
+  `--probe-buttons` (remap spike: acceptance/grid-discovery/persistence; `--reset` restores recorded
+  actions, `--slot-test` re-runs the scratch-slot persistence test).
 - Solution is `NagaBatteryTray.slnx` (XML format, not `.sln`). No `global.json` (SDK unpinned),
   no CI, no `.editorconfig` — verification is local `dotnet test` only.
 
@@ -63,6 +67,14 @@ does, so launch it `-WindowStyle Hidden`.
   via private `BuildReport`/`ValidateReply`; public API is
   `BuildFeatureBuffer`/`BuildGetDpiBuffer`/`BuildSetDpiBuffer` + `ParseReply`/`ParseDpiReply`.
   `ParseDpiReply` treats DPI outside `100..30000` as **Failed** (guards wrong-layout firmware replies).
+  Buttons (class 0x02, set 0x0c / get 0x8c, args `[profile,buttonId,hypershift,category,len,d0..d4]`;
+  `ParseButtonReply` guards via the **echo check** — the reply must echo the request's
+  profile/buttonId/hypershift), profile lifecycle (class 0x05: list 0x81 / create 0x02 / delete 0x03),
+  device mode (0x00/0x84 get, 0x00/0x04 set) — all hardware-verified 2026-07-11 (spike, spec §6).
+  `Hid/ButtonBinding.cs` holds the button model: `ButtonBinding` (+`ToWire`; Default throws — never
+  written), `RawButtonAction`, `ProfileList`, and `NagaV2ProButtons` (grid ids `0x40..0x4b` physical
+  order; `FactoryBindingForPosition` = the digits row `1..9 0 - =` — a **freshly created onboard slot
+  is EMPTY**, so "Default" writes the baked-in factory action and new slots are seeded with it).
 - `Hid/RazerDevice.cs` (implements `Hid/IRazerDevice.cs`) — zero-access `CreateFile` +
   `HidD_Set/GetFeature`; `ExchangeAsync` transport (SET→`SetReadDelayMs` wait→GET, busy-retry,
   close-on-failure). `EnsureConnectedAsync` picks the **live** collection (the one whose
@@ -79,13 +91,23 @@ does, so launch it `-WindowStyle Hidden`.
   `TransactionIdProbeSet`) and cached; every battery/DPI call gates on `tid != 0`, returning Absent/null
   silently until it resolves.
 - `Monitoring/BatteryMonitor.cs` — poll timer + arming state machine; takes `IRazerDevice`; battery
-  poll + DPI pass-throughs serialize on one `_readLock` (poll skips if busy, DPI blocks). `RefreshNowAsync`
+  poll + DPI/button/profile pass-throughs serialize on one `_readLock` (poll skips if busy, the
+  pass-throughs block). The poll itself does battery I/O only. `RefreshNowAsync`
   (manual button, wake, device-change) calls `_device.Reset()` first to re-select the active interface;
   the frequent background poll reuses the handle for efficiency.
+- **Button remapping (Phase B, shipped 2026-07-11)** — bindings are written **once** into an
+  **app-owned onboard profile slot** (created on first Apply via the first FREE slot number, seeded
+  with the factory map, recorded as `OnboardSlot` in settings; **the user's existing slots 01/02 are
+  never taken or written**). The firmware holds bindings through power-cycles — no re-apply, no
+  sentinel poll. No command exists to set the active slot: the user selects it once with the mouse's
+  bottom button (LED colour = slot: white/red/green/blue/cyan; the Apply status names it). Apply flow
+  in `AppHost.ApplyButtonsAsync`: ensure slot → write → read-back verify → persist; "Default" writes
+  the factory action (deterministic) and is stageable on any row (the repair path).
 - `Settings/` — `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at
   `%APPDATA%\NagaBatteryTray\settings.json` (Roaming — **not** the install dir under `%LOCALAPPDATA%`);
   holds cadences, low-battery threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), cached
-  transaction id. Corrupt file → silently resets to defaults.
+  transaction id, the sparse `ButtonBindings` table (grid position → key/disabled), and the adopted
+  `OnboardSlot`. Corrupt file → silently resets to defaults.
 - `Ui/` — `IconRenderer` (draws the tray battery digits from their **ink bounds via a `GraphicsPath`**,
   sized to fill the icon height and only condensed horizontally when too wide, so 3-digit "100" stays
   legible); `TrayIcon` (raw **Shell_NotifyIcon** keyed by a **stable GUID derived from the exe path** so
@@ -101,7 +123,9 @@ does, so launch it `-WindowStyle Hidden`.
   device-change hook) / `Program.cs` single-instance (named Mutex); run-at-login is
   `Startup/StartupRegistration.cs` (a **delayed-logon scheduled task** named `NagaBatteryTray`, registered
   via `schtasks /XML`; the exe self-registers through the `--enable-startup` switch that `install.ps1` calls);
-  `Diagnostics/ProbeCommand.cs` backs `--probe`/`--probe-dpi`/`--probe-dock`.
+  `Diagnostics/ProbeCommand.cs` backs `--probe`/`--probe-dpi`/`--probe-dock`/`--probe-buttons`
+  (`[--reset|--slot-test]`); the Buttons UI is `ButtonRowViewModel` (staged-op model) +
+  `KeyToHidUsage` (WPF Key ↔ HID usage map + modifier bits).
 - Design specs + implementation plans live in `docs/superpowers/`.
 
 ## References / prior art (Razer HID protocol)
@@ -113,8 +137,8 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
   `[2..87]`, battery `0x07/0x80`, charging `0x07/0x84`, DPI get `0x04/0x85` / set `0x04/0x05` VARSTORE.
   Naga V2 Pro supported (PID `0x00A7`/`0x00A8`) with a **hard-coded transaction id `0x1f`** (our probe
   set leads with `0x1f`, so it converges there). Has **no button remapping** for any mouse — Phase B's
-  remap protocol is undocumented even here and still needs a Synapse USB-capture spike (don't mistake
-  the LED `0x03/0x0B` "custom frame" command for remapping).
+  protocol came from the Basilisk V3 command family (geezmolycos/razerqdhid) and was hardware-verified
+  by our own spike (spec §6); don't mistake the LED `0x03/0x0B` "custom frame" command for remapping.
 - [Tekk-Know/RazerBatteryTaskbar](https://github.com/Tekk-Know/RazerBatteryTaskbar) — Electron tray
   battery app, same niche. Confirms battery `0x07/0x80` + tx id `0x1f`. **Phase C lead:** supports the
   **Razer Mouse Dock Pro (PID `0x00A4`, tx `0x1f`)**. Caveat: archived (2024) and lists V2 Pro PIDs as
@@ -134,14 +158,17 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
 - [x] Reliability + UI polish (2026-06-21): wired/USB-C battery read, instant charge-status on USB
   plug/unplug (device-change hook), GUID tray icon (stable taskbar position), larger tray digits,
   widened popup + themed header/charging-pill, no popup reposition flash.
-- [ ] B — Button remapping (feasibility spike first; the V2 Pro remap protocol isn't documented)
+- [x] B — Button remapping (MVP: key+modifiers/disable per grid button, onboard app-owned slot —
+  shipped 2026-07-11). Spike + Stage 2 both hardware-accepted same day; see
+  `docs/superpowers/specs/2026-06-21-naga-button-remap-design.md`.
 
 ## Conventions
 TDD, DRY, YAGNI, surgical changes, conventional-commit messages, frequent commits. Read the FULL
 file before editing. WPF-UI gotcha: `NumberBox.Value` commits on LostFocus/Enter — bind it
 `UpdateSourceTrigger=PropertyChanged` so a button Click reads the typed value, not the prior one.
 Tests cover logic layers only — `RazerProtocol`, `BatteryMonitor`, `SettingsViewModel`,
-`JsonSettingsStore`, `IconRenderer`, `StartupRegistration` — via `Fakes/FakeRazerDevice` (the
+`JsonSettingsStore`, `IconRenderer`, `StartupRegistration`, `ButtonBinding`/`NagaV2ProButtons`,
+`KeyToHidUsage`, `ButtonRowViewModel` — via `Fakes/FakeRazerDevice` (the
 `IRazerDevice` seam); HID transport, WPF windows, and the tray are exercised by the installed build
-and `--probe`/`--probe-dpi`, not unit tests. Tests reach `internal` members through
+and `--probe`/`--probe-dpi`/`--probe-buttons`, not unit tests. Tests reach `internal` members through
 `InternalsVisibleTo.cs` — don't tighten visibility or drop that file.

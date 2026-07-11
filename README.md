@@ -36,7 +36,12 @@ directly over HID with no Synapse, no driver, and no admin rights.
   bar, the active link (Wired / Wireless / On battery), and Refresh + Settings.
 - 🎯 **Active DPI control** — read and set the mouse's current hardware DPI from the
   Settings window; the change is written to the device — no Synapse round-trip.
-- ⚙️ **Settings window** — low-battery threshold, poll cadence, and DPI, all per-user.
+- ⌨️ **Button remapping** — bind any of the 12 thumb-grid buttons to a key (with
+  Ctrl/Shift/Alt/Win modifiers) or disable it. Bindings are written **once into an onboard
+  profile the app creates and owns** — the mouse keeps them through power-cycles and reboots
+  with **no software running at all**, and your existing onboard profiles are never touched.
+- ⚙️ **Settings window** — low-battery threshold, poll cadence, DPI, and button bindings,
+  all per-user.
 - 🔔 **Low-battery toast** — a native Windows notification when you drop to/below your
   threshold (default 15%) while on battery.
 - ⚡ **Charging aware** — polls faster while charging (15 s vs 60 s), suppresses nagging
@@ -128,8 +133,9 @@ HID probe — it enumerates the Razer HID collections, tries each known transact
 prints the raw battery reply:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe       # battery
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dpi   # active DPI
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe          # battery
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dpi      # active DPI
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-buttons  # remap protocol
 ```
 
 ---
@@ -143,7 +149,7 @@ flowchart LR
     Mon --> Tray["TrayIcon<br/>GUID-stable icon"]
     Mon --> Popup["PopupWindow<br/>compact card"]
     Mon --> Toast["Notifications<br/>low-battery toast"]
-    Mon --> Set["SettingsWindow<br/>threshold · cadence · DPI"]
+    Mon --> Set["SettingsWindow<br/>threshold · cadence · DPI · buttons"]
     DevChg["DeviceChangeWatcher<br/>USB plug/unplug"] --> Mon
     Cfg[("settings.json")] -.-> Mon
     Host["AppHost / Program<br/>lifecycle · single-instance · run-at-login"] --- Mon
@@ -158,7 +164,8 @@ flowchart LR
   ids and caches the one that works, picks whichever interface is live (wired or wireless),
   and reads/writes the active DPI.
 - **`Monitoring/BatteryMonitor.cs`** — polling timer + state machine (online/unknown,
-  low-battery edge logic, staleness → unknown); also the DPI read/set pass-through.
+  low-battery edge logic, staleness → unknown); also the DPI and button read/set
+  pass-throughs (everything shares one lock — never two concurrent device exchanges).
 - **`Ui/`** — `IconRenderer` (GDI+ number icon, DPI-aware, supersampled, fills the icon
   height), `TrayIcon` + `TrayIconController` (Win32 `Shell_NotifyIcon` with a stable GUID so
   the taskbar position survives restarts), `PopupWindow` (compact WPF card, multi-monitor
@@ -182,8 +189,11 @@ Full design and implementation notes live in [`docs/superpowers/`](docs/superpow
 - [—] **C — Dock charger support**: *closed — the Mouse Dock Pro relay is non-viable on
       this firmware (it never answers a battery query). Charging while docked already shows
       via the mouse's own read.*
-- [ ] **B — Button remapping**: remap the Naga's side buttons *(feasibility spike first —
-      the V2 Pro's remap protocol isn't publicly documented).*
+- [x] **B — Button remapping**: bind each thumb-grid button to a key (+modifiers) or disable
+      it, stored in an onboard profile the app owns — survives power-cycles with no software
+      running. *(The V2 Pro's remap protocol wasn't publicly documented; a hardware spike
+      captured it — grid ids `0x40..0x4b`, command `0x02/0x0c` — see
+      [`docs/superpowers/`](docs/superpowers/).)*
 
 ---
 
