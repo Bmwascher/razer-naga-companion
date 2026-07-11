@@ -24,7 +24,7 @@ public sealed class AppHost
     private BatteryMonitor _monitor = null!;
     private TrayIconController _tray = null!;
     private PopupWindow? _popup;
-    private SettingsWindow? _settingsWindow;
+    private DashboardWindow? _dashboard;
     private DeviceChangeWatcher? _deviceWatcher;
     private CancellationTokenSource? _deviceDebounce;
 
@@ -49,7 +49,7 @@ public sealed class AppHost
         _tray.LeftClicked += TogglePopup;
         _tray.RefreshRequested += () => _ = _monitor.RefreshNowAsync();
         _tray.StartupToggled += SetStartup;
-        _tray.SettingsRequested += OpenSettings;
+        _tray.SettingsRequested += OpenDashboard;
         _tray.QuitRequested += Quit;
 
         _tray.SetStartupChecked(_startup.IsEnabled());
@@ -96,59 +96,80 @@ public sealed class AppHost
     {
         var p = new PopupWindow();
         p.RefreshRequested += () => _ = _monitor.RefreshNowAsync();
-        p.SettingsRequested += OpenSettings;
+        p.SettingsRequested += OpenDashboard;
         _monitor.StateChanged += (_, state) => p.ApplyState(state); // live-update the popup while it's open
         return p;
     }
 
-    private void OpenSettings()
+    private void OpenDashboard()
     {
-        if (_settingsWindow is { IsVisible: true }) { _settingsWindow.Activate(); return; }
+        if (_dashboard is { IsVisible: true }) { _dashboard.Activate(); return; }
 
-        var win = new SettingsWindow(_settings.Settings, _startup.IsEnabled());
-        win.SaveRequested += () => { win.ApplyTo(_settings.Settings); _settings.Save(); };
-        win.StartupToggled += enable => { SetStartup(enable); _tray.SetStartupChecked(enable); };
-        win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(win, dpi);
-        win.ApplyButtonsRequested += ops => _ = ApplyButtonsAsync(win, ops);
-        win.Closed += (_, _) => _settingsWindow = null;
-        win.SetDevicePresent(_monitor.State.Status == DeviceStatus.Online);
-        _settingsWindow = win;
+        var vm = new DashboardViewModel(_settings.Settings, _startup.IsEnabled(), WriteBindingAsync);
+        var win = new DashboardWindow(vm);
+        win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
+        win.LivenessRefreshRequested += () => _ = RefreshLivenessAsync(vm);
+        win.SettingsOverlayRequested += () => ShowSettingsOverlay(win, vm);
+        win.Closed += (_, _) =>
+        {
+            vm.ApplyTo(_settings.Settings);
+            _settings.Save();
+            _dashboard = null; // release-on-close: idle memory returns to baseline
+        };
+        vm.ApplyState(_monitor.State);
+        _monitor.StateChanged += (_, state) => Dispatch(() => { if (_dashboard == win) vm.ApplyState(state); });
+        _dashboard = win;
         win.Show();
-        _ = LoadDpiAsync(win); // read current DPI off the UI thread, then seed the UI
+        _ = SeedDashboardAsync(vm);
     }
 
     // Task.Run keeps the blocking HidD_*Feature calls off the UI thread (no UI freeze; supports the
     // lightweight + zero-latency invariant). Results marshal back via Dispatch.
-    private async Task LoadDpiAsync(SettingsWindow win)
+    private async Task SeedDashboardAsync(DashboardViewModel vm)
     {
         var dpi = await Task.Run(() => _monitor.GetDpiAsync());
-        Dispatch(() => { win.SetCurrentDpi(dpi); win.SetDevicePresent(dpi is not null); });
+        Dispatch(() => vm.SetCurrentDpi(dpi));
+        await RefreshLivenessAsync(vm);
     }
 
-    private async Task ApplyDpiAsync(SettingsWindow win, int dpi)
+    private async Task RefreshLivenessAsync(DashboardViewModel vm)
     {
-        Dispatch(() => win.SetDpiStatus("Applying…"));
+        var state = await CheckLivenessAsync();
+        Dispatch(() => vm.SetLiveness(state));
+    }
+
+    private void ShowSettingsOverlay(DashboardWindow win, DashboardViewModel vm)
+    {
+        var view = new SettingsView { DataContext = vm };
+        view.CloseRequested += () => { vm.ApplyTo(_settings.Settings); _settings.Save(); win.HideOverlay(); };
+        view.StartupToggled += enable => { SetStartup(enable); _tray.SetStartupChecked(enable); };
+        view.ThemeChanged += name =>
+        { ThemeManager.Apply(_app, name); _settings.Settings.Theme = ThemeManager.Resolve(name); _settings.Save(); };
+        view.ResetAllRequested += () =>
+        {
+            var pick = System.Windows.MessageBox.Show(
+                "Rewrite all 12 grid buttons to their factory keys?", "Reset buttons",
+                System.Windows.MessageBoxButton.YesNo);
+            if (pick == System.Windows.MessageBoxResult.Yes) _ = ResetAllButtonsAsync(vm);
+        };
+        win.ShowOverlay(view);
+    }
+
+    private async Task ApplyDpiAsync(DashboardViewModel vm, int dpi)
+    {
         bool ok = await Task.Run(() => _monitor.SetDpiAsync(dpi, dpi));
         DpiSetting? readBack = ok ? await Task.Run(() => _monitor.GetDpiAsync()) : null;
-        Dispatch(() =>
+        if (readBack is { } v && v.X == dpi)
         {
-            if (readBack is { } v && v.X == dpi)
-            {
-                win.SetCurrentDpi(v);
-                win.SetDpiStatus($"Applied ({v.X} DPI)");
-            }
-            else
-            {
-                win.SetDpiStatus("Couldn't confirm — wiggle the mouse and retry");
-            }
-        });
+            Dispatch(() => vm.SetCurrentDpi(v));
+        }
+        else
+        {
+            // keep simple: on failure just re-read the current DPI
+            var current = await Task.Run(() => _monitor.GetDpiAsync());
+            Dispatch(() => vm.SetCurrentDpi(current));
+        }
     }
-
-    /// <summary>Slot LED colour on the V2 Pro's bottom profile button (spec §6).</summary>
-    private static string SlotColour(byte slot) => slot switch
-    {
-        1 => "white", 2 => "red", 3 => "green", 4 => "blue", 5 => "cyan", _ => $"slot {slot}",
-    };
 
     /// <summary>Returns the app-owned onboard slot, adopting one on first use: re-creates the recorded
     /// slot if the mouse lost it (e.g. factory reset), else creates the first FREE slot — a user's
@@ -244,58 +265,6 @@ public sealed class AppHost
         }
     }
 
-    /// <summary>Apply staged button ops into the app-owned ONBOARD slot (spec §5.3): adopt the slot on
-    /// first use, write the binding, read-back verify, persist. "Default" writes the baked-in factory
-    /// action (a fresh slot reads back empty, so there is no snapshot to restore). The mouse itself
-    /// holds the bindings — they survive power-cycles with no software involvement. Every HID call
-    /// runs off the UI thread via the monitor's shared lock.</summary>
-    private async Task ApplyButtonsAsync(SettingsWindow win, IReadOnlyList<ButtonOp> ops)
-    {
-        Dispatch(() => win.SetButtonsStatus("Applying…"));
-
-        if (await EnsureOnboardSlotAsync() is not { } slot)
-        {
-            // rows keep their pending state so a retry re-sends the same ops
-            Dispatch(() => win.SetButtonsStatus("No onboard slot — wiggle the mouse and retry"));
-            return;
-        }
-
-        var table = _settings.Settings.ButtonBindings;
-        int okCount = 0;
-
-        foreach (var op in ops)
-        {
-            var row = win.ButtonRow(op.Position);
-            var binding = op.OpKind == ButtonOpKind.RestoreDefault
-                ? NagaV2ProButtons.FactoryBindingForPosition(op.Position)
-                : new ButtonBinding(NagaV2ProButtons.IdForPosition(op.Position), op.Kind, op.Modifiers, op.HidUsage);
-            var (category, data) = binding.ToWire();
-
-            bool ok = await Task.Run(() => _monitor.SetButtonAsync(slot, binding.ButtonId, category, data));
-            if (ok)
-            {
-                var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, binding.ButtonId));
-                ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
-            }
-            if (ok)
-            {
-                if (op.OpKind == ButtonOpKind.RestoreDefault) table.Remove(op.Position);
-                else table[op.Position] = new ButtonBindingSetting
-                {
-                    Kind = op.Kind, Modifiers = op.Modifiers, HidUsage = op.HidUsage,
-                };
-                Dispatch(row.MarkApplied);
-                okCount++;
-            }
-            else Dispatch(() => row.MarkFailed("Not applied — wiggle the mouse and retry"));
-        }
-
-        _settings.Save();
-        Dispatch(() => win.SetButtonsStatus(okCount == ops.Count
-            ? $"Saved to onboard profile {slot} ({SlotColour(slot)}) — select it with the bottom button"
-            : $"{okCount}/{ops.Count} applied"));
-    }
-
     private void SetStartup(bool enable)
     {
         if (enable) _startup.Enable(); else _startup.Disable();
@@ -305,7 +274,7 @@ public sealed class AppHost
     {
         _deviceDebounce?.Cancel();
         _deviceWatcher?.Dispose();
-        _settingsWindow?.Close();
+        _dashboard?.Close();
         _monitor.Dispose();
         _device.Dispose();
         _tray.Dispose();

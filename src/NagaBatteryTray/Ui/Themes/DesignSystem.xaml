@@ -3,6 +3,7 @@
   <SolidColorBrush x:Key="Status.Positive" Color="#43D675"/>
   <SolidColorBrush x:Key="Status.Warning" Color="#E6A23C"/>
   <SolidColorBrush x:Key="Status.Critical" Color="#E5484D"/>
+  <SolidColorBrush x:Key="App.Scrim" Color="#A0000000"/>
 
   <Style x:Key="CardBorder" TargetType="Border">
     <Setter Property="Background" Value="{DynamicResource App.CardFill}"/>

@@ -34,6 +34,6 @@
     <local:MouseStageView Grid.Row="2" x:Name="Stage" Margin="16,0,16,16"/>
     <!-- settings overlay host (Task 9 fills) -->
     <Grid Grid.Row="1" Grid.RowSpan="2" x:Name="OverlayHost" Visibility="Collapsed"
-          Background="#A0000000"/>
+          Background="{DynamicResource App.Scrim}"/>
   </Grid>
 </ui:FluentWindow>
