@@ -64,7 +64,9 @@ public static class IconRenderer
             // o'clock and is colored by battery level (green/amber/red, green while charging).
             // Inset by half its own width beyond the coin margin so the ring reads as the coin's
             // rim rather than floating separately from it.
-            float ringW = render * 0.09f;
+            // Hairline rim: floored at 1 FINAL pixel (render/size supersample px) so antialiasing
+            // can never dither it into a dashed circle at 16 px.
+            float ringW = MathF.Max(render * 0.055f, render / (float)size);
             float ringInset = coinMargin + ringW / 2f;
             var ringRect = new RectangleF(ringInset, ringInset, render - 2f * ringInset, render - 2f * ringInset);
             using (var track = new Pen(Color.FromArgb(45, 255, 255, 255), ringW))
@@ -93,7 +95,7 @@ public static class IconRenderer
                 // (the reference's principle; its own icons measure 41% tall on a 6% ring, ours
                 // pushes both to the limit). 3 digits get a shorter target, same as the
                 // reference dropping 56% -> 42% for "100".
-                float targetHeight = render * (text.Length >= 3 ? 0.40f : 0.51f);
+                float targetHeight = render * (text.Length >= 3 ? 0.46f : 0.57f);
                 float rIn = render / 2f - ringW;               // ring's inner edge radius
                 float halfH = targetHeight / 2f;
                 float maxWidth = 2f * MathF.Sqrt(Math.Max(0f, rIn * rIn - halfH * halfH)) - pad;
