@@ -6,6 +6,10 @@ public enum ButtonActionKind { Default, Disabled, Key }
 /// Round-trips categories the app doesn't model (mouse, DPI-stage, …) — Default-restore needs that.</summary>
 public readonly record struct RawButtonAction(byte Category, byte[] Data);
 
+/// <summary>The mouse's onboard profile inventory (0x05/0x81): slot capacity + the occupied slot
+/// numbers. Used to adopt an app-owned slot without ever touching a user's existing slots.</summary>
+public readonly record struct ProfileList(byte Capacity, byte[] Slots);
+
 /// <summary>One thumb-grid button binding. Kind=Default is a marker (absent from the remap table);
 /// it is never written to the device.</summary>
 public readonly record struct ButtonBinding(byte ButtonId, ButtonActionKind Kind, byte Modifiers, byte HidUsage)

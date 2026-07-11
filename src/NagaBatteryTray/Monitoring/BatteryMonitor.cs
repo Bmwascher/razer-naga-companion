@@ -60,34 +60,46 @@ public sealed class BatteryMonitor : IDisposable
         finally { _readLock.Release(); }
     }
 
-    /// <summary>Write one raw button action to the volatile direct profile. Blocks for the read lock
-    /// (serializes against battery poll + DPI on the single HID handle).</summary>
-    public async Task<bool> SetButtonAsync(byte buttonId, byte category, byte[] data)
+    /// <summary>Write one raw button action to a profile (0x00 direct / 0x01..0x05 onboard). Blocks for
+    /// the read lock (serializes against battery poll + DPI on the single HID handle).</summary>
+    public async Task<bool> SetButtonAsync(byte profile, byte buttonId, byte category, byte[] data)
     {
         try { await _readLock.WaitAsync(_cts.Token); }
         catch (OperationCanceledException) { return false; }
-        try { return await _device.SetButtonAsync(buttonId, category, data, _cts.Token); }
+        try { return await _device.SetButtonAsync(profile, buttonId, category, data, _cts.Token); }
         catch (OperationCanceledException) { return false; }
         finally { _readLock.Release(); }
     }
 
-    /// <summary>Read a button's current effective action from the direct profile. Blocks for the read lock.</summary>
-    public async Task<RawButtonAction?> GetButtonAsync(byte buttonId)
+    /// <summary>Read a button's current action from a profile. Blocks for the read lock.</summary>
+    public async Task<RawButtonAction?> GetButtonAsync(byte profile, byte buttonId)
     {
         try { await _readLock.WaitAsync(_cts.Token); }
         catch (OperationCanceledException) { return null; }
-        try { return await _device.GetButtonAsync(buttonId, _cts.Token); }
+        try { return await _device.GetButtonAsync(profile, buttonId, _cts.Token); }
         catch (OperationCanceledException) { return null; }
         finally { _readLock.Release(); }
     }
 
-    /// <summary>The remaps the mouse should hold (re-apply model, spec §5.3). Default entries are
-    /// filtered out — they are never written. Each subsequent poll/refresh verifies one sentinel button
-    /// and re-asserts the set only on drift; an empty set adds zero button I/O to the poll.</summary>
-    public void SetRemaps(IEnumerable<ButtonBinding> remaps) =>
-        _remaps = remaps.Where(b => b.Kind != ButtonActionKind.Default).ToArray();
+    /// <summary>Onboard profile inventory. Blocks for the read lock.</summary>
+    public async Task<ProfileList?> GetProfileListAsync()
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return null; }
+        try { return await _device.GetProfileListAsync(_cts.Token); }
+        catch (OperationCanceledException) { return null; }
+        finally { _readLock.Release(); }
+    }
 
-    private IReadOnlyList<ButtonBinding> _remaps = Array.Empty<ButtonBinding>();
+    /// <summary>Create an onboard profile slot. Blocks for the read lock.</summary>
+    public async Task<bool> CreateProfileAsync(byte slot)
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return false; }
+        try { return await _device.CreateProfileAsync(slot, _cts.Token); }
+        catch (OperationCanceledException) { return false; }
+        finally { _readLock.Release(); }
+    }
 
     private async Task PollAsync(bool reconnect = false)
     {
@@ -98,30 +110,9 @@ public sealed class BatteryMonitor : IDisposable
             var reading = await _device.ReadAsync(_cts.Token);
             ProcessReading(reading);
             ScheduleNext(reading);
-            if (reading.IsPresent) await VerifyRemapsAsync(); // still under the same lock hold
         }
         catch (OperationCanceledException) { }
         finally { _readLock.Release(); }
-    }
-
-    /// <summary>Re-assert remaps when the volatile layer was wiped: a wireless power-cycle emits NO USB
-    /// device-change (the dongle stays enumerated), so event-driven re-apply cannot see it. Piggybacks
-    /// the existing poll/refresh — no new timer; one sentinel GET per poll only while remaps are
-    /// configured, writes only on drift. An unreadable sentinel writes nothing (retries next poll).</summary>
-    private async Task VerifyRemapsAsync()
-    {
-        var remaps = _remaps;
-        if (remaps.Count == 0) return;
-        var sentinel = remaps[0];
-        var (expectedCategory, expectedData) = sentinel.ToWire();
-        var current = await _device.GetButtonAsync(sentinel.ButtonId, _cts.Token);
-        if (current is not { } c) return;
-        if (c.Category == expectedCategory && c.Data.AsSpan().SequenceEqual(expectedData)) return;
-        foreach (var b in remaps)
-        {
-            var (category, data) = b.ToWire();
-            await _device.SetButtonAsync(b.ButtonId, category, data, _cts.Token);
-        }
     }
 
     private void ScheduleNext(BatteryReading reading)

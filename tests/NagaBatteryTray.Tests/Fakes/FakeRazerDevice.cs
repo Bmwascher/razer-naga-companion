@@ -18,23 +18,35 @@ public sealed class FakeRazerDevice : IRazerDevice
         return Task.FromResult(SetDpiResult);
     }
 
-    public sealed record ButtonWrite(byte ButtonId, byte Category, byte[] Data);
+    public sealed record ButtonWrite(byte Profile, byte ButtonId, byte Category, byte[] Data);
     public List<ButtonWrite> ButtonWrites { get; } = new();
     public bool SetButtonResult { get; set; } = true;
-    public Dictionary<byte, RawButtonAction> ButtonActions { get; } = new();
+    public Dictionary<(byte Profile, byte ButtonId), RawButtonAction> ButtonActions { get; } = new();
 
-    public Task<bool> SetButtonAsync(byte buttonId, byte category, byte[] data, CancellationToken ct)
+    public Task<bool> SetButtonAsync(byte profile, byte buttonId, byte category, byte[] data, CancellationToken ct)
     {
-        ButtonWrites.Add(new ButtonWrite(buttonId, category, data));
+        ButtonWrites.Add(new ButtonWrite(profile, buttonId, category, data));
         return Task.FromResult(SetButtonResult);
     }
 
     public int GetButtonCount { get; private set; }
 
-    public Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct)
+    public Task<RawButtonAction?> GetButtonAsync(byte profile, byte buttonId, CancellationToken ct)
     {
         GetButtonCount++;
-        return Task.FromResult(ButtonActions.TryGetValue(buttonId, out var a) ? a : (RawButtonAction?)null);
+        return Task.FromResult(ButtonActions.TryGetValue((profile, buttonId), out var a) ? a : (RawButtonAction?)null);
+    }
+
+    public ProfileList? Profiles { get; set; }
+    public bool CreateProfileResult { get; set; } = true;
+    public List<byte> CreatedSlots { get; } = new();
+
+    public Task<ProfileList?> GetProfileListAsync(CancellationToken ct) => Task.FromResult(Profiles);
+
+    public Task<bool> CreateProfileAsync(byte slot, CancellationToken ct)
+    {
+        CreatedSlots.Add(slot);
+        return Task.FromResult(CreateProfileResult);
     }
 
     public int ResetCount { get; private set; }

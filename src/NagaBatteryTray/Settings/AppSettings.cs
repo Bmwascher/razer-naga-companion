@@ -11,4 +11,8 @@ public sealed class AppSettings
 
     /// <summary>Thumb-grid remaps keyed by grid position (1..12); sparse — only non-Default buttons.</summary>
     public Dictionary<int, ButtonBindingSetting> ButtonBindings { get; set; } = new();
+
+    /// <summary>The onboard profile slot this app created and owns (bindings are written there and
+    /// persist in the mouse's own memory). Null = not adopted yet. Never a user's pre-existing slot.</summary>
+    public int? OnboardSlot { get; set; } = null;
 }

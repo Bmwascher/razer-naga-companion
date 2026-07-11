@@ -79,7 +79,7 @@
             </StackPanel>
           </ui:CardExpander.Header>
           <StackPanel Margin="0,4,0,0">
-            <TextBlock Text="Rebind captures the next key you press (hold modifiers with it). Bindings live on the mouse and are re-applied when it reconnects. Synapse must not be running."
+            <TextBlock Text="Rebind captures the next key you press (hold modifiers with it). Bindings are saved into an onboard profile owned by this app — press the button on the mouse's underside until its LED shows the colour reported below. They then survive power-cycles with no software running. Your existing onboard profiles are never touched. Synapse must not be running."
                        Opacity="0.7" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"/>
             <ItemsControl ItemsSource="{Binding Buttons}">
               <ItemsControl.ItemTemplate>

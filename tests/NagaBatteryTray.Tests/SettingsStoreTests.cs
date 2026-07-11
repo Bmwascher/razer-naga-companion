@@ -40,6 +40,17 @@ public class SettingsStoreTests
     }
 
     [Fact]
+    public void OnboardSlot_defaults_null_and_round_trips()
+    {
+        var path = TempFile();
+        var store = new JsonSettingsStore(path);
+        Assert.Null(store.Settings.OnboardSlot);
+        store.Settings.OnboardSlot = 3;
+        store.Save();
+        Assert.Equal(3, new JsonSettingsStore(path).Settings.OnboardSlot);
+    }
+
+    [Fact]
     public void ButtonBindings_default_is_empty_and_old_files_load_without_the_field()
     {
         var path = TempFile();

@@ -4,9 +4,14 @@
 **Status:** **SPIKE RUN 2026-07-11 — PASS.** Stage 1 confirmed the remap command on hardware (§6): the
 12 grid ids are `0x40..0x4b` in physical order, volatile profile-0 writes apply instantly and clear on
 replug, **no preamble is required**, and input feel was unaffected throughout. The onboard-slot test was
-**declined by choice** (zero risk to the user's existing profiles) → **Stage 2 ships the re-apply
-persistence model.** (A spike FAIL would have been a documented close-out per the Phase C precedent,
-never a constraint-violating workaround.)
+initially declined, and Stage 2 first shipped the re-apply model — but hardware acceptance showed its
+weakness (a **wireless power-cycle emits no USB device-change**, so re-apply waits for the next battery
+poll), so the scratch-slot test was run after all (`--probe-buttons --slot-test`, same day): **PASS — an
+onboard slot persists across a power-cycle** → **Stage 2 ships the onboard app-owned-slot model** (§5.3):
+bindings are written once into a profile slot the app creates and owns, the firmware holds them through
+power-cycles with zero software involvement, and the user's existing slots are never written. (A spike
+FAIL would have been a documented close-out per the Phase C precedent, never a constraint-violating
+workaround.)
 **Builds on:** Phase 2-A (Settings + active DPI). Its §3.1 non-functional invariants
 (`2026-06-20-naga-settings-dpi-design.md`) bind this phase **unchanged**.
 
@@ -58,8 +63,11 @@ must come from a hardware **feasibility spike** that gates everything downstream
 - The concrete **12-entry thumb-grid button-ID table** (`NagaV2ProButtons`). **Decided 2026-07-11:
   `0x40`..`0x4b`, contiguous, physical order 1→12 (§6).**
 - The **persistence model** Stage 2 ships: *volatile direct + re-apply on connect* vs. *onboard slot,
-  written once*. **Decided 2026-07-11: the re-apply model** — the onboard-slot test was declined (zero
-  risk to existing profiles; §6), and re-apply needs no onboard writes at all.
+  written once*. **Decided 2026-07-11 (revised same day): the onboard app-owned-slot model** — the
+  re-apply model was built first (slot test initially declined) but couldn't see a wireless power-cycle
+  (no USB device-change), leaving up to a poll interval of stock bindings; the scratch-slot test was then
+  run and **passed** (§6), so bindings now live in a slot the app creates and owns — Synapse-parity
+  persistence with strictly less runtime I/O.
 
 ## 3. Success criteria
 
@@ -96,11 +104,11 @@ so it is handled with *more* care than DPI, never less:
   process**. After the write the firmware emits the bound usage; **we are not in the input path at all.**
 - Writes are **off the UI thread** (`Task.Run`) and **serialized on the existing `BatteryMonitor._readLock`**
   (the same lock battery+DPI already share). Never a concurrent feature transfer.
-- Writes are **user-action-triggered or drift-triggered re-assertion only** — **no new timer/thread.**
-  Re-application **piggybacks the existing battery poll**: one sentinel `GetButton` per poll **only
-  while remaps are configured** (zero extra I/O otherwise), writes only when the volatile layer was
-  actually wiped. (Revised from pure event-driven re-apply during Stage 2 acceptance: a wireless
-  power-cycle emits **no** USB device-change, so an event-only design silently loses bindings.)
+- Writes are **user-action-triggered only** (explicit Apply) — **no new timer/thread, and zero button
+  I/O outside Apply**. The onboard slot makes any re-assertion machinery unnecessary: the firmware holds
+  the bindings through power-cycles itself. (History: Stage 2 briefly shipped a per-poll sentinel-verify
+  for the volatile re-apply model — a wireless power-cycle emits **no** USB device-change, so event-only
+  re-apply silently lost bindings; the onboard model made that sentinel read deletable.)
 - **Flash-wear discipline:** onboard flash has finite write-endurance. Writes are **deliberate**
   (explicit user Apply), **read-back-verified**, and **coalesced** (write only buttons that changed). The
   spike prefers the **volatile** profile for the high-churn discovery loop — though its real value is the
@@ -253,28 +261,31 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
 
 ### 5.3 Stage 2 — device & monitor (`Hid/IRazerDevice.cs`, `Hid/RazerDevice.cs`, `Monitoring/BatteryMonitor.cs`)
 
-- `IRazerDevice` gains `Task<bool> SetButtonAsync(byte buttonId, byte category, byte[] data, CancellationToken ct)`
-  and `Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct)` — **raw category+data
-  both ways**: a Key-only `ButtonBinding` cannot carry the stock mouse-category actions that
-  Default-restore and read-back need. `FakeRazerDevice` implements both with assertion fields (write
-  log, canned reads) — the unit seam, mirroring the DPI fakes.
+- `IRazerDevice` gains `Task<bool> SetButtonAsync(byte profile, byte buttonId, byte category, byte[] data, CancellationToken ct)`
+  and `Task<RawButtonAction?> GetButtonAsync(byte profile, byte buttonId, CancellationToken ct)` — **raw
+  category+data both ways** (a Key-only `ButtonBinding` cannot carry the stock mouse-category actions
+  that Default-restore and read-back need), **profile-addressed** (0x00 direct / 0x01..0x05 onboard) —
+  plus `GetProfileListAsync` (`0x05/0x81`) and `CreateProfileAsync(slot)` (`0x05/0x02`) for slot
+  adoption. `FakeRazerDevice` implements all four with assertion fields (write log keyed by profile,
+  canned reads, created-slot log) — the unit seam, mirroring the DPI fakes.
 - `RazerDevice` implements them over the **existing `ExchangeAsync`** (SET→`SetReadDelayMs` wait→GET,
   busy-retry, close-on-failure) — no new transport. `tid != 0` gating as battery/DPI already do.
-- `BatteryMonitor` gains `SetButtonAsync(...)` / `GetButtonAsync(...)` pass-throughs that acquire the
-  **existing `_readLock`** (DPI blocks, poll skips-if-busy — unchanged). No cadence/timer change.
-- **Re-apply model (as shipped — revised during Stage 2 hardware acceptance):** event-driven re-apply
-  alone is **insufficient**: a **wireless power-cycle emits no USB device-change** (the dongle stays
-  enumerated), so `DeviceChangeWatcher` never fires and the wiped volatile layer went unnoticed until
-  app restart. Instead, `AppHost` hands the persisted table to `BatteryMonitor.SetRemaps(...)` (at
-  startup and after every Apply), and **each successful battery poll/refresh sentinel-verifies**: one
-  `GetButton` on the first bound button — **only while remaps are configured; zero extra I/O
-  otherwise** — and re-asserts the whole set **only on drift** (a power-cycle wipes all volatile
-  bindings uniformly, so one sentinel suffices). No new timer/thread — it rides the existing poll;
-  wired/dongle replugs still re-assert via the existing debounced device-change refresh (which also
-  verifies); a silent wireless power-cycle self-heals within one poll interval or instantly via the
-  tray's "Refresh now". An unreadable sentinel writes nothing (retry next poll — never a blind write).
-  **The onboard-slot model** (bindings written once on user Apply to a slot; no re-write) was not
-  selected (§6: slot test declined).
+- `BatteryMonitor` gains locked pass-throughs for all four that acquire the **existing `_readLock`**
+  (DPI blocks, poll skips-if-busy — unchanged). No cadence/timer change; the poll itself does **zero**
+  button I/O.
+- **Onboard app-owned-slot model (as shipped — final, chosen by the user after the slot test passed):**
+  on the first Apply the app **adopts a slot**: it queries the profile list, picks the first **free**
+  slot number (a user's existing slots are **never** taken or written), creates it, and records the
+  number in `settings.json` (`OnboardSlot`). Every binding write targets that slot; the **firmware**
+  then holds the bindings through power-cycles, replugs, and reboots with **no software involvement** —
+  Synapse parity, and instant (the re-apply model left the mouse on stock bindings for up to a poll
+  interval after a silent wireless power-cycle). If the mouse later loses the recorded slot (factory
+  reset), Apply re-creates that same number; if the list is unreadable or every slot is occupied by a
+  foreign profile, Apply fails visibly — never a blind write. **One UX cost:** there is **no
+  documented command to set the active profile**, so the user selects the app's slot once with the
+  mouse's **bottom profile button** (LED colour = slot: 1 white / 2 red / 3 green / 4 blue / 5 cyan);
+  the Apply status line names the slot and colour. The earlier **volatile + sentinel-verify re-apply**
+  build was deleted with this change — startup, reconnect, and the battery poll do no button work at all.
 
 ### 5.4 Stage 2 — settings, model & wiring (`Settings/AppSettings.cs`, `AppHost.cs`)
 
@@ -284,9 +295,10 @@ runtime. New `Program.cs` dispatch: `--probe-buttons` → `RunButtons()`, `--pro
   profile **before that button's first-ever write**) so "Default" can restore instantly and offline.
   Persisted in `settings.json` (Roaming), corrupt/missing → defaults, exactly as today. The discovered
   `NagaV2ProButtons` ID table is a baked-in constant (`0x40..0x4b`, §6), so the stored table is
-  position-indexed and firmware-id-stable.
-- `AppHost` loads the table and (re-apply model) applies it on startup/device-change; passes the monitor
-  to the Settings window so Apply routes writes through `_readLock`.
+  position-indexed and firmware-id-stable. `AppSettings.OnboardSlot` (nullable) records the adopted
+  app-owned slot; null = not adopted yet.
+- `AppHost` adopts the onboard slot on first Apply (§5.3) and routes all writes through the monitor's
+  `_readLock`; startup and device-change do **no** button work (the mouse holds its own bindings).
 
 ### 5.5 Stage 2 — UI (`Ui/SettingsWindow.xaml(.cs)`, `Ui/SettingsViewModel.cs`)
 
@@ -338,8 +350,8 @@ driver) from openrazer's `razerchromacommon.c`.
 | Does the V2 Pro accept `0x020c` (known-ID acceptance probe)? | **Yes** — SET status `0x02`, read-back echoed `02 / 00 68`, F13 emitted on wheel-click. The get-before returned the true factory action (`category 0x01` mouse, `data 03` middle-click), so GET reads real data |
 | The 12 thumb-grid button IDs (physical position → id) + recorded previous actions | **`0x40`..`0x4b`, contiguous, physical order 1→12.** Previous actions journaled to `probe-buttons.json` (the active onboard profile carried custom Synapse-era keys — F4–F10/Oem/Enter, not factory digits) |
 | Does a **volatile** (profile 0) write apply instantly? | **Yes** — and it **clears on replug** (profile 0 confirmed volatile/no-flash) |
-| Onboard profile list (`0x05/0x81`); was profile creation (`0x05/0x02`) required? | List works: capacity 5, slots `[01 02]` exist. Creation untested (scratch test declined) |
-| Does a **scratch onboard slot** write **persist** across unplug/replug with **no Razer software**? | **Skipped by choice** (zero onboard risk). Re-runnable later if the onboard model is ever wanted; Stage 2 does not need it |
+| Onboard profile list (`0x05/0x81`); was profile creation (`0x05/0x02`) required? | List works: capacity 5, slots `[01 02]` exist. **Creation works** (slot-test run, same day): scratch slot 3 created (status `0x02`), deleted cleanly after the test (`0x05/0x03`, status `0x02`) |
+| Does a **scratch onboard slot** write **persist** across unplug/replug with **no Razer software**? | **YES** (`--probe-buttons --slot-test`, 2026-07-11): grid button 1 → F15 written to scratch slot 3 (status `0x02`), journal-before-write honored, **F15 survived a full power-cycle** with no Razer software. User profiles `[01 02]` untouched throughout |
 | Required preamble/handshake before a write is accepted? **and does it alter normal input** (see gate) | **None.** Writes accepted directly in normal device mode; the mouse stayed fully functional throughout (movement, clicks, grid presses) — no input-feel change |
 
 **Extra findings (2026-07-11):** the firmware **validates button ids** — every candidate outside the real
@@ -348,8 +360,9 @@ cannot bind a nonexistent button. Besides the grid, ids **`0x0e`** and **`0x50`.
 writes but were not emitted by any grid press — other physical controls or reserved slots, left
 unidentified for now (Stage 2 only writes the 12 known grid ids).
 
-**Result: PASS** — Stage 2 proceeds with the **re-apply** persistence model (volatile profile-0 writes,
-re-asserted on connect via the existing startup + `DeviceChangeWatcher` debounced-refresh path).
+**Result: PASS** — Stage 2 ships the **onboard app-owned-slot** persistence model (§5.3): bindings are
+written once into a slot the app creates and owns; the firmware persists them itself. (The re-apply
+model was built first and replaced after the slot test passed — see Status.)
 
 **Gate:** PASS = command accepted **and** the 12 IDs captured **and** at least the volatile write honored →
 Stage 2 proceeds (persistence model chosen from the volatile/onboard rows). FAIL = the firmware rejects the write, or no
@@ -370,14 +383,17 @@ by contrast, is one-time onboard housekeeping and is an acceptable preamble.
 - **Write rejected / busy:** existing `ExchangeAsync` busy-retry + status validation; surfaced to the user
   on Apply (no false "saved").
 - **Read-back mismatch:** Apply reports the button as not-applied rather than claiming success.
-- **Mouse absent / unplugged mid-write:** `EnsureConnectedAsync` fails gracefully; handle dropped; (re-apply
-  model) the binding re-asserts on the next device-change/connect.
-- **Firmware doesn't persist (slot model):** caught by the spike → either ship the **re-apply** model or, if
-  nothing persists, close the phase. Not papered over.
+- **Mouse absent / unplugged mid-write:** `EnsureConnectedAsync` fails gracefully; handle dropped; the
+  failed rows stay pending in the UI so a retry re-sends the same ops (already-written bindings sit
+  safely in the onboard slot).
+- **Mouse lost the app's slot** (factory reset): Apply re-creates the recorded slot number; a user's
+  slots are never candidates. Unreadable profile list or all slots foreign-occupied → Apply fails
+  visibly, never a blind write.
 - **Unknown/again-default button:** "Default" rewrites the button's **stock action snapshotted at its
-  first-ever remap** (read from the direct profile before our first write; persisted beside the binding);
-  if that snapshot read failed, Default = drop from the table + effective on next reconnect. A
-  never-touched button is never written (flash-wear/§3.1 discipline).
+  first-ever remap** (read from the app's slot before our first write; persisted beside the binding);
+  if that snapshot read failed (rare device hiccup), Default drops the table entry and says honestly
+  that the button keeps its last binding in the slot. A never-touched button is never written
+  (flash-wear/§3.1 discipline).
 - **Mouse left in driver mode** (past Synapse install): detected and reset to normal in the spike (§5.2
   step 1); Stage 2 assumes normal mode — it never sets driver mode.
 - **Synapse running concurrently:** may override at runtime; documented (§4). We do not fight it.
@@ -391,8 +407,8 @@ by contrast, is one-time onboard housekeeping and is an acceptable preamble.
 
 All remap HID I/O is **off the UI thread**, inside `BatteryMonitor` under the **single shared `_readLock`**
 already used by battery+DPI — never a second concurrent feature transfer. UI updates marshal back via the
-existing `Dispatch`. (Re-apply model) re-application runs inside the existing debounced device-change
-handler / startup, off-UI, under the same lock. **No new synchronization primitives, timers, or threads.**
+existing `Dispatch`. Button I/O happens **only during an explicit Apply**; startup, reconnect, and the
+battery poll do none. **No new synchronization primitives, timers, or threads.**
 
 ## 9. Testing strategy
 
@@ -405,9 +421,8 @@ acceptance, capture the 12 IDs, record which write modes persist; `--probe-butto
 - `BuildGetButtonBuffer`/`ParseButtonReply` round-trip; a reply failing the **echo check** (wrong
   profile/buttonId/hypershift echoed, or dataLen > 5) → `Failed`; `BuildSetButtonBuffer` with data > 5
   bytes **throws** (a truncated binding must never reach the device).
-- `SetButtonAsync` routes the binding to the device and returns its result; `GetButtonAsync` decodes it.
-- (Re-apply model) `ApplyRemapsAsync` writes every configured binding on connect; an empty table writes
-  nothing (assert zero device calls — protects the no-extra-I/O invariant).
+- `SetButtonAsync`/`GetButtonAsync` route profile + binding to the device and return its result;
+  `GetProfileListAsync`/`CreateProfileAsync` route the slot-adoption commands under the same lock.
 - A button left "Default" is never written on Apply (coalesced-write / flash-wear assertion).
 - `RemapTable` round-trips through `JsonSettingsStore`; corrupt JSON → defaults; `SettingsViewModel`
   edits map to the right `ButtonBinding`s.
@@ -434,8 +449,8 @@ HyperShift, per-app profiles, Type-Text, and Launch-Program remain **permanently
   delete `0x05/0x03`.
 - **Lightweight + zero mouse-input-latency are hard, gating requirements** (§3.1): one passive
   control-endpoint feature write per changed button, off-UI, serialized on the one `_readLock`,
-  user-action-triggered (or re-applied via the existing event-driven device-change/startup path — no new
-  timer/thread); deliberate, read-back-verified, coalesced writes; footprint + latency verified as
+  user-action-triggered only (the onboard slot needs no re-apply path — no new timer/thread, no button
+  I/O outside Apply); deliberate, read-back-verified, coalesced writes; footprint + latency verified as
   acceptance gates.
 - **Reference-only prior art (all GPL):** re-derive protocol bytes; never copy code, never adopt the
   interface-claiming transport. See CLAUDE.md "References / prior art."

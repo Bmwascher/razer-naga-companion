@@ -56,7 +56,6 @@ public sealed class AppHost
         _deviceWatcher = new DeviceChangeWatcher();
         _deviceWatcher.DeviceChanged += OnDeviceChanged;
 
-        _monitor.SetRemaps(CurrentBindings()); // first poll verifies + applies them (empty table = no-op)
         _monitor.Start();
     }
 
@@ -77,7 +76,7 @@ public sealed class AppHost
         {
             try { await Task.Delay(DeviceSettleMs, ct); }
             catch (OperationCanceledException) { return; }
-            await _monitor.RefreshNowAsync(); // the refresh also sentinel-verifies + re-asserts remaps
+            await _monitor.RefreshNowAsync();
         }, ct);
     }
 
@@ -140,19 +139,52 @@ public sealed class AppHost
         });
     }
 
-    /// <summary>The persisted remap table as wire-ready bindings — the monitor's sentinel-verify set.</summary>
-    private IEnumerable<ButtonBinding> CurrentBindings()
+    /// <summary>Slot LED colour on the V2 Pro's bottom profile button (spec §6).</summary>
+    private static string SlotColour(byte slot) => slot switch
     {
-        foreach (var (pos, b) in _settings.Settings.ButtonBindings)
-            yield return new ButtonBinding(NagaV2ProButtons.IdForPosition(pos), b.Kind, b.Modifiers, b.HidUsage);
+        1 => "white", 2 => "red", 3 => "green", 4 => "blue", 5 => "cyan", _ => $"slot {slot}",
+    };
+
+    /// <summary>Returns the app-owned onboard slot, adopting one on first use: re-creates the recorded
+    /// slot if the mouse lost it (e.g. factory reset), else creates the first FREE slot — a user's
+    /// existing slots are never taken or written. Null = mouse unreachable, create refused, or no
+    /// free slot.</summary>
+    private async Task<byte?> EnsureOnboardSlotAsync()
+    {
+        if (await Task.Run(() => _monitor.GetProfileListAsync()) is not { } list) return null;
+
+        if (_settings.Settings.OnboardSlot is { } recorded)
+        {
+            byte r = (byte)recorded;
+            if (Array.IndexOf(list.Slots, r) >= 0) return r;
+            return await Task.Run(() => _monitor.CreateProfileAsync(r)) ? r : null;
+        }
+
+        byte free = 0;
+        for (byte n = 1; n <= list.Capacity; n++)
+            if (Array.IndexOf(list.Slots, n) < 0) { free = n; break; }
+        if (free == 0) return null; // every slot holds someone else's profile — never overwrite
+        if (!await Task.Run(() => _monitor.CreateProfileAsync(free))) return null;
+        _settings.Settings.OnboardSlot = free;
+        _settings.Save();
+        return free;
     }
 
-    /// <summary>Apply staged button ops: snapshot the stock action at a button's first-ever remap,
-    /// write the binding (volatile profile), read-back verify, persist. Default restores the snapshot
-    /// and drops the entry. Every HID call runs off the UI thread via the monitor's shared lock.</summary>
+    /// <summary>Apply staged button ops into the app-owned ONBOARD slot (spec §5.3): adopt the slot on
+    /// first use, snapshot a button's factory action at its first-ever remap, write the binding,
+    /// read-back verify, persist. The mouse itself holds the bindings — they survive power-cycles with
+    /// no software involvement. Every HID call runs off the UI thread via the monitor's shared lock.</summary>
     private async Task ApplyButtonsAsync(SettingsWindow win, IReadOnlyList<ButtonOp> ops)
     {
         Dispatch(() => win.SetButtonsStatus("Applying…"));
+
+        if (await EnsureOnboardSlotAsync() is not { } slot)
+        {
+            // rows keep their pending state so a retry re-sends the same ops
+            Dispatch(() => win.SetButtonsStatus("No onboard slot — wiggle the mouse and retry"));
+            return;
+        }
+
         var table = _settings.Settings.ButtonBindings;
         int okCount = 0;
 
@@ -165,16 +197,16 @@ public sealed class AppHost
             if (op.OpKind == ButtonOpKind.RestoreDefault)
             {
                 table.TryGetValue(op.Position, out var entry);
-                bool deferred = entry is not null && !entry.HasStock;
+                bool stockUnknown = entry is not null && !entry.HasStock;
                 ok = entry is null || !entry.HasStock
-                     || await Task.Run(() => _monitor.SetButtonAsync(id, entry.StockCategory, entry.StockData));
+                     || await Task.Run(() => _monitor.SetButtonAsync(slot, id, entry.StockCategory, entry.StockData));
                 if (ok)
                 {
                     table.Remove(op.Position);
                     Dispatch(() =>
                     {
                         row.MarkApplied();
-                        if (deferred) row.Status = "Default after next reconnect";
+                        if (stockUnknown) row.Status = "Stock unknown — button keeps its last binding";
                     });
                 }
                 else Dispatch(() => row.MarkFailed("Restore failed — retry"));
@@ -184,9 +216,9 @@ public sealed class AppHost
                 if (!table.TryGetValue(op.Position, out var entry))
                 {
                     entry = new ButtonBindingSetting();
-                    // first-ever remap of this button: it has never been written, so the direct-profile
-                    // read returns its stock action — snapshot it for instant Default later
-                    var stock = await Task.Run(() => _monitor.GetButtonAsync(id));
+                    // first-ever remap of this button: the app slot still holds its factory action —
+                    // snapshot it (from the slot, not the active profile) for instant Default later
+                    var stock = await Task.Run(() => _monitor.GetButtonAsync(slot, id));
                     if (stock is { } s)
                     {
                         entry.StockCategory = s.Category;
@@ -196,10 +228,10 @@ public sealed class AppHost
                 }
                 var binding = new ButtonBinding(id, op.Kind, op.Modifiers, op.HidUsage);
                 var (category, data) = binding.ToWire();
-                ok = await Task.Run(() => _monitor.SetButtonAsync(id, category, data));
+                ok = await Task.Run(() => _monitor.SetButtonAsync(slot, id, category, data));
                 if (ok)
                 {
-                    var readBack = await Task.Run(() => _monitor.GetButtonAsync(id));
+                    var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, id));
                     ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
                 }
                 if (ok)
@@ -214,8 +246,9 @@ public sealed class AppHost
         }
 
         _settings.Save();
-        _monitor.SetRemaps(CurrentBindings()); // keep the poll's sentinel-verify set in sync
-        Dispatch(() => win.SetButtonsStatus(okCount == ops.Count ? "Applied" : $"{okCount}/{ops.Count} applied"));
+        Dispatch(() => win.SetButtonsStatus(okCount == ops.Count
+            ? $"Saved to onboard profile {slot} ({SlotColour(slot)}) — select it with the bottom button"
+            : $"{okCount}/{ops.Count} applied"));
     }
 
     private void SetStartup(bool enable)

@@ -178,14 +178,14 @@ public sealed class RazerDevice : IRazerDevice
         }
     }
 
-    public async Task<bool> SetButtonAsync(byte buttonId, byte category, byte[] data, CancellationToken ct)
+    public async Task<bool> SetButtonAsync(byte profile, byte buttonId, byte category, byte[] data, CancellationToken ct)
     {
         try
         {
             byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return false;
             var reply = await ExchangeAsync(RazerProtocol.BuildSetButtonBuffer(
-                tid, RazerProtocol.ButtonProfileDirect, buttonId, 0x00, category, data), ct);
+                tid, profile, buttonId, 0x00, category, data), ct);
             // SET ack: status-only (the spike-proven check); correctness is covered by read-back verify.
             return reply is not null && reply[1] == 0x02;
         }
@@ -197,16 +197,16 @@ public sealed class RazerDevice : IRazerDevice
         }
     }
 
-    public async Task<RawButtonAction?> GetButtonAsync(byte buttonId, CancellationToken ct)
+    public async Task<RawButtonAction?> GetButtonAsync(byte profile, byte buttonId, CancellationToken ct)
     {
         try
         {
             byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return null;
             var reply = await ExchangeAsync(RazerProtocol.BuildGetButtonBuffer(
-                tid, RazerProtocol.ButtonProfileDirect, buttonId, 0x00), ct);
+                tid, profile, buttonId, 0x00), ct);
             if (reply is null) return null;
-            if (RazerProtocol.ParseButtonReply(reply, RazerProtocol.ButtonProfileDirect, buttonId, 0x00,
+            if (RazerProtocol.ParseButtonReply(reply, profile, buttonId, 0x00,
                     out byte category, out byte[] data) != ReplyResult.Success)
                 return null;
             return new RawButtonAction(category, data);
@@ -216,6 +216,43 @@ public sealed class RazerDevice : IRazerDevice
             CloseHandle();
             LogOnce(ex);
             return null;
+        }
+    }
+
+    public async Task<ProfileList?> GetProfileListAsync(CancellationToken ct)
+    {
+        try
+        {
+            byte tid = await EnsureConnectedAsync(ct);
+            if (tid == 0) return null;
+            var reply = await ExchangeAsync(RazerProtocol.BuildGetProfileListBuffer(tid), ct);
+            if (reply is null) return null;
+            if (RazerProtocol.ParseProfileListReply(reply, out byte capacity, out byte[] slots) != ReplyResult.Success)
+                return null;
+            return new ProfileList(capacity, slots);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CloseHandle();
+            LogOnce(ex);
+            return null;
+        }
+    }
+
+    public async Task<bool> CreateProfileAsync(byte slot, CancellationToken ct)
+    {
+        try
+        {
+            byte tid = await EnsureConnectedAsync(ct);
+            if (tid == 0) return false;
+            var reply = await ExchangeAsync(RazerProtocol.BuildNewProfileBuffer(tid, slot), ct);
+            return reply is not null && reply[1] == 0x02;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CloseHandle();
+            LogOnce(ex);
+            return false;
         }
     }
 

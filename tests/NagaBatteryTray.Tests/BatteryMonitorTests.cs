@@ -108,13 +108,14 @@ public class BatteryMonitorTests
     }
 
     [Fact]
-    public async Task SetButtonAsync_routes_raw_bytes_to_device_and_returns_result()
+    public async Task SetButtonAsync_routes_profile_and_raw_bytes_to_device_and_returns_result()
     {
         var fake = new FakeRazerDevice { SetButtonResult = true };
         using var m = new BatteryMonitor(fake, TempStore(), a => a());
-        bool ok = await m.SetButtonAsync(0x40, 0x02, new byte[] { 0x01, 0x06 });
+        bool ok = await m.SetButtonAsync(0x03, 0x40, 0x02, new byte[] { 0x01, 0x06 });
         Assert.True(ok);
         var w = Assert.Single(fake.ButtonWrites);
+        Assert.Equal(0x03, w.Profile);
         Assert.Equal(0x40, w.ButtonId);
         Assert.Equal(0x02, w.Category);
         Assert.Equal(new byte[] { 0x01, 0x06 }, w.Data);
@@ -124,100 +125,32 @@ public class BatteryMonitorTests
     public async Task GetButtonAsync_returns_device_value_or_null()
     {
         var fake = new FakeRazerDevice();
-        fake.ButtonActions[0x40] = new RawButtonAction(0x02, new byte[] { 0x00, 0x3d });
+        fake.ButtonActions[(0x03, 0x40)] = new RawButtonAction(0x02, new byte[] { 0x00, 0x3d });
         using var m = new BatteryMonitor(fake, TempStore(), a => a());
-        var hit = await m.GetButtonAsync(0x40);
-        Assert.Equal(new RawButtonAction(0x02, fake.ButtonActions[0x40].Data), hit);
-        Assert.Null(await m.GetButtonAsync(0x41));
-    }
-
-    // --- remap sentinel verify (re-apply model): a wireless power-cycle wipes the volatile layer but
-    // --- emits NO USB device-change, so each poll/refresh with remaps configured checks one sentinel
-    // --- button and re-asserts everything only on drift.
-
-    [Fact]
-    public async Task Refresh_with_drifted_sentinel_reapplies_every_binding()
-    {
-        var fake = new FakeRazerDevice();
-        fake.Enqueue(Online(50, false));
-        fake.ButtonActions[0x40] = new RawButtonAction(0x01, new byte[] { 0x03 }); // stock, not our Ctrl+C
-        using var m = new BatteryMonitor(fake, TempStore(), a => a());
-        m.SetRemaps(new[]
-        {
-            new ButtonBinding(0x40, ButtonActionKind.Key, 0x01, 0x06),  // Ctrl+C
-            new ButtonBinding(0x41, ButtonActionKind.Disabled, 0, 0),
-        });
-        await m.RefreshNowAsync();
-        Assert.Equal(2, fake.ButtonWrites.Count);
-        Assert.Equal(RazerProtocol.FnKeyboard, fake.ButtonWrites[0].Category);
-        Assert.Equal(new byte[] { 0x01, 0x06 }, fake.ButtonWrites[0].Data);
-        Assert.Equal(RazerProtocol.FnDisabled, fake.ButtonWrites[1].Category);
-        Assert.Empty(fake.ButtonWrites[1].Data);
+        var hit = await m.GetButtonAsync(0x03, 0x40);
+        Assert.Equal(new RawButtonAction(0x02, fake.ButtonActions[(0x03, 0x40)].Data), hit);
+        Assert.Null(await m.GetButtonAsync(0x03, 0x41));
+        Assert.Null(await m.GetButtonAsync(0x00, 0x40)); // same button, different profile
     }
 
     [Fact]
-    public async Task Refresh_with_matching_sentinel_writes_nothing()
+    public async Task GetProfileListAsync_returns_device_value_or_null()
     {
-        var fake = new FakeRazerDevice();
-        fake.Enqueue(Online(50, false));
-        fake.ButtonActions[0x40] = new RawButtonAction(0x02, new byte[] { 0x01, 0x06 }); // already ours
+        var fake = new FakeRazerDevice { Profiles = new ProfileList(5, new byte[] { 1, 2 }) };
         using var m = new BatteryMonitor(fake, TempStore(), a => a());
-        m.SetRemaps(new[] { new ButtonBinding(0x40, ButtonActionKind.Key, 0x01, 0x06) });
-        await m.RefreshNowAsync();
-        Assert.Equal(1, fake.GetButtonCount); // one sentinel read
-        Assert.Empty(fake.ButtonWrites);      // no drift -> no writes
+        var list = await m.GetProfileListAsync();
+        Assert.Equal(new ProfileList(5, fake.Profiles!.Value.Slots), list);
+
+        using var m2 = new BatteryMonitor(new FakeRazerDevice(), TempStore(), a => a());
+        Assert.Null(await m2.GetProfileListAsync());
     }
 
     [Fact]
-    public async Task Refresh_with_no_remaps_makes_zero_button_io()
+    public async Task CreateProfileAsync_routes_slot_and_returns_result()
     {
-        // protects the no-extra-I/O invariant: no remaps configured => byte-for-byte today's behaviour
-        var fake = new FakeRazerDevice();
-        fake.Enqueue(Online(50, false));
+        var fake = new FakeRazerDevice { CreateProfileResult = true };
         using var m = new BatteryMonitor(fake, TempStore(), a => a());
-        await m.RefreshNowAsync();
-        Assert.Equal(0, fake.GetButtonCount);
-        Assert.Empty(fake.ButtonWrites);
-    }
-
-    [Fact]
-    public async Task Refresh_with_absent_device_does_no_button_io()
-    {
-        var fake = new FakeRazerDevice(); // empty queue -> Absent reading
-        using var m = new BatteryMonitor(fake, TempStore(), a => a());
-        m.SetRemaps(new[] { new ButtonBinding(0x40, ButtonActionKind.Key, 0x01, 0x06) });
-        await m.RefreshNowAsync();
-        Assert.Equal(0, fake.GetButtonCount);
-        Assert.Empty(fake.ButtonWrites);
-    }
-
-    [Fact]
-    public async Task Refresh_with_unreadable_sentinel_writes_nothing()
-    {
-        // uncertain state (mouse answered battery but not the button read) -> don't write; retry next poll
-        var fake = new FakeRazerDevice();
-        fake.Enqueue(Online(50, false));
-        using var m = new BatteryMonitor(fake, TempStore(), a => a());
-        m.SetRemaps(new[] { new ButtonBinding(0x40, ButtonActionKind.Key, 0x01, 0x06) });
-        await m.RefreshNowAsync(); // ButtonActions has no 0x40 -> GET returns null
-        Assert.Equal(1, fake.GetButtonCount);
-        Assert.Empty(fake.ButtonWrites);
-    }
-
-    [Fact]
-    public async Task SetRemaps_filters_default_entries()
-    {
-        var fake = new FakeRazerDevice();
-        fake.Enqueue(Online(50, false));
-        fake.ButtonActions[0x41] = new RawButtonAction(0x01, new byte[] { 0x03 }); // drifted sentinel
-        using var m = new BatteryMonitor(fake, TempStore(), a => a());
-        m.SetRemaps(new[]
-        {
-            new ButtonBinding(0x40, ButtonActionKind.Default, 0, 0),   // filtered out (never written)
-            new ButtonBinding(0x41, ButtonActionKind.Disabled, 0, 0),  // becomes the sentinel
-        });
-        await m.RefreshNowAsync();
-        var w = Assert.Single(fake.ButtonWrites);
-        Assert.Equal(0x41, w.ButtonId);
+        Assert.True(await m.CreateProfileAsync(3));
+        Assert.Equal(new byte[] { 3 }, fake.CreatedSlots.ToArray());
     }
 }
