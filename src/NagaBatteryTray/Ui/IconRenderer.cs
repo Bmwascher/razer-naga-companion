@@ -10,7 +10,7 @@ public static class IconRenderer
     private static readonly Color Green = Color.FromArgb(0x44, 0xD6, 0x2C);
     private static readonly Color Amber = Color.FromArgb(0xE0, 0xA2, 0x3E);
     private static readonly Color Red = Color.FromArgb(0xE0, 0x47, 0x3E);
-    private static readonly Color CoinFill = Color.FromArgb(170, 16, 18, 22);
+    private static readonly Color CoinFill = Color.FromArgb(205, 16, 18, 22);
     private static readonly FontFamily Family = ResolveFamily();
 
     private static FontFamily ResolveFamily()
@@ -38,7 +38,9 @@ public static class IconRenderer
     public static Icon Render(DeviceState state, int dpi)
     {
         int size = Math.Max(16, dpi * 16 / 96); // SM_CXSMICON scales with DPI
-        int render = size * 2;                  // supersample 2x; Windows downscales -> crisper digits
+        int render = size * 4;                  // supersample 4x, downscaled BELOW by us — handing the
+                                                // shell an oversized icon lets ITS low-quality resampler
+                                                // mush the digits (user-visible blur at 16 px)
         string text = state.Status == DeviceStatus.Unknown ? "-" : state.Percent.ToString();
         Color ringColor = state.Status == DeviceStatus.Unknown
             ? Color.Gray
@@ -119,10 +121,27 @@ public static class IconRenderer
                 using var m = new Matrix(scaleX, 0f, 0f, scaleY, offX, offY);
                 path.Transform(m);
 
+                // Fill + a same-color stroke: Segoe UI Bold is too light once the digits are
+                // ~9 px tall on the final icon. Keep the stroke subtle — it also SHRINKS the
+                // digit counters (the holes in 0/9), which is what kills legibility first;
+                // 3 digits get even less because their strokes sit closer together.
                 using var brush = new SolidBrush(Color.White);
+                using var fat = new Pen(Color.White, render * (text.Length >= 3 ? 0.012f : 0.024f)) { LineJoin = LineJoin.Round };
+                g.DrawPath(fat, path);
                 g.FillPath(brush, path);
             }
         }
-        return Icon.FromHandle(bmp.GetHicon());
+
+        // Downscale to the EXACT tray size with a high-quality resampler so the shell displays
+        // the icon 1:1. (It used to receive the 2x render and downscale it itself — visibly
+        // blurry digits at 16 px.)
+        using var final = new Bitmap(size, size);
+        using (var g = Graphics.FromImage(final))
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.DrawImage(bmp, new Rectangle(0, 0, size, size));
+        }
+        return Icon.FromHandle(final.GetHicon());
     }
 }
