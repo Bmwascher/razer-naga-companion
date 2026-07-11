@@ -2,7 +2,8 @@
 
 Featherweight Windows system-tray app — a minimal **Razer Synapse replacement** for the
 **Razer Naga V2 Pro**. Shows battery % in the tray, reads/sets the mouse's active
-hardware DPI, and remaps the 12-button thumb grid (onboard, key+modifiers or disable).
+hardware DPI, and remaps the 12-button thumb grid (onboard, key+modifiers or disable)
+through a themed dashboard UI.
 .NET 10 (`net10.0-windows10.0.19041.0`), C#, WPF + WinForms, WPF-UI 4.3.0
 (Fluent), HidSharp, CommunityToolkit.WinUI.Notifications (toasts), xUnit.
 Public repo: https://github.com/Bmwascher/razer-naga-companion
@@ -110,22 +111,50 @@ does, so launch it `-WindowStyle Hidden`.
   `OnboardSlot`. Corrupt file → silently resets to defaults.
 - `Ui/` — `IconRenderer` (draws the tray battery digits from their **ink bounds via a `GraphicsPath`**,
   sized to fill the icon height and only condensed horizontally when too wide, so 3-digit "100" stays
-  legible); `TrayIcon` (raw **Shell_NotifyIcon** keyed by a **stable GUID derived from the exe path** so
+  legible, plus a **circular battery-level ring** drawn first, behind the digits — digits win the space
+  contest; ring thickness ~7% of icon size, round caps, a glow pen while charging); `TrayIcon` (raw
+  **Shell_NotifyIcon** keyed by a **stable GUID derived from the exe path** so
   Windows persists the taskbar position across restarts/sleep — fixes the position-reset bug; the
   path-derived GUID also differs between the installed exe and a dev-host run, dodging the shell's
   one-GUID-per-executable conflict; uses `NOTIFYICON_VERSION_4`, so handle **only** `NIN_SELECT`/
   `WM_CONTEXTMENU`, **not** the duplicate raw `WM_LBUTTONUP`/`WM_RBUTTONUP` or every click double-fires),
-  wrapped by `TrayIconController`; `PopupWindow` (+`PopupViewModel`; cached singleton that **re-parks
-  off-screen before every show** and positions in **physical px** to dodge mixed-DPI bugs and a
-  reposition flash); `DeviceChangeWatcher` (hidden top-level window; `WM_DEVICECHANGE`/
-  `DBT_DEVNODES_CHANGED` → debounced refresh); `SettingsWindow`/`SettingsViewModel`, `Notifications`
-  (low-battery toast), `DoubleIntConverter`. `AppHost.cs` lifecycle (owns the monitor, tray, and
-  device-change hook) / `Program.cs` single-instance (named Mutex); run-at-login is
-  `Startup/StartupRegistration.cs` (a **delayed-logon scheduled task** named `NagaBatteryTray`, registered
-  via `schtasks /XML`; the exe self-registers through the `--enable-startup` switch that `install.ps1` calls);
-  `Diagnostics/ProbeCommand.cs` backs `--probe`/`--probe-dpi`/`--probe-dock`/`--probe-buttons`
-  (`[--reset|--slot-test]`); the Buttons UI is `ButtonRowViewModel` (staged-op model) +
-  `KeyToHidUsage` (WPF Key ↔ HID usage map + modifier bits).
+  wrapped by `TrayIconController` (tray menu item is **"Dashboard"**, renamed from "Settings"); `PopupWindow`
+  (+`PopupViewModel`; cached singleton that **re-parks off-screen before every show** and positions in
+  **physical px** to dodge mixed-DPI bugs and a reposition flash; restyled to the `App.*` DynamicResource
+  theme keys, shows a "Profile N · colour" line once an onboard slot is adopted, and its second button
+  opens the dashboard); `DeviceChangeWatcher` (hidden top-level window; `WM_DEVICECHANGE`/
+  `DBT_DEVNODES_CHANGED` → debounced refresh); `Notifications` (low-battery toast), `DoubleIntConverter`.
+  `AppHost.cs` lifecycle (owns the monitor, tray, and device-change hook) / `Program.cs` single-instance
+  (named Mutex); run-at-login is `Startup/StartupRegistration.cs` (a **delayed-logon scheduled task**
+  named `NagaBatteryTray`, registered via `schtasks /XML`; the exe self-registers through the
+  `--enable-startup` switch that `install.ps1` calls); `Diagnostics/ProbeCommand.cs` backs
+  `--probe`/`--probe-dpi`/`--probe-dock`/`--probe-buttons` (`[--reset|--slot-test]`); `KeyToHidUsage`
+  (WPF Key ↔ HID usage map + modifier bits, used by the dashboard's key capture).
+- `Ui/Dashboard/` (replaces the deleted `SettingsWindow`/`SettingsViewModel`/`ButtonRowViewModel`) —
+  `DashboardWindow` (a WPF-UI `FluentWindow` shell; releases on close — the monitor's `StateChanged`
+  subscription is removed and the field nulled, same release-on-close discipline the old Settings
+  window had) hosts `MouseStageView` (a vector Naga silhouette with the 12 grid buttons as instant-apply
+  binding callout chips — click to capture a key, Disable, or Default, each with a 5 s one-shot undo;
+  hovering a chip or its grid key highlights both, satisfying the two-way hover-pairing requirement —
+  plus a DPI card with app-side presets and a Profile card) and, as a right-docked overlay,
+  `SettingsView` (theme picker, general toggles, battery polling, reset-all-buttons). `CalloutViewModel`
+  is the per-button state machine (Idle → Capturing → Writing → Confirmed | Failed) that replaces
+  `ButtonRowViewModel`'s staged-op model — every action writes instantly through `AppHost`'s
+  `WriteBindingAsync`, no stage-then-commit step. `DashboardViewModel` is the window's VM (header/DPI/
+  profile state plus the `Callouts` list); `ProfileLiveness` is a pure comparer — is the mouse currently
+  ON the app's onboard slot? (a profile-0 **effective-action** read, hardware-verified in the Phase B
+  spike, compared against the app slot's expected bytes) — driving the Profile card's live/not-live/
+  unknown text.
+- `Ui/Themes/` — `DesignSystem.xaml` (theme-independent status colors — `Status.Positive/Warning/
+  Critical` — plus shared styles `CardBorder`/`ChipBorder`/`LabelText`/`NumeralText`/`BodyText`/
+  `SubtleText`) and 5 preset theme dictionaries (Porcelain default, Razer, Ice, Ultraviolet, Ember),
+  each defining the same 12 semantic `App.*` brush keys (canvas, card fill/stroke, chip fill/stroke,
+  accent/accent-soft, text primary/secondary, numeral, glow, plus the `App.ThemeName` marker);
+  `ThemeManager.Apply` swaps the marked dictionary in `Application.Resources.MergedDictionaries` at
+  runtime. Two hard rules: **no `DropShadowEffect`/`BitmapEffect` anywhere** (stays software-rendered —
+  glows are gradient brushes like `App.GlowSoft`, not effects), and **no hardcoded colors in themed
+  XAML** — always a `DynamicResource App.*` key, never a literal color, so a theme swap actually
+  repaints everything.
 - Design specs + implementation plans live in `docs/superpowers/`.
 
 ## References / prior art (Razer HID protocol)
@@ -161,14 +190,19 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
 - [x] B — Button remapping (MVP: key+modifiers/disable per grid button, onboard app-owned slot —
   shipped 2026-07-11). Spike + Stage 2 both hardware-accepted same day; see
   `docs/superpowers/specs/2026-06-21-naga-button-remap-design.md`.
+- [x] GUI redesign — themed dashboard (`Ui/Dashboard/` + `Ui/Themes/`, 5 presets) replaces the old
+  Settings window: instant-apply button remap chips with undo, DPI presets, a Profile liveness card,
+  and a tray battery-level ring (shipped 2026-07-11); see
+  `docs/superpowers/specs/2026-07-11-naga-gui-redesign-design.md`.
 
 ## Conventions
 TDD, DRY, YAGNI, surgical changes, conventional-commit messages, frequent commits. Read the FULL
 file before editing. WPF-UI gotcha: `NumberBox.Value` commits on LostFocus/Enter — bind it
 `UpdateSourceTrigger=PropertyChanged` so a button Click reads the typed value, not the prior one.
-Tests cover logic layers only — `RazerProtocol`, `BatteryMonitor`, `SettingsViewModel`,
+Tests cover logic layers only — `RazerProtocol`, `BatteryMonitor`, `DashboardViewModel`,
 `JsonSettingsStore`, `IconRenderer`, `StartupRegistration`, `ButtonBinding`/`NagaV2ProButtons`,
-`KeyToHidUsage`, `ButtonRowViewModel` — via `Fakes/FakeRazerDevice` (the
+`KeyToHidUsage`, `CalloutViewModel`, `ThemeManager`, `ProfileLiveness`, `PopupViewModel` — via
+`Fakes/FakeRazerDevice` (the
 `IRazerDevice` seam); HID transport, WPF windows, and the tray are exercised by the installed build
 and `--probe`/`--probe-dpi`/`--probe-buttons`, not unit tests. Tests reach `internal` members through
 `InternalsVisibleTo.cs` — don't tighten visibility or drop that file.
