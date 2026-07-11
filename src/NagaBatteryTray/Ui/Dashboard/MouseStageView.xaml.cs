@@ -1,0 +1,72 @@
+using System.Globalization;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Media;
+using Wpf.Ui.Controls;
+using UserControl = System.Windows.Controls.UserControl; // WinForms' implicit using also exports one
+using Color = System.Windows.Media.Color; // ditto (System.Drawing.Color)
+using ColorConverter = System.Windows.Media.ColorConverter; // ditto (System.Drawing.ColorConverter)
+
+namespace NagaBatteryTray.Ui.Dashboard;
+
+public sealed class StringToBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type t, object p, CultureInfo c) =>
+        new SolidColorBrush((Color)ColorConverter.ConvertFromString((string)value));
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => throw new NotSupportedException();
+}
+
+public partial class MouseStageView : UserControl
+{
+    public event Action<CalloutViewModel>? CaptureRequested; // window owns the keyboard hook
+    public event Action<int>? ApplyDpiRequested;
+    public event Action? LivenessRefreshRequested;
+
+    public MouseStageView() => InitializeComponent();
+
+    /// <summary>Split the 12 callouts 6 left / 6 right and seed the grid keys.</summary>
+    public void Bind(DashboardViewModel vm)
+    {
+        DataContext = vm;
+        LeftChips.ItemsSource = vm.Callouts.Take(6).ToList();
+        RightChips.ItemsSource = vm.Callouts.Skip(6).ToList();
+        GridKeys.ItemsSource = vm.Callouts;
+    }
+
+    private static CalloutViewModel Vm(object sender) =>
+        (CalloutViewModel)((FrameworkElement)sender).DataContext;
+
+    private void OnChipEnter(object s, RoutedEventArgs e) => Vm(s).IsHighlighted = true;
+    private void OnChipLeave(object s, RoutedEventArgs e) => Vm(s).IsHighlighted = false;
+    private void OnKeyEnter(object s, RoutedEventArgs e) => Vm(s).IsHighlighted = true;
+    private void OnKeyLeave(object s, RoutedEventArgs e) => Vm(s).IsHighlighted = false;
+
+    private void OnChipClick(object s, RoutedEventArgs e) => CaptureRequested?.Invoke(Vm(s));
+    private void OnChipKeyUp(object s, System.Windows.Input.KeyEventArgs e)
+    { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
+        CaptureRequested?.Invoke(Vm(s)); }
+
+    private void OnUndo(object s, RoutedEventArgs e) => _ = Vm(s).UndoAsync();
+    private void OnDisable(object s, RoutedEventArgs e) => _ = Vm(s).DisableAsync();
+    private void OnDefault(object s, RoutedEventArgs e) => _ = Vm(s).DefaultAsync();
+
+    private void OnDpiDragCompleted(object s, System.Windows.Controls.Primitives.DragCompletedEventArgs e) =>
+        ApplyDpiRequested?.Invoke(((DashboardViewModel)DataContext).Dpi);
+    private void OnDpiSliderKeyUp(object s, System.Windows.Input.KeyEventArgs e)
+    { if (e.Key == System.Windows.Input.Key.Enter)
+        ApplyDpiRequested?.Invoke(((DashboardViewModel)DataContext).Dpi); }
+
+    private void OnApplyPreset(object s, RoutedEventArgs e)
+    {
+        var item = (DpiPresetItem)((FrameworkElement)s).DataContext;
+        ((DashboardViewModel)DataContext).Dpi = item.Value;
+        ApplyDpiRequested?.Invoke(item.Value);
+    }
+    private void OnRemovePreset(object s, RoutedEventArgs e) =>
+        ((DashboardViewModel)DataContext).RemovePreset((DpiPresetItem)((FrameworkElement)s).DataContext);
+    private void OnAddPreset(object s, RoutedEventArgs e)
+    { if (NewPresetBox.Value is { } v) ((DashboardViewModel)DataContext).AddPreset((int)v); }
+
+    private void OnRefreshLiveness(object s, RoutedEventArgs e) => LivenessRefreshRequested?.Invoke();
+}
