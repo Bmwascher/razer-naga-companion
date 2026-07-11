@@ -67,6 +67,21 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public IReadOnlyList<CalloutViewModel> Callouts { get; }
     public CalloutViewModel Callout(int position) => Callouts[position - 1];
 
+    /// <summary>Settings-overlay "Reset all to factory": Default-write every grid button in position
+    /// order via each chip's own instant-apply pipeline, counting verified successes (Status ==
+    /// "Applied") vs failures — so the caller can report a countable outcome instead of silence
+    /// while the several seconds of HID I/O run behind the overlay/scrim.</summary>
+    public async Task<(int Ok, int Failed)> ResetAllAsync()
+    {
+        int ok = 0, failed = 0;
+        foreach (var c in Callouts)
+        {
+            await c.DefaultAsync();
+            if (c.Status == "Applied") ok++; else failed++;
+        }
+        return (ok, failed);
+    }
+
     // ---- header ----
     public bool DeviceOnline { get => _deviceOnline; private set => Set(ref _deviceOnline, value); }
     public string StatusDotBrushKey { get => _statusDotBrushKey; private set => Set(ref _statusDotBrushKey, value); }

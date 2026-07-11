@@ -153,7 +153,9 @@ public sealed class AppHost
             var pick = System.Windows.MessageBox.Show(
                 "Rewrite all 12 grid buttons to their factory keys?", "Reset buttons",
                 System.Windows.MessageBoxButton.YesNo);
-            if (pick == System.Windows.MessageBoxResult.Yes) _ = ResetAllButtonsAsync(vm);
+            if (pick != System.Windows.MessageBoxResult.Yes) return;
+            view.SetResetNote("Resetting…");
+            _ = RunResetAllAsync(view, vm);
         };
         win.ShowOverlay(view);
     }
@@ -246,12 +248,13 @@ public sealed class AppHost
         return ProfileLiveness.Evaluate(s.OnboardSlot, expected, effective);
     }
 
-    /// <summary>Settings-overlay "Reset all to factory": Default-write every grid button via the
-    /// per-chip pipeline so each chip shows its own verified result.</summary>
-    private async Task ResetAllButtonsAsync(DashboardViewModel vm)
+    /// <summary>Settings-overlay "Reset all to factory": runs the counted reset (each chip shows its
+    /// own verified result too) and reports the outcome via SetResetNote, since the overlay/scrim
+    /// hides the chips for the several seconds of HID I/O this takes.</summary>
+    private static async Task RunResetAllAsync(SettingsView view, DashboardViewModel vm)
     {
-        for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
-            await vm.Callout(pos).DefaultAsync();
+        var (ok, failed) = await vm.ResetAllAsync();
+        view.SetResetNote(failed == 0 ? $"All {ok} buttons reset" : $"{failed} failed — retry from the chips");
     }
 
     /// <summary>A just-created slot starts EMPTY — its grid buttons read back as no action (this

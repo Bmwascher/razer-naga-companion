@@ -81,4 +81,23 @@ public class DashboardViewModelTests
         vm.ApplyState(DeviceState.Unknown);
         Assert.False(vm.DeviceOnline);
     }
+
+    [Fact]
+    public async Task ResetAllAsync_counts_all_12_as_ok_when_every_write_succeeds()
+    {
+        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var (ok, failed) = await vm.ResetAllAsync();
+        Assert.Equal(12, ok);
+        Assert.Equal(0, failed);
+    }
+
+    [Fact]
+    public async Task ResetAllAsync_counts_failures_for_positions_whose_write_fails()
+    {
+        Task<bool> FailTwo(int p, ButtonActionKind k, byte m, byte u) => Task.FromResult(p != 3 && p != 7);
+        var vm = new DashboardViewModel(Seeded(), false, FailTwo);
+        var (ok, failed) = await vm.ResetAllAsync();
+        Assert.Equal(10, ok);
+        Assert.Equal(2, failed);
+    }
 }
