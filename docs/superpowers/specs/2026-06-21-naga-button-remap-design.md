@@ -457,5 +457,5 @@ Modify:
   tests/NagaBatteryTray.Tests/RazerProtocolTests.cs      get/parse round-trip
   tests/NagaBatteryTray.Tests/BatteryMonitorTests.cs     routing + (re-apply) apply-on-connect + no-extra-write
   tests/NagaBatteryTray.Tests/SettingsViewModelTests.cs  binding edits → ButtonBinding
-  tests/NagaBatteryTray.Tests/JsonSettingsStoreTests.cs  RemapTable persistence round-trip + corrupt-JSON → defaults
+  tests/NagaBatteryTray.Tests/SettingsStoreTests.cs      RemapTable persistence round-trip + corrupt-JSON → defaults (existing store-test file)
 ```

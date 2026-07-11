@@ -8,4 +8,7 @@ public sealed class AppSettings
     public bool LowBatteryNotify { get; set; } = true;
     public string? CachedTransactionId { get; set; } = null; // e.g. "0x1f"; null = unprobed
     public int SetReadDelayMs { get; set; } = 400;
+
+    /// <summary>Thumb-grid remaps keyed by grid position (1..12); sparse — only non-Default buttons.</summary>
+    public Dictionary<int, ButtonBindingSetting> ButtonBindings { get; set; } = new();
 }
