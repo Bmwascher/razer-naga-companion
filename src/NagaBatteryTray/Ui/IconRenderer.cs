@@ -86,12 +86,23 @@ public static class IconRenderer
             {
                 float pad = render * 0.04f;
                 float targetHeight = render * 0.52f;
-                float maxWidth = render - 2f * ringW - pad;
+                float maxWidth = render - 2f * ringW - 2f * pad;
 
-                float scaleY = targetHeight / ink.Height;                 // fill the target height
-                float scaleX = ink.Width * scaleY > maxWidth              // overflow horizontally?
-                    ? maxWidth / ink.Width                                //   compress width to fit
-                    : scaleY;                                             //   else stay uniform (no stretch)
+                float scaleX, scaleY;
+                if (state.Status == DeviceStatus.Unknown)
+                {
+                    // The "-" glyph's ink is far wider than tall; the fill-height rule below
+                    // would stretch the thin hyphen into a slab filling the coin. Scale it
+                    // uniformly by width instead: target ink width ~35% of render.
+                    scaleX = scaleY = render * 0.35f / ink.Width;
+                }
+                else
+                {
+                    scaleY = targetHeight / ink.Height;                   // fill the target height
+                    scaleX = ink.Width * scaleY > maxWidth                // overflow horizontally?
+                        ? maxWidth / ink.Width                            //   compress width to fit
+                        : scaleY;                                         //   else stay uniform (no stretch)
+                }
 
                 float offX = (render - ink.Width * scaleX) / 2f - ink.Left * scaleX;
                 float offY = (render - ink.Height * scaleY) / 2f - ink.Top * scaleY;
