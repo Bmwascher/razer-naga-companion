@@ -60,6 +60,48 @@ public sealed class BatteryMonitor : IDisposable
         finally { _readLock.Release(); }
     }
 
+    /// <summary>Write one raw button action to the volatile direct profile. Blocks for the read lock
+    /// (serializes against battery poll + DPI on the single HID handle).</summary>
+    public async Task<bool> SetButtonAsync(byte buttonId, byte category, byte[] data)
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return false; }
+        try { return await _device.SetButtonAsync(buttonId, category, data, _cts.Token); }
+        catch (OperationCanceledException) { return false; }
+        finally { _readLock.Release(); }
+    }
+
+    /// <summary>Read a button's current effective action from the direct profile. Blocks for the read lock.</summary>
+    public async Task<RawButtonAction?> GetButtonAsync(byte buttonId)
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return null; }
+        try { return await _device.GetButtonAsync(buttonId, _cts.Token); }
+        catch (OperationCanceledException) { return null; }
+        finally { _readLock.Release(); }
+    }
+
+    /// <summary>Re-assert the configured remaps (connect-time re-apply model, spec §5.3). Best-effort
+    /// batch under one lock hold — an individual failure is retried at the next connect, not here. An
+    /// empty table makes zero device calls; Default entries are skipped (never written).</summary>
+    public async Task ApplyRemapsAsync(IReadOnlyList<ButtonBinding> bindings)
+    {
+        if (bindings.Count == 0) return;
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return; }
+        try
+        {
+            foreach (var b in bindings)
+            {
+                if (b.Kind == ButtonActionKind.Default) continue;
+                var (category, data) = b.ToWire();
+                await _device.SetButtonAsync(b.ButtonId, category, data, _cts.Token);
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally { _readLock.Release(); }
+    }
+
     private async Task PollAsync(bool reconnect = false)
     {
         if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip

@@ -106,4 +106,64 @@ public class BatteryMonitorTests
         Assert.Equal(1, fake.ResetCount);
         Assert.True(m.State.Charging);
     }
+
+    [Fact]
+    public async Task SetButtonAsync_routes_raw_bytes_to_device_and_returns_result()
+    {
+        var fake = new FakeRazerDevice { SetButtonResult = true };
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        bool ok = await m.SetButtonAsync(0x40, 0x02, new byte[] { 0x01, 0x06 });
+        Assert.True(ok);
+        var w = Assert.Single(fake.ButtonWrites);
+        Assert.Equal(0x40, w.ButtonId);
+        Assert.Equal(0x02, w.Category);
+        Assert.Equal(new byte[] { 0x01, 0x06 }, w.Data);
+    }
+
+    [Fact]
+    public async Task GetButtonAsync_returns_device_value_or_null()
+    {
+        var fake = new FakeRazerDevice();
+        fake.ButtonActions[0x40] = new RawButtonAction(0x02, new byte[] { 0x00, 0x3d });
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        var hit = await m.GetButtonAsync(0x40);
+        Assert.Equal(new RawButtonAction(0x02, fake.ButtonActions[0x40].Data), hit);
+        Assert.Null(await m.GetButtonAsync(0x41));
+    }
+
+    [Fact]
+    public async Task ApplyRemapsAsync_writes_every_binding_in_wire_form()
+    {
+        var fake = new FakeRazerDevice();
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        await m.ApplyRemapsAsync(new[]
+        {
+            new ButtonBinding(0x40, ButtonActionKind.Key, 0x01, 0x06),  // Ctrl+C
+            new ButtonBinding(0x41, ButtonActionKind.Disabled, 0, 0),
+        });
+        Assert.Equal(2, fake.ButtonWrites.Count);
+        Assert.Equal(new byte[] { 0x01, 0x06 }, fake.ButtonWrites[0].Data);
+        Assert.Equal(RazerProtocol.FnKeyboard, fake.ButtonWrites[0].Category);
+        Assert.Equal(RazerProtocol.FnDisabled, fake.ButtonWrites[1].Category);
+        Assert.Empty(fake.ButtonWrites[1].Data);
+    }
+
+    [Fact]
+    public async Task ApplyRemapsAsync_empty_table_makes_zero_device_calls()
+    {
+        // protects the no-extra-I/O invariant: no remaps configured => byte-for-byte today's behaviour
+        var fake = new FakeRazerDevice();
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        await m.ApplyRemapsAsync(Array.Empty<ButtonBinding>());
+        Assert.Empty(fake.ButtonWrites);
+    }
+
+    [Fact]
+    public async Task ApplyRemapsAsync_skips_default_entries()
+    {
+        var fake = new FakeRazerDevice();
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        await m.ApplyRemapsAsync(new[] { new ButtonBinding(0x40, ButtonActionKind.Default, 0, 0) });
+        Assert.Empty(fake.ButtonWrites);
+    }
 }
