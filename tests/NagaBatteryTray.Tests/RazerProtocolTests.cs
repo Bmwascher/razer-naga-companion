@@ -202,4 +202,82 @@ public class RazerProtocolTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             RazerProtocol.BuildSetButtonBuffer(0x1f, 0x00, 0x03, 0x00, RazerProtocol.FnKeyboard, new byte[6]));
     }
+
+    private static byte[] MakeButtonReply(byte status, byte profile, byte buttonId, byte hypershift,
+                                          byte category, byte[] data)
+    {
+        var buf = new byte[91];
+        buf[1] = status;              // report[0]
+        buf[2] = 0x1f;                // transaction_id
+        buf[6] = 0x0a;                // data_size
+        buf[7] = 0x02;                // command_class
+        buf[8] = 0x8c;                // command_id (GET)
+        buf[9] = profile; buf[10] = buttonId; buf[11] = hypershift; // echoed request args
+        buf[12] = category; buf[13] = (byte)data.Length;
+        for (int i = 0; i < data.Length; i++) buf[14 + i] = data[i];
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i]; // reply crc over buffer[3..88]
+        buf[89] = crc;
+        return buf;
+    }
+
+    [Fact]
+    public void GetButton_buffer_has_correct_layout_and_crc()
+    {
+        byte[] buf = RazerProtocol.BuildGetButtonBuffer(0x1f, 0x01, 0x34, 0x00);
+        Assert.Equal(0x0a, buf[6]);  // data_size (same 10-byte frame as SET)
+        Assert.Equal(0x02, buf[7]);  // command_class
+        Assert.Equal(0x8c, buf[8]);  // command_id (GET)
+        Assert.Equal(0x01, buf[9]);  // profile
+        Assert.Equal(0x34, buf[10]); // buttonId
+        Assert.Equal(0x00, buf[11]); // hypershift
+        for (int i = 12; i <= 18; i++) Assert.Equal(0x00, buf[i]); // zero-padded
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        Assert.Equal(crc, buf[89]);
+    }
+
+    [Fact]
+    public void ParseButtonReply_success_decodes_category_and_data()
+    {
+        var reply = MakeButtonReply(0x02, 0x00, 0x34, 0x00, 0x02, new byte[] { 0x01, 0x06 });
+        var r = RazerProtocol.ParseButtonReply(reply, 0x00, 0x34, 0x00, out byte category, out byte[] data);
+        Assert.Equal(ReplyResult.Success, r);
+        Assert.Equal(0x02, category);
+        Assert.Equal(new byte[] { 0x01, 0x06 }, data);
+    }
+
+    [Fact]
+    public void ParseButtonReply_busy_is_busy()
+    {
+        var reply = MakeButtonReply(0x01, 0x00, 0x34, 0x00, 0x02, new byte[] { 0x01, 0x06 });
+        Assert.Equal(ReplyResult.Busy, RazerProtocol.ParseButtonReply(reply, 0x00, 0x34, 0x00, out _, out _));
+    }
+
+    [Fact]
+    public void ParseButtonReply_echo_mismatch_is_failed()
+    {
+        // reply echoes buttonId 0x35 but we asked about 0x34 -> wrong-layout guard trips
+        var reply = MakeButtonReply(0x02, 0x00, 0x35, 0x00, 0x02, new byte[] { 0x01, 0x06 });
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseButtonReply(reply, 0x00, 0x34, 0x00, out _, out _));
+    }
+
+    [Fact]
+    public void ParseButtonReply_datalen_over_5_is_failed()
+    {
+        var reply = MakeButtonReply(0x02, 0x00, 0x34, 0x00, 0x02, new byte[] { 0x01, 0x06 });
+        reply[13] = 6;                                    // corrupt dataLen
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= reply[i];    // re-seal crc so only the guard trips
+        reply[89] = crc;
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseButtonReply(reply, 0x00, 0x34, 0x00, out _, out _));
+    }
+
+    [Fact]
+    public void ParseButtonReply_bad_crc_is_failed()
+    {
+        var reply = MakeButtonReply(0x02, 0x00, 0x34, 0x00, 0x02, new byte[] { 0x01, 0x06 });
+        reply[89] ^= 0xFF;
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseButtonReply(reply, 0x00, 0x34, 0x00, out _, out _));
+    }
 }

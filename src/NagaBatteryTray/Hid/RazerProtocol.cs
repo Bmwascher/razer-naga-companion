@@ -100,6 +100,34 @@ public static class RazerProtocol
         return BuildReport(transactionId, DataSizeButton, CommandClassButton, CommandIdSetButton, args);
     }
 
+    /// <summary>GET a button's onboard function. Request carries [profile, buttonId, hypershift] in a
+    /// 10-byte zero-padded frame (same data_size as SET); the reply fills category + data.</summary>
+    public static byte[] BuildGetButtonBuffer(byte transactionId, byte profile, byte buttonId, byte hypershift)
+    {
+        Span<byte> args = stackalloc byte[10];
+        args[0] = profile; args[1] = buttonId; args[2] = hypershift;
+        return BuildReport(transactionId, DataSizeButton, CommandClassButton, CommandIdGetButton, args);
+    }
+
+    /// <summary>Validates a get-button reply. Echo check: reply args [0..2] must match the requested
+    /// profile/buttonId/hypershift and dataLen must be ≤ 5, else Failed (buttons have no DPI-style
+    /// numeric range to validate against).</summary>
+    public static ReplyResult ParseButtonReply(byte[] buffer91, byte profile, byte buttonId, byte hypershift,
+                                               out byte category, out byte[] data)
+    {
+        category = 0; data = Array.Empty<byte>();
+        var r = ValidateReply(buffer91);
+        if (r != ReplyResult.Success) return r;
+        if (buffer91[9] != profile || buffer91[10] != buttonId || buffer91[11] != hypershift)
+            return ReplyResult.Failed;
+        int len = buffer91[13];
+        if (len > 5) return ReplyResult.Failed;
+        category = buffer91[12];
+        data = new byte[len];
+        Array.Copy(buffer91, 14, data, 0, len);
+        return ReplyResult.Success;
+    }
+
     /// <summary>Validates a 91-byte reply: status byte then XOR CRC over buffer[3..88] vs buffer[89].</summary>
     private static ReplyResult ValidateReply(byte[] buffer91)
     {
