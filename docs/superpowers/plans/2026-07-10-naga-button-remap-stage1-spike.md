@@ -68,7 +68,7 @@ the spike fills §6.
   `public const byte CommandClassButton = 0x02, CommandIdSetButton = 0x0c, CommandIdGetButton = 0x8c, DataSizeButton = 0x0a, ButtonProfileDirect = 0x00, FnDisabled = 0x00, FnKeyboard = 0x02;`
   `public static byte[] BuildSetButtonBuffer(byte transactionId, byte profile, byte buttonId, byte hypershift, byte category, ReadOnlySpan<byte> data)` — returns the 91-byte feature buffer; **throws `ArgumentOutOfRangeException` when `data.Length > 5`**.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/NagaBatteryTray.Tests/RazerProtocolTests.cs` (inside the existing class):
 
@@ -122,12 +122,12 @@ Append to `tests/NagaBatteryTray.Tests/RazerProtocolTests.cs` (inside the existi
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~RazerProtocolTests"`
 Expected: **build error** — `'RazerProtocol' does not contain a definition for 'BuildSetButtonBuffer'` (and the new consts). A compile failure is this cycle's red.
 
-- [ ] **Step 3: Implement constants + builder**
+- [x] **Step 3: Implement constants + builder**
 
 In `src/NagaBatteryTray/Hid/RazerProtocol.cs`, after the DPI constants block (after `public const int DpiMax = 30000;`), add:
 
@@ -161,12 +161,12 @@ After `BuildSetDpiBuffer`, add:
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~RazerProtocolTests"`
 Expected: PASS (all existing + 4 new).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Hid/RazerProtocol.cs tests/NagaBatteryTray.Tests/RazerProtocolTests.cs
@@ -187,7 +187,7 @@ git commit -m "feat(hid): BuildSetButtonBuffer verified against Basilisk V3 vect
   `public static byte[] BuildGetButtonBuffer(byte transactionId, byte profile, byte buttonId, byte hypershift)`;
   `public static ReplyResult ParseButtonReply(byte[] buffer91, byte profile, byte buttonId, byte hypershift, out byte category, out byte[] data)` — echo check: reply args `[0..2]` must equal the requested profile/buttonId/hypershift and `dataLen <= 5`, else `Failed`. Arg offsets in the 91-byte buffer: profile `[9]`, buttonId `[10]`, hypershift `[11]`, category `[12]`, dataLen `[13]`, data `[14..18]`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `RazerProtocolTests.cs`:
 
@@ -271,12 +271,12 @@ Append to `RazerProtocolTests.cs`:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~RazerProtocolTests"`
 Expected: **build error** — `BuildGetButtonBuffer`/`ParseButtonReply` not defined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `RazerProtocol.cs`, after `BuildSetButtonBuffer`:
 
@@ -310,12 +310,12 @@ In `RazerProtocol.cs`, after `BuildSetButtonBuffer`:
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~RazerProtocolTests"`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Hid/RazerProtocol.cs tests/NagaBatteryTray.Tests/RazerProtocolTests.cs
@@ -343,7 +343,7 @@ git commit -m "feat(hid): get-button buffer + ParseButtonReply with request-echo
   `public static byte[] BuildNewProfileBuffer(byte transactionId, byte slot)`;
   `public static byte[] BuildDeleteProfileBuffer(byte transactionId, byte slot)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `RazerProtocolTests.cs`:
 
@@ -424,12 +424,12 @@ Append to `RazerProtocolTests.cs`:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~RazerProtocolTests"`
 Expected: **build error** — the new members are not defined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `RazerProtocol.cs`, after the Task 1 button consts:
 
@@ -515,12 +515,12 @@ After `ParseButtonReply`:
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~RazerProtocolTests"`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Hid/RazerProtocol.cs tests/NagaBatteryTray.Tests/RazerProtocolTests.cs
@@ -547,7 +547,7 @@ git commit -m "feat(hid): device-mode + profile-lifecycle buffers for the button
   `private sealed class ButtonCaptureFile` with properties `Dictionary<int, byte> PositionToId`, `Dictionary<byte, CapturedAction> PreviousActions`, `byte? DeviceModeAtStart`, `bool? SetAccepted`, `bool? AcceptancePassed`, `bool? Profile0Volatile`, `bool? SlotPersisted`, `byte? SlotTested`, `byte? SlotButtonId`, `CapturedAction? SlotPreviousAction`, `bool SlotWasCreated`, `string? ProfileNotes`, methods `void Save()`, `static ButtonCaptureFile? Load()`, `static string PathFor()`;
   `private static void CheckDeviceMode(MouseSession s, ButtonCaptureFile capture)`.
 
-- [ ] **Step 1: Add the dispatch branch**
+- [x] **Step 1: Add the dispatch branch**
 
 In `Program.cs`, after the `--probe-dock` branch:
 
@@ -561,7 +561,7 @@ In `Program.cs`, after the `--probe-dock` branch:
 
 (The `--reset` variant is dispatched in Task 7, when `RunButtonsReset` exists.)
 
-- [ ] **Step 2: Add plumbing + device-mode step to `ProbeCommand`**
+- [x] **Step 2: Add plumbing + device-mode step to `ProbeCommand`**
 
 Append inside the `ProbeCommand` class (below `RunDock`, above the private helpers):
 
@@ -727,12 +727,12 @@ Append inside the `ProbeCommand` class (below `RunDock`, above the private helpe
     }
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build`
 Expected: Build succeeded, 0 errors.
 
-- [ ] **Step 4: Smoke-run (mouse optional)**
+- [x] **Step 4: Smoke-run (mouse optional)**
 
 Quit the resident tray app first (tray icon → Exit) so probe exchanges don't interleave with the battery poll. Then:
 
@@ -742,7 +742,7 @@ Expected: with the mouse connected, prints `Live collection: PID 0x...`, the `[1
 "No live mouse collection found" line, exit code 1. (If SAC vetoes the load: rebuild with
 `-p:Deterministic=false` and retry.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Program.cs src/NagaBatteryTray/Diagnostics/ProbeCommand.cs
@@ -762,7 +762,7 @@ git commit -m "feat(probe): --probe-buttons plumbing + device-mode check (spike 
   returns `false` only when the firmware rejects the SET outright (spike aborts). Sets
   `capture.AcceptancePassed` and `capture.Profile0Volatile`.
 
-- [ ] **Step 1: Extend `RunButtons` and add the method**
+- [x] **Step 1: Extend `RunButtons` and add the method**
 
 Replace the `RunButtons` body's tail (from `CheckDeviceMode(s, capture);` down to `return 0;`) with:
 
@@ -847,17 +847,17 @@ Add the method after `CheckDeviceMode`:
     }
 ```
 
-- [ ] **Step 2: Build**
+- [x] **Step 2: Build**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build`
 Expected: Build succeeded, 0 errors.
 
-- [ ] **Step 3: Run the full unit suite (regression check)**
+- [x] **Step 3: Run the full unit suite (regression check)**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: PASS (probe code is manual-only; this guards against accidental breakage elsewhere).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Diagnostics/ProbeCommand.cs
@@ -883,7 +883,7 @@ git commit -m "feat(probe): acceptance + volatility probe (spike step 2)"
   `private static IEnumerable<byte> CandidateIds()` — primary window `0x06..0x33` minus known wheel ids
   `0x09`/`0x0a` (44 ids), then fallback window `0x36..0x5f` (42 ids).
 
-- [ ] **Step 1: Extend `RunButtons` and add discovery**
+- [x] **Step 1: Extend `RunButtons` and add discovery**
 
 Replace the `RunButtons` tail (from `if (!RunAcceptanceProbe...` down to `return 0;`) with:
 
@@ -1002,17 +1002,17 @@ Add after `RunAcceptanceProbe`:
     }
 ```
 
-- [ ] **Step 2: Build**
+- [x] **Step 2: Build**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build`
 Expected: Build succeeded, 0 errors.
 
-- [ ] **Step 3: Run the full unit suite (regression check)**
+- [x] **Step 3: Run the full unit suite (regression check)**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Diagnostics/ProbeCommand.cs
@@ -1035,7 +1035,7 @@ git commit -m "feat(probe): batched grid-id discovery with previous-action captu
   `private static void PrintResultsTemplate(ButtonCaptureFile c)`;
   `public static int RunButtonsReset()`.
 
-- [ ] **Step 1: Finalize `RunButtons` and add the methods**
+- [x] **Step 1: Finalize `RunButtons` and add the methods**
 
 Replace the `RunButtons` tail (from `RunGridDiscovery(s, capture);` down to `return 0;`) with:
 
@@ -1191,7 +1191,7 @@ Add after `RunGridDiscovery`:
     }
 ```
 
-- [ ] **Step 2: Extend the dispatch**
+- [x] **Step 2: Extend the dispatch**
 
 In `Program.cs`, replace the Task 4 branch with:
 
@@ -1205,17 +1205,17 @@ In `Program.cs`, replace the Task 4 branch with:
         }
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build`
 Expected: Build succeeded, 0 errors.
 
-- [ ] **Step 4: Run the full unit suite (regression check)**
+- [x] **Step 4: Run the full unit suite (regression check)**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: PASS — all suites green (protocol tests from Tasks 1–3 included).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/NagaBatteryTray/Diagnostics/ProbeCommand.cs src/NagaBatteryTray/Program.cs
