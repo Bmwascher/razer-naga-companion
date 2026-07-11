@@ -25,6 +25,16 @@ public static class RazerProtocol
     public const int DpiMin = 100;
     public const int DpiMax = 30000;
 
+    public const byte CommandClassButton = 0x02;
+    public const byte CommandIdSetButton = 0x0c;   // write a button's onboard function
+    public const byte CommandIdGetButton = 0x8c;   // read it back
+    public const byte DataSizeButton = 0x0a;       // 10 arg bytes
+    public const byte ButtonProfileDirect = 0x00;  // volatile "direct" profile; 0x01..0x05 = onboard slots
+
+    // MVP function categories only (deferred mouse/DPI/media categories are spec §6 prose)
+    public const byte FnDisabled = 0x00;
+    public const byte FnKeyboard = 0x02;           // data = [modifierBitmask, hidUsage]
+
     public static readonly byte[] TransactionIdProbeSet =
         { 0x1f, 0x3f, 0x00, 0xff, 0x08, 0x88, 0x1d, 0x9f };
 
@@ -74,6 +84,20 @@ public static class RazerProtocol
         args[1] = (byte)(dpiX >> 8); args[2] = (byte)dpiX;  // X big-endian
         args[3] = (byte)(dpiY >> 8); args[4] = (byte)dpiY;  // Y big-endian
         return BuildReport(transactionId, DataSizeDpi, CommandClassDpi, CommandIdSetDpi, args);
+    }
+
+    /// <summary>SET a button's onboard function. args = [profile, buttonId, hypershift, category, dataLen, d0..d4].
+    /// hypershift is a fixed wire-format byte (0x00 this phase). Throws if data exceeds 5 bytes —
+    /// a truncated binding must never reach the device.</summary>
+    public static byte[] BuildSetButtonBuffer(byte transactionId, byte profile, byte buttonId, byte hypershift,
+                                              byte category, ReadOnlySpan<byte> data)
+    {
+        if (data.Length > 5) throw new ArgumentOutOfRangeException(nameof(data));
+        Span<byte> args = stackalloc byte[10];
+        args[0] = profile; args[1] = buttonId; args[2] = hypershift;
+        args[3] = category; args[4] = (byte)data.Length;
+        for (int i = 0; i < data.Length; i++) args[5 + i] = data[i];
+        return BuildReport(transactionId, DataSizeButton, CommandClassButton, CommandIdSetButton, args);
     }
 
     /// <summary>Validates a 91-byte reply: status byte then XOR CRC over buffer[3..88] vs buffer[89].</summary>

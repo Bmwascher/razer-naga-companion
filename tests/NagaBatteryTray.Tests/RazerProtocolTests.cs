@@ -154,4 +154,52 @@ public class RazerProtocolTests
         // valid CRC but decoded X below DpiMin -> Failed (guards against wrong-layout firmware)
         Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseDpiReply(MakeDpiReply(0x02, 50, 1600), out _, out _));
     }
+
+    // --- Phase B: button remap (Basilisk V3 oracle vectors; spec §5.1/§6) ---
+
+    [Fact]
+    public void SetButton_reproduces_basilisk_ctrl_c_vector()
+    {
+        // tilt-wheel-left (0x34) -> Ctrl+C on profile 1: args = 01 34 00 02 02 01 06 00 00 00
+        byte[] buf = RazerProtocol.BuildSetButtonBuffer(0x1f, 0x01, 0x34, 0x00,
+            RazerProtocol.FnKeyboard, new byte[] { 0x01, 0x06 });
+        Assert.Equal(91, buf.Length);
+        Assert.Equal(0x1f, buf[2]);  // transaction_id
+        Assert.Equal(0x0a, buf[6]);  // data_size
+        Assert.Equal(0x02, buf[7]);  // command_class
+        Assert.Equal(0x0c, buf[8]);  // command_id (SET)
+        byte[] expectedArgs = { 0x01, 0x34, 0x00, 0x02, 0x02, 0x01, 0x06, 0x00, 0x00, 0x00 };
+        for (int i = 0; i < 10; i++) Assert.Equal(expectedArgs[i], buf[9 + i]);
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        Assert.Equal(crc, buf[89]);
+    }
+
+    [Fact]
+    public void SetButton_reproduces_basilisk_ctrl_v_vector()
+    {
+        // tilt-wheel-right (0x35) -> Ctrl+V on profile 1: args = 01 35 00 02 02 01 19 00 00 00
+        byte[] buf = RazerProtocol.BuildSetButtonBuffer(0x1f, 0x01, 0x35, 0x00,
+            RazerProtocol.FnKeyboard, new byte[] { 0x01, 0x19 });
+        byte[] expectedArgs = { 0x01, 0x35, 0x00, 0x02, 0x02, 0x01, 0x19, 0x00, 0x00, 0x00 };
+        for (int i = 0; i < 10; i++) Assert.Equal(expectedArgs[i], buf[9 + i]);
+    }
+
+    [Fact]
+    public void SetButton_disabled_has_zero_length_data()
+    {
+        byte[] buf = RazerProtocol.BuildSetButtonBuffer(0x1f, RazerProtocol.ButtonProfileDirect,
+            0x03, 0x00, RazerProtocol.FnDisabled, ReadOnlySpan<byte>.Empty);
+        Assert.Equal(0x00, buf[12]); // category = disabled
+        Assert.Equal(0x00, buf[13]); // dataLen = 0
+        for (int i = 14; i <= 18; i++) Assert.Equal(0x00, buf[i]);
+    }
+
+    [Fact]
+    public void SetButton_throws_on_data_longer_than_5()
+    {
+        // a truncated binding must never reach the device
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            RazerProtocol.BuildSetButtonBuffer(0x1f, 0x00, 0x03, 0x00, RazerProtocol.FnKeyboard, new byte[6]));
+    }
 }
