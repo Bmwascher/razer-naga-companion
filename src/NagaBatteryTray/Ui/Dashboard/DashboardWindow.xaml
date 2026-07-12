@@ -32,8 +32,16 @@
     </Border>
     <!-- stage -->
     <local:MouseStageView Grid.Row="2" x:Name="Stage" Margin="16,0,16,16"/>
-    <!-- settings overlay host (Task 9 fills) -->
-    <Grid Grid.Row="1" Grid.RowSpan="2" x:Name="OverlayHost" Visibility="Collapsed"
-          Background="{DynamicResource App.Scrim}"/>
+    <!-- settings overlay: Scrim fades on its own opacity (not a parent of the content), so its
+         fade never dims the drawer riding on top of it; OverlayContent slides via its own
+         TranslateTransform, starting off-screen right (its docked width, 340) -->
+    <Grid Grid.Row="1" Grid.RowSpan="2" x:Name="OverlayHost" Visibility="Collapsed">
+      <Border x:Name="Scrim" Background="{DynamicResource App.Scrim}" Opacity="0"/>
+      <ContentControl x:Name="OverlayContent" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+        <ContentControl.RenderTransform>
+          <TranslateTransform x:Name="OverlayTranslate" X="340"/>
+        </ContentControl.RenderTransform>
+      </ContentControl>
+    </Grid>
   </Grid>
 </ui:FluentWindow>

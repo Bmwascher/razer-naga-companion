@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using NagaBatteryTray.Ui;
 using Wpf.Ui.Controls;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using Brush = System.Windows.Media.Brush; // WinForms' implicit using also exports one
@@ -11,6 +13,8 @@ public partial class DashboardWindow : FluentWindow
 {
     private readonly DashboardViewModel _vm;
     private CalloutViewModel? _capturing;
+    private int _overlayVersion; // undo-pattern token: guards the hide animation's Completed collapse
+                                  // against a ShowOverlay that arrives before it fires
 
     public event Action? SettingsOverlayRequested;
     public event Action<int>? ApplyDpiRequested;
@@ -40,13 +44,50 @@ public partial class DashboardWindow : FluentWindow
     private void UpdateDot() =>
         StatusDot.Fill = (Brush)FindResource(_vm.StatusDotBrushKey);
 
+    /// <summary>Opens the drawer: content slides in from off-screen right (Motion.Drawer curve)
+    /// while the scrim fades in on its own (Motion.EaseOut) - decoupled so the slide never rides
+    /// on a fading parent. Reduced motion: no slide, both fade in together instead.</summary>
     public void ShowOverlay(UIElement content)
     {
-        OverlayHost.Children.Clear();
-        OverlayHost.Children.Add(content);
+        _overlayVersion++; // cancels any pending hide-collapse
+        OverlayContent.Content = content;
         OverlayHost.Visibility = Visibility.Visible;
+
+        Motion.Animate(Scrim, OpacityProperty, 1, Motion.Fade, Motion.EaseOut);
+        if (Motion.Reduced)
+        {
+            OverlayTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+            OverlayTranslate.X = 0; // positional motion is skipped outright, not slowed down
+            OverlayContent.BeginAnimation(OpacityProperty, null);
+            OverlayContent.Opacity = 0;
+            Motion.Animate(OverlayContent, OpacityProperty, 1, Motion.Fade, Motion.EaseOut);
+        }
+        else
+        {
+            Motion.Animate(OverlayTranslate, TranslateTransform.XProperty, 0, Motion.DrawerIn, Motion.Drawer);
+        }
     }
-    public void HideOverlay() => OverlayHost.Visibility = Visibility.Collapsed;
+
+    /// <summary>Closes the drawer: slides content back out (or fades it, reduced motion) while the
+    /// scrim fades out; the host is only collapsed in the scrim fade's Completed callback, guarded
+    /// by a version token so a ShowOverlay arriving mid-hide cancels the pending collapse instead
+    /// of the drawer popping back open underneath it.</summary>
+    public void HideOverlay()
+    {
+        int token = ++_overlayVersion;
+        var scrimFade = new DoubleAnimation(0, Motion.Fade) { EasingFunction = Motion.EaseOut };
+        scrimFade.Completed += (_, _) =>
+        {
+            if (token != _overlayVersion) return; // superseded by a ShowOverlay mid-hide
+            OverlayHost.Visibility = Visibility.Collapsed;
+        };
+        Scrim.BeginAnimation(OpacityProperty, scrimFade, HandoffBehavior.Compose);
+
+        if (Motion.Reduced)
+            Motion.Animate(OverlayContent, OpacityProperty, 0, Motion.Fade, Motion.EaseOut);
+        else
+            Motion.Animate(OverlayTranslate, TranslateTransform.XProperty, 340, Motion.DrawerOut, Motion.Drawer);
+    }
 
     private void OnGear(object s, RoutedEventArgs e) => SettingsOverlayRequested?.Invoke();
 
