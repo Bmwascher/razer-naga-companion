@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using NagaBatteryTray.Ui;
 using UserControl = System.Windows.Controls.UserControl; // WinForms' implicit using also exports one
 
@@ -12,7 +14,64 @@ public partial class MouseStageView : UserControl
     public event Action<int>? ApplyDpiRequested;
     public event Action? LivenessRefreshRequested;
 
-    public MouseStageView() => InitializeComponent();
+    private const int StaggerStepMs = 30;
+    private static readonly Duration StaggerDuration = new(TimeSpan.FromMilliseconds(200));
+    private const double StaggerRiseY = 4;
+
+    private bool _staggered; // Loaded can fire more than once per instance (visual-tree reparenting) - run once
+
+    public MouseStageView()
+    {
+        InitializeComponent();
+        Loaded += OnLoaded;
+    }
+
+    /// <summary>Chip stagger-in (spec: the one delight moment on dashboard open). Runs once per
+    /// view instance - AppHost creates a fresh DashboardWindow (and so a fresh MouseStageView) per
+    /// open, so this naturally fires once per dashboard open. Deferred to Loaded-priority dispatch
+    /// because the ItemsControl containers may not be realized yet when Loaded itself fires; if
+    /// they still aren't realized by then, skip silently rather than throw.</summary>
+    private void OnLoaded(object? sender, RoutedEventArgs e)
+    {
+        if (_staggered) return;
+        _staggered = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(RunChipStagger));
+    }
+
+    private void RunChipStagger()
+    {
+        var containers = new List<ContentPresenter>();
+        CollectContainers(LeftChips, containers);
+        CollectContainers(RightChips, containers);
+        if (containers.Count == 0) return; // not realized - skip silently, nothing to animate
+
+        bool reduced = Motion.Reduced;
+        for (int i = 0; i < containers.Count; i++)
+        {
+            var cp = containers[i];
+            var begin = TimeSpan.FromMilliseconds(i * StaggerStepMs);
+
+            cp.Opacity = 0;
+            var fade = new DoubleAnimation
+            { From = 0, To = 1, BeginTime = begin,
+              Duration = reduced ? Motion.Micro : StaggerDuration, EasingFunction = Motion.EaseOut };
+            cp.BeginAnimation(OpacityProperty, fade);
+
+            if (reduced) continue; // reduced motion: fade only, no rise
+            var translate = new TranslateTransform(0, StaggerRiseY);
+            cp.RenderTransform = translate;
+            var rise = new DoubleAnimation
+            { From = StaggerRiseY, To = 0, BeginTime = begin, Duration = StaggerDuration, EasingFunction = Motion.EaseOut };
+            translate.BeginAnimation(TranslateTransform.YProperty, rise);
+        }
+    }
+
+    private static void CollectContainers(ItemsControl items, List<ContentPresenter> into)
+    {
+        for (int i = 0; i < items.Items.Count; i++)
+            if (items.ItemContainerGenerator.ContainerFromIndex(i) is ContentPresenter cp)
+                into.Add(cp);
+    }
 
     /// <summary>Split the 12 callouts 6 left / 6 right and seed the grid keys.</summary>
     public void Bind(DashboardViewModel vm)
