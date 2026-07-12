@@ -101,9 +101,19 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     {
         get => _dpi;
         set { if (Set(ref _dpi, Math.Clamp(value, RazerProtocol.DpiMin, RazerProtocol.DpiMax)))
-              { Notify(nameof(DpiText)); RefreshActive(); } }
+              { Notify(nameof(DpiText)); Notify(nameof(DpiSliderPos)); RefreshActive(); } }
     }
     public string DpiText => DevicePresent ? Dpi.ToString() : "—";
+
+    /// <summary>Perceptual log-scale surface for the DPI slider: 0.0 at 100 DPI, 1.0 at 30000 DPI
+    /// (a 300x range), so equal slider travel feels like equal proportional DPI change instead of
+    /// the low end being unusably cramped on a linear scale. The setter snaps to the nearest 50,
+    /// matching the granularity DPI is normally adjusted in.</summary>
+    public double DpiSliderPos
+    {
+        get => Math.Log(Dpi / 100.0) / Math.Log(300.0);
+        set => Dpi = (int)Math.Round(100.0 * Math.Pow(300.0, value) / 50.0) * 50;
+    }
 
     public void SetCurrentDpi(DpiSetting? dpi)
     {

@@ -100,4 +100,39 @@ public class DashboardViewModelTests
         Assert.Equal(10, ok);
         Assert.Equal(2, failed);
     }
+
+    [Fact]
+    public void DpiSliderPos_endpoints_map_to_dpi_range()
+    {
+        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        vm.DpiSliderPos = 0.0;
+        Assert.Equal(100, vm.Dpi);
+        vm.DpiSliderPos = 1.0;
+        Assert.Equal(30000, vm.Dpi);
+    }
+
+    [Fact]
+    public void DpiSliderPos_round_trips_through_dpi()
+    {
+        var vm = new DashboardViewModel(Seeded(), false, NoWrite) { Dpi = 1600 };
+        double pos = vm.DpiSliderPos;
+        vm.DpiSliderPos = pos;
+        Assert.Equal(1600, vm.Dpi);
+    }
+
+    [Fact]
+    public void DpiSliderPos_midpoint_is_sqrt300_times_100_rounded_to_50()
+    {
+        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        vm.DpiSliderPos = 0.5;
+        Assert.Equal(1750, vm.Dpi);
+    }
+
+    [Fact]
+    public void DpiSliderPos_setter_always_snaps_dpi_to_a_multiple_of_50()
+    {
+        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        vm.DpiSliderPos = 0.37;
+        Assert.Equal(0, vm.Dpi % 50);
+    }
 }
