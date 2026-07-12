@@ -2,7 +2,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    xmlns:local="clr-namespace:NagaBatteryTray.Ui.Dashboard">
+    xmlns:local="clr-namespace:NagaBatteryTray.Ui.Dashboard"
+    xmlns:motion="clr-namespace:NagaBatteryTray.Ui">
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     <local:StringToBrushConverter x:Key="HexBrush"/>
@@ -33,22 +34,48 @@
         </Border.Style>
         <StackPanel>
           <TextBlock Style="{DynamicResource LabelText}" Text="{Binding Label, StringFormat=Button {0}}"/>
-          <Border Background="{DynamicResource App.ChipFill}" BorderBrush="{DynamicResource App.ChipStroke}"
-                  BorderThickness="1" CornerRadius="4" Padding="6,1" HorizontalAlignment="Left">
-            <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding BindingText}"
-                       FontWeight="SemiBold" Foreground="{DynamicResource App.TextPrimary}">
-              <TextBlock.Style>
-                <Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
-                  <Setter Property="Text" Value="{Binding BindingText}"/>
+          <Grid HorizontalAlignment="Left">
+            <Border Background="{DynamicResource App.ChipFill}" BorderBrush="{DynamicResource App.ChipStroke}"
+                    BorderThickness="1" CornerRadius="4" Padding="6,1">
+              <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding BindingText}"
+                         FontWeight="SemiBold" Foreground="{DynamicResource App.TextPrimary}">
+                <TextBlock.Style>
+                  <Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+                    <Setter Property="Text" Value="{Binding BindingText}"/>
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsCapturing}" Value="True">
+                        <Setter Property="Text" Value="press a key…"/>
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </TextBlock.Style>
+              </TextBlock>
+            </Border>
+            <!-- verified-apply accent flash: fires once per successful write (Status -> "Applied"),
+                 restart-on-retrigger is correct here since each apply is its own event -->
+            <Border BorderBrush="{DynamicResource App.Accent}" BorderThickness="1.5" CornerRadius="4"
+                    Opacity="0" IsHitTestVisible="False">
+              <Border.Style>
+                <Style TargetType="Border">
                   <Style.Triggers>
-                    <DataTrigger Binding="{Binding IsCapturing}" Value="True">
-                      <Setter Property="Text" Value="press a key…"/>
+                    <DataTrigger Binding="{Binding Status}" Value="Applied">
+                      <DataTrigger.EnterActions>
+                        <BeginStoryboard>
+                          <Storyboard>
+                            <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="Opacity">
+                              <LinearDoubleKeyFrame KeyTime="0:0:0" Value="0"/>
+                              <EasingDoubleKeyFrame KeyTime="0:0:0.1" Value="1" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
+                              <EasingDoubleKeyFrame KeyTime="0:0:0.25" Value="0" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
+                            </DoubleAnimationUsingKeyFrames>
+                          </Storyboard>
+                        </BeginStoryboard>
+                      </DataTrigger.EnterActions>
                     </DataTrigger>
                   </Style.Triggers>
                 </Style>
-              </TextBlock.Style>
-            </TextBlock>
-          </Border>
+              </Border.Style>
+            </Border>
+          </Grid>
           <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding Status}" FontSize="10"/>
           <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
             <StackPanel.Style>
@@ -68,7 +95,27 @@
               </Style>
             </StackPanel.Style>
             <Button Content="Undo" Click="OnUndo" FontSize="10" Padding="6,1"
-                    Visibility="{Binding CanUndo, Converter={StaticResource BoolToVis}}"/>
+                    Visibility="{Binding CanUndo, Converter={StaticResource BoolToVis}}">
+              <Button.Style>
+                <Style TargetType="Button">
+                  <Style.Triggers>
+                    <!-- appearance-only fade: the action row itself stays instant on hover/focus
+                         (frequency rule - no motion on a frequently hovered element), so only the
+                         Undo button's own CanUndo-triggered reveal gets the 150ms fade-in -->
+                    <DataTrigger Binding="{Binding CanUndo}" Value="True">
+                      <DataTrigger.EnterActions>
+                        <BeginStoryboard>
+                          <Storyboard>
+                            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1"
+                                             Duration="0:0:0.15" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
+                          </Storyboard>
+                        </BeginStoryboard>
+                      </DataTrigger.EnterActions>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Button.Style>
+            </Button>
             <Button Content="Disable" Click="OnDisable" FontSize="10" Padding="6,1" Margin="4,0,0,0"/>
             <Button Content="Default" Click="OnDefault" FontSize="10" Padding="6,1" Margin="4,0,0,0"/>
           </StackPanel>
