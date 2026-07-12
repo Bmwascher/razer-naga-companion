@@ -19,6 +19,10 @@ public sealed class AppSettings
     /// <summary>Active theme preset name (Ui/Themes). Unknown value → Porcelain at apply time.</summary>
     public string Theme { get; set; } = "Porcelain";
 
+    /// <summary>Tray icon style: "Gauge" (coin + level ring) or "Text" (classic full-height level-colored
+    /// digits). Unknown value → Gauge at the consumer.</summary>
+    public string TrayIconStyle { get; set; } = "Gauge";
+
     /// <summary>App-side one-click DPI presets shown in the dashboard's DPI card.</summary>
     public List<int> DpiPresets { get; set; } = new() { 800, 1600, 3200 };
 }

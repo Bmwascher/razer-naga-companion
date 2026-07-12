@@ -117,5 +117,17 @@ public class SettingsStoreTests
         var store = new JsonSettingsStore(path);
         Assert.Equal("Porcelain", store.Settings.Theme);
         Assert.Equal(new[] { 800, 1600, 3200 }, store.Settings.DpiPresets);
+        Assert.Equal("Gauge", store.Settings.TrayIconStyle);
+    }
+
+    [Fact]
+    public void TrayIconStyle_defaults_gauge_and_round_trips()
+    {
+        var path = TempFile();
+        var store = new JsonSettingsStore(path);
+        Assert.Equal("Gauge", store.Settings.TrayIconStyle);
+        store.Settings.TrayIconStyle = "Text";
+        store.Save();
+        Assert.Equal("Text", new JsonSettingsStore(path).Settings.TrayIconStyle);
     }
 }

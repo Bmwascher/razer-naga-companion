@@ -54,6 +54,7 @@ public sealed class AppHost
         _tray.QuitRequested += Quit;
 
         _tray.SetStartupChecked(_startup.IsEnabled());
+        _tray.SetGaugeStyle(_settings.Settings.TrayIconStyle != "Text");
         _tray.Show();
 
         SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == PowerModes.Resume) _ = _monitor.RefreshNowAsync(); };
@@ -146,10 +147,13 @@ public sealed class AppHost
     private void ShowSettingsOverlay(DashboardWindow win, DashboardViewModel vm)
     {
         var view = new SettingsView { DataContext = vm };
+        view.SetTrayIconStyle(_settings.Settings.TrayIconStyle);
         view.CloseRequested += () => { vm.ApplyTo(_settings.Settings); _settings.Save(); win.HideOverlay(); };
         view.StartupToggled += enable => { SetStartup(enable); _tray.SetStartupChecked(enable); };
         view.ThemeChanged += name =>
         { ThemeManager.Apply(_app, name); _settings.Settings.Theme = ThemeManager.Resolve(name); _settings.Save(); };
+        view.TrayIconStyleChanged += style =>
+        { _settings.Settings.TrayIconStyle = style; _settings.Save(); _tray.SetGaugeStyle(style != "Text"); };
         view.ResetAllRequested += () =>
         {
             var pick = System.Windows.MessageBox.Show(

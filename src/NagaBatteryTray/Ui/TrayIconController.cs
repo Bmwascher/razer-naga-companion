@@ -10,6 +10,7 @@ public sealed class TrayIconController : IDisposable
     private readonly TrayIcon _icon;
     private readonly ToolStripMenuItem _startupItem;
     private Icon? _current;
+    private bool _gauge = true;
 
     public event Action? LeftClicked;
     public event Action? RefreshRequested;
@@ -38,6 +39,14 @@ public sealed class TrayIconController : IDisposable
 
     public void Show() => Update(_monitor.State); // first Update registers the icon with the shell
 
+    /// <summary>Switches the tray icon style (gauge vs. text-only) and re-renders immediately from the
+    /// monitor's current state — event-driven, no polling.</summary>
+    public void SetGaugeStyle(bool gauge)
+    {
+        _gauge = gauge;
+        Update(_monitor.State);
+    }
+
     public void SetStartupChecked(bool value)
     {
         _startupItem.CheckedChanged -= OnStartupChanged; // avoid firing the toggle on a programmatic set
@@ -50,7 +59,7 @@ public sealed class TrayIconController : IDisposable
     private void Update(DeviceState state)
     {
         int dpi = (int)Math.Round(96 * GetDpiScale());
-        var next = IconRenderer.Render(state, dpi);
+        var next = IconRenderer.Render(state, dpi, _gauge);
         _icon.Update(next, Tooltip(state));
         IconRenderer.Destroy(_current); // keep the live HICON (next) alive; free the previous one
         _current = next;
