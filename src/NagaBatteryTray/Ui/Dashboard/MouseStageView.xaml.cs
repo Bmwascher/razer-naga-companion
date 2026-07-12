@@ -79,7 +79,10 @@ public partial class MouseStageView : UserControl
         DataContext = vm;
         LeftChips.ItemsSource = vm.Callouts.Take(6).ToList();
         RightChips.ItemsSource = vm.Callouts.Skip(6).ToList();
-        GridKeys.ItemsSource = vm.Callouts;
+        // side-view grid in the hardware's physical order: 4 columns front-to-back, each
+        // column numbered bottom-up, so row-major here is 3 6 9 12 / 2 5 8 11 / 1 4 7 10
+        int[] sideViewOrder = { 3, 6, 9, 12, 2, 5, 8, 11, 1, 4, 7, 10 };
+        GridKeys.ItemsSource = sideViewOrder.Select(vm.Callout).ToList();
     }
 
     private static CalloutViewModel Vm(object sender) =>

@@ -150,63 +150,71 @@
           </Style.Triggers>
         </Style>
       </Viewbox.Style>
-      <Canvas Width="240" Height="360">
-        <!-- side-view body: simple bezier silhouette, thumb side facing viewer -->
-        <Path Canvas.Left="30" Canvas.Top="10" StrokeThickness="1.5"
-              Stroke="{DynamicResource App.CardStroke}">
-          <Path.Fill>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-              <GradientStop Color="#2A2C31" Offset="0"/><GradientStop Color="#131418" Offset="0.7"/>
-            </LinearGradientBrush>
-          </Path.Fill>
-          <Path.Data>
-            M 60,0 C 130,-6 180,40 180,150 C 180,260 150,340 90,340 C 30,340 0,280 0,190 C 0,80 10,6 60,0 Z
-          </Path.Data>
-        </Path>
-        <!-- top-down anatomy: button split, scroll wheel, thumb-plate frame -->
-        <Path StrokeThickness="1.5" Stroke="{DynamicResource App.CardStroke}" Data="M 120,14 L 120,70"/>
-        <Rectangle Canvas.Left="112" Canvas.Top="34" Width="16" Height="34" RadiusX="8" RadiusY="8"
-                   Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.CardStroke}" StrokeThickness="1"/>
-        <Rectangle Canvas.Left="44" Canvas.Top="82" Width="112" Height="144" RadiusX="12" RadiusY="12"
-                   Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.CardStroke}" StrokeThickness="1"
-                   Opacity="0.85"/>
-        <Ellipse Canvas.Left="20" Canvas.Top="40" Width="200" Height="290"
+      <Canvas Width="400" Height="220">
+        <!-- left-side profile, nose facing left (the thumb-grid side the user actually sees).
+             The wheel is drawn FIRST: seen along its axle it is a disc, and the opaque shell
+             painted over it leaves only the arc poking above the front-top edge visible. -->
+        <Ellipse Canvas.Left="64" Canvas.Top="84" Width="32" Height="32"
+                 Fill="{DynamicResource App.CanvasBrush}"/>
+        <Ellipse Canvas.Left="64" Canvas.Top="84" Width="32" Height="32"
+                 Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.ChipStroke}" StrokeThickness="1.5"/>
+        <!-- body shell: low nose, arch peaking ~60% back, rounded tail, flat base. The theme
+             fills are translucent tints, so the shell stacks an opaque CanvasBrush base under
+             the CardFill tint — the mouse reads as a card-surface shape, not a wire ghost -->
+        <Path Fill="{DynamicResource App.CanvasBrush}"
+              Data="M 34,200 C 22,190 16,152 26,126 C 32,110 42,103 54,101 C 112,84 168,46 246,38
+                    C 292,40 330,62 358,96 C 372,118 380,146 376,170 C 372,188 366,196 354,200 Z"/>
+        <Path StrokeThickness="1.5" Stroke="{DynamicResource App.CardStroke}" Fill="{DynamicResource App.CardFill}"
+              Data="M 34,200 C 22,190 16,152 26,126 C 32,110 42,103 54,101 C 112,84 168,46 246,38
+                    C 292,40 330,62 358,96 C 372,118 380,146 376,170 C 372,188 366,196 354,200 Z"/>
+        <!-- front click seam, nose ridge to the wheel well -->
+        <Path StrokeThickness="1" Stroke="{DynamicResource App.CardStroke}" Opacity="0.55"
+              Data="M 27,128 C 42,124 56,114 64,104"/>
+        <Ellipse Canvas.Left="50" Canvas.Top="55" Width="300" Height="140"
                  Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
-        <!-- 12-key thumb grid, 3 cols × 4 rows -->
-        <ItemsControl x:Name="GridKeys" Canvas.Left="52" Canvas.Top="90">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Border Width="26" Height="26" Margin="3" CornerRadius="4"
-                      RenderTransformOrigin="0.5,0.5"
-                      MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave"
-                      PreviewMouseLeftButtonDown="OnChipPressDown" PreviewMouseLeftButtonUp="OnChipPressUp"
-                      MouseLeftButtonUp="OnChipClick"
-                      IsEnabled="{Binding DataContext.DeviceOnline, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                <Border.RenderTransform>
-                  <ScaleTransform/>
-                </Border.RenderTransform>
-                <Border.Style>
-                  <Style TargetType="Border">
-                    <Setter Property="Background" Value="{DynamicResource App.ChipFill}"/>
-                    <Setter Property="BorderBrush" Value="Transparent"/>
-                    <Setter Property="BorderThickness" Value="1"/>
-                    <Style.Triggers>
-                      <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
-                        <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
-                        <Setter Property="Background" Value="{DynamicResource App.AccentSoft}"/>
-                      </DataTrigger>
-                    </Style.Triggers>
-                  </Style>
-                </Border.Style>
-                <TextBlock Text="{Binding Label}" FontSize="10" HorizontalAlignment="Center"
-                           VerticalAlignment="Center" Foreground="{DynamicResource App.TextSecondary}"/>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <!-- thumb side panel: 12 keys in the hardware's own layout — 4 columns front-to-back,
+             each numbered bottom-up (top row 3 6 9 12, middle 2 5 8 11, bottom 1 4 7 10; the
+             item order comes from Bind) — raked -8° to follow the shell line -->
+        <Canvas Canvas.Left="86" Canvas.Top="88" Width="190" Height="88"
+                RenderTransformOrigin="0.5,0.5">
+          <Canvas.RenderTransform><RotateTransform Angle="-7"/></Canvas.RenderTransform>
+          <Rectangle Width="190" Height="88" RadiusX="10" RadiusY="10"
+                     Fill="{DynamicResource App.CardFill}" Stroke="{DynamicResource App.CardStroke}" StrokeThickness="1"/>
+          <ItemsControl x:Name="GridKeys" Canvas.Left="3" Canvas.Top="2">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><UniformGrid Columns="4"/></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Width="40" Height="22" Margin="3" CornerRadius="4"
+                        RenderTransformOrigin="0.5,0.5"
+                        MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave"
+                        PreviewMouseLeftButtonDown="OnChipPressDown" PreviewMouseLeftButtonUp="OnChipPressUp"
+                        MouseLeftButtonUp="OnChipClick"
+                        IsEnabled="{Binding DataContext.DeviceOnline, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                  <Border.RenderTransform>
+                    <ScaleTransform/>
+                  </Border.RenderTransform>
+                  <Border.Style>
+                    <Style TargetType="Border">
+                      <Setter Property="Background" Value="{DynamicResource App.ChipFill}"/>
+                      <Setter Property="BorderBrush" Value="Transparent"/>
+                      <Setter Property="BorderThickness" Value="1"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                          <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+                          <Setter Property="Background" Value="{DynamicResource App.AccentSoft}"/>
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
+                  <TextBlock Text="{Binding Label}" FontSize="10" HorizontalAlignment="Center"
+                             VerticalAlignment="Center" Foreground="{DynamicResource App.TextSecondary}"/>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Canvas>
       </Canvas>
     </Viewbox>
 
