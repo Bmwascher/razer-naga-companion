@@ -1,22 +1,10 @@
-using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
 using System.Windows.Media;
 using NagaBatteryTray.Ui;
-using Wpf.Ui.Controls;
 using UserControl = System.Windows.Controls.UserControl; // WinForms' implicit using also exports one
-using Color = System.Windows.Media.Color; // ditto (System.Drawing.Color)
-using ColorConverter = System.Windows.Media.ColorConverter; // ditto (System.Drawing.ColorConverter)
 
 namespace NagaBatteryTray.Ui.Dashboard;
-
-public sealed class StringToBrushConverter : IValueConverter
-{
-    public object Convert(object value, Type t, object p, CultureInfo c) =>
-        new SolidColorBrush((Color)ColorConverter.ConvertFromString((string)value));
-    public object ConvertBack(object v, Type t, object p, CultureInfo c) => throw new NotSupportedException();
-}
 
 public partial class MouseStageView : UserControl
 {

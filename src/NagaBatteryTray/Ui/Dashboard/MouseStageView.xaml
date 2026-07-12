@@ -2,11 +2,9 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    xmlns:local="clr-namespace:NagaBatteryTray.Ui.Dashboard"
     xmlns:motion="clr-namespace:NagaBatteryTray.Ui">
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
-    <local:StringToBrushConverter x:Key="HexBrush"/>
     <DataTemplate x:Key="ChipTemplate">
       <Border Margin="0,3" MinWidth="150"
               RenderTransformOrigin="0.5,0.5"
@@ -248,8 +246,17 @@
                           HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                           IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}">
                     <StackPanel Orientation="Horizontal">
-                      <Ellipse Width="7" Height="7" VerticalAlignment="Center"
-                               Fill="{Binding ColorHex, Converter={StaticResource HexBrush}}"/>
+                      <Ellipse Width="7" Height="7" VerticalAlignment="Center" Fill="{DynamicResource App.TextSecondary}">
+                        <Ellipse.Style>
+                          <Style TargetType="Ellipse">
+                            <Style.Triggers>
+                              <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                <Setter Property="Fill" Value="{DynamicResource App.Accent}"/>
+                              </DataTrigger>
+                            </Style.Triggers>
+                          </Style>
+                        </Ellipse.Style>
+                      </Ellipse>
                       <TextBlock Style="{DynamicResource BodyText}" Text="{Binding Value}" Margin="7,0,0,0"/>
                       <TextBlock Style="{DynamicResource BodyText}" Text=" ✓" Foreground="{DynamicResource App.Accent}"
                                  Visibility="{Binding IsActive, Converter={StaticResource BoolToVis}}"/>

@@ -10,9 +10,8 @@ namespace NagaBatteryTray.Ui.Dashboard;
 public sealed class DpiPresetItem : INotifyPropertyChanged
 {
     private bool _isActive;
-    public DpiPresetItem(int value, string colorHex) { Value = value; ColorHex = colorHex; }
+    public DpiPresetItem(int value) { Value = value; }
     public int Value { get; }
-    public string ColorHex { get; }
     public bool IsActive
     {
         get => _isActive;
@@ -24,10 +23,6 @@ public sealed class DpiPresetItem : INotifyPropertyChanged
 
 public sealed class DashboardViewModel : INotifyPropertyChanged
 {
-    // Fixed identification palette for preset dots, assigned by list index (theme-independent, §4.1).
-    private static readonly string[] DotPalette =
-        { "#E6A23C", "#5AA9FF", "#43D675", "#E5484D", "#B678FF", "#4DD0C7" };
-
     private readonly int? _slot;
     private int _dpi = RazerProtocol.DpiMin;
     private bool _devicePresent, _deviceOnline, _runAtStartup, _lowBatteryNotify;
@@ -57,7 +52,6 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
 
         Presets = new ObservableCollection<DpiPresetItem>();
         foreach (int v in source.DpiPresets.Distinct().OrderBy(v => v)) Presets.Add(NewItem(v));
-        RefreshDots();
         SetLiveness(_slot is null ? ProfileLivenessState.NotAdopted : ProfileLivenessState.Unchecked);
     }
 
@@ -128,27 +122,15 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         int at = 0;
         while (at < Presets.Count && Presets[at].Value < value) at++;
         Presets.Insert(at, NewItem(value));
-        RefreshDots();
         RefreshActive();
     }
 
     public void RemovePreset(DpiPresetItem item)
     {
         Presets.Remove(item);
-        RefreshDots();
     }
 
-    private DpiPresetItem NewItem(int v) => new(v, DotPalette[0]); // dot fixed in RefreshDots
-    private void RefreshDots()
-    {
-        // ColorHex is by index — rebuild wrappers cheaply by replacing items whose color changed
-        for (int i = 0; i < Presets.Count; i++)
-        {
-            string want = DotPalette[i % DotPalette.Length];
-            if (Presets[i].ColorHex != want)
-                Presets[i] = new DpiPresetItem(Presets[i].Value, want) { IsActive = Presets[i].IsActive };
-        }
-    }
+    private static DpiPresetItem NewItem(int v) => new(v);
     private void RefreshActive()
     { foreach (var p in Presets) p.IsActive = DevicePresent && p.Value == Dpi; }
 
