@@ -154,39 +154,43 @@
         <!-- face-on thumb-panel view (user reference photo): mouse vertical, nose up, all 12
              keys facing the viewer. The wheel nub is drawn FIRST so the shell painted over it
              leaves only the sliver poking above the nose crown visible. -->
-        <!-- body shell: nose crown widening into the right-hand palm swell, fuller rounded
-             tail (face-on at the thumb panel, the wheel is hidden behind the crown — only the
-             main-button split seam shows). The theme fills are translucent tints, so the shell
-             stacks an opaque CanvasBrush base under the CardFill tint — the mouse reads as a
-             card-surface shape, not a wire ghost -->
+        <!-- body shell traced from the product-render reference: slanted crown peaking right
+             (the main-button plate), full right cheek, long concave lower-left sweep to the
+             tail tip. The theme fills are translucent tints, so the shell stacks an opaque
+             CanvasBrush base under the CardFill tint — the mouse reads as a card-surface
+             shape, not a wire ghost -->
         <Path Fill="{DynamicResource App.CanvasBrush}"
-              Data="M 78,36 C 94,18 126,16 142,28 C 174,52 204,98 214,154
-                    C 224,222 220,290 202,340 C 186,372 158,390 128,392 C 98,394 76,382 66,352
-                    C 52,314 46,262 48,210 C 50,160 54,110 62,66 C 66,44 72,40 78,36 Z"/>
+              Data="M 148,14 C 122,17 84,34 58,52 C 46,60 38,76 35,96 C 31,118 30,134 31,154
+                    C 29,222 48,318 94,374 C 102,384 112,390 122,389 C 138,387 152,377 162,366
+                    C 188,340 209,298 216,250 C 224,194 214,128 196,84 C 186,56 166,30 148,14 Z"/>
         <Path StrokeThickness="1.5" Stroke="{DynamicResource App.CardStroke}" Fill="{DynamicResource App.CardFill}"
-              Data="M 78,36 C 94,18 126,16 142,28 C 174,52 204,98 214,154
-                    C 224,222 220,290 202,340 C 186,372 158,390 128,392 C 98,394 76,382 66,352
-                    C 52,314 46,262 48,210 C 50,160 54,110 62,66 C 66,44 72,40 78,36 Z"/>
-        <!-- main-button split seam over the crown, and the thumb-shelf ridge above the grid -->
-        <Path StrokeThickness="1" Stroke="{DynamicResource App.CardStroke}" Opacity="0.55"
-              Data="M 112,19 C 111,32 110,44 110,58"/>
-        <Path StrokeThickness="1" Stroke="{DynamicResource App.CardStroke}" Opacity="0.4"
-              Data="M 56,126 C 92,116 134,114 168,122"/>
-        <Ellipse Canvas.Left="45" Canvas.Top="80" Width="170" Height="260"
+              Data="M 148,14 C 122,17 84,34 58,52 C 46,60 38,76 35,96 C 31,118 30,134 31,154
+                    C 29,222 48,318 94,374 C 102,384 112,390 122,389 C 138,387 152,377 162,366
+                    C 188,340 209,298 216,250 C 224,194 214,128 196,84 C 186,56 166,30 148,14 Z"/>
+        <!-- LED side-strip: soft accent wash along the right cheek, like the hardware's ring -->
+        <Path StrokeThickness="4" Stroke="{DynamicResource App.Accent}" Opacity="0.18"
+              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+              Data="M 197,86 C 214,128 223,194 215,250 C 208,296 188,338 163,364"/>
+        <!-- main-button plate: a distinct surface like the hardware's — bounded by the top
+             edge, the facet edge to the right shoulder, and the split slit back to the peak -->
+        <Path Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.CardStroke}"
+              StrokeThickness="1" Opacity="0.9"
+              Data="M 148,14 C 122,17 84,34 58,52 C 95,64 132,72 164,80 C 158,56 152,32 148,14 Z"/>
+        <Ellipse Canvas.Left="50" Canvas.Top="90" Width="170" Height="260"
                  Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
         <!-- thumb grid face-on, numbered like the hardware labels (1 2 3 / 4 5 6 / 7 8 9 /
-             10 11 12), raked -4° like the panel; no plate frame — on the real mouse the keys
-             sit directly on the shell, nearly edge-to-edge -->
-        <Canvas Canvas.Left="59" Canvas.Top="141" Width="150" Height="136"
+             10 11 12), near-level like the reference render; no plate frame — the keys sit
+             directly on the shell -->
+        <Canvas Canvas.Left="58" Canvas.Top="155" Width="138" Height="132"
                 RenderTransformOrigin="0.5,0.5">
-          <Canvas.RenderTransform><RotateTransform Angle="-4"/></Canvas.RenderTransform>
+          <Canvas.RenderTransform><RotateTransform Angle="-2"/></Canvas.RenderTransform>
           <ItemsControl x:Name="GridKeys">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <Border Width="44" Height="28" Margin="3" CornerRadius="5"
+                <Border Width="40" Height="27" Margin="3" CornerRadius="6"
                         RenderTransformOrigin="0.5,0.5"
                         MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave"
                         PreviewMouseLeftButtonDown="OnChipPressDown" PreviewMouseLeftButtonUp="OnChipPressUp"
