@@ -160,22 +160,30 @@
              CanvasBrush base under the CardFill tint — the mouse reads as a card-surface
              shape, not a wire ghost -->
         <Path Fill="{DynamicResource App.CanvasBrush}"
-              Data="M 148,14 C 122,17 84,34 58,52 C 46,60 38,76 35,96 C 31,118 30,134 31,154
-                    C 29,222 48,318 94,374 C 102,384 112,390 122,389 C 138,387 152,377 162,366
-                    C 188,340 209,298 216,250 C 224,194 214,128 196,84 C 186,56 166,30 148,14 Z"/>
+              Data="M 145,12 C 156,14 164,27 169,44 C 174,60 176,74 180,92 C 200,134 217,190 216,250
+                    C 209,298 188,340 162,366 C 152,377 138,387 122,389 C 112,390 102,384 94,374
+                    C 48,318 29,222 31,154 C 30,134 31,118 35,96 C 38,76 46,60 58,52
+                    C 86,36 104,27 114,21 C 121,16 127,17 128,23 C 128,30 129,35 129,40
+                    C 129,45 136,45 136,40 C 136,32 136,26 137,20 C 137,13 141,11 145,12 Z"/>
         <Path StrokeThickness="1.5" Stroke="{DynamicResource App.CardStroke}" Fill="{DynamicResource App.CardFill}"
-              Data="M 148,14 C 122,17 84,34 58,52 C 46,60 38,76 35,96 C 31,118 30,134 31,154
-                    C 29,222 48,318 94,374 C 102,384 112,390 122,389 C 138,387 152,377 162,366
-                    C 188,340 209,298 216,250 C 224,194 214,128 196,84 C 186,56 166,30 148,14 Z"/>
+              Data="M 145,12 C 156,14 164,27 169,44 C 174,60 176,74 180,92 C 200,134 217,190 216,250
+                    C 209,298 188,340 162,366 C 152,377 138,387 122,389 C 112,390 102,384 94,374
+                    C 48,318 29,222 31,154 C 30,134 31,118 35,96 C 38,76 46,60 58,52
+                    C 86,36 104,27 114,21 C 121,16 127,17 128,23 C 128,30 129,35 129,40
+                    C 129,45 136,45 136,40 C 136,32 136,26 137,20 C 137,13 141,11 145,12 Z"/>
         <!-- LED side-strip: soft accent wash along the right cheek, like the hardware's ring -->
         <Path StrokeThickness="4" Stroke="{DynamicResource App.Accent}" Opacity="0.18"
               StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-              Data="M 197,86 C 214,128 223,194 215,250 C 208,296 188,338 163,364"/>
-        <!-- main-button plate: a distinct surface like the hardware's — bounded by the top
-             edge, the facet edge to the right shoulder, and the split slit back to the peak -->
+              Data="M 180,92 C 200,134 216,190 215,250 C 208,296 188,338 163,364"/>
+        <!-- main-button plate: a distinct surface like the hardware's — top bevel to the left
+             corner, facet edge back to the slit, right side hugging the slit up to the tip -->
         <Path Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.CardStroke}"
               StrokeThickness="1" Opacity="0.9"
-              Data="M 148,14 C 122,17 84,34 58,52 C 95,64 132,72 164,80 C 158,56 152,32 148,14 Z"/>
+              Data="M 121,18 C 104,26 84,35 58,52 C 95,63 124,69 148,75 C 143,58 135,38 128,25
+                    C 127,20 125,18 121,18 Z"/>
+        <!-- the split slit continuing from the crown notch down into the panel -->
+        <Path StrokeThickness="1" Stroke="{DynamicResource App.CardStroke}" Opacity="0.55"
+              Data="M 133,42 C 140,57 146,68 151,77 C 154,84 156,93 158,102"/>
         <Ellipse Canvas.Left="50" Canvas.Top="90" Width="170" Height="260"
                  Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
         <!-- thumb grid face-on, numbered like the hardware labels (1 2 3 / 4 5 6 / 7 8 9 /
