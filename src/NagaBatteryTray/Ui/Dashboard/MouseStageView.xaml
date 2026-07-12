@@ -250,9 +250,12 @@
                           HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                           IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}">
                     <StackPanel Orientation="Horizontal">
-                      <Ellipse Width="7" Height="7" VerticalAlignment="Center" Fill="{DynamicResource App.TextSecondary}">
+                      <Ellipse Width="7" Height="7" VerticalAlignment="Center">
                         <Ellipse.Style>
                           <Style TargetType="Ellipse">
+                            <!-- base Fill lives in the style: a local Fill on the element would
+                                 outrank the IsActive trigger and the dot could never turn accent -->
+                            <Setter Property="Fill" Value="{DynamicResource App.TextSecondary}"/>
                             <Style.Triggers>
                               <DataTrigger Binding="{Binding IsActive}" Value="True">
                                 <Setter Property="Fill" Value="{DynamicResource App.Accent}"/>

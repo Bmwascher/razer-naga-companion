@@ -45,7 +45,16 @@ public static class ThemeManager
         // has no live Application/resources for WPF-UI to update.
         if (AccentOf(next) is { } accent)
         {
-            try { ApplicationAccentColorManager.Apply(accent, ApplicationTheme.Dark); }
+            try
+            {
+                ApplicationAccentColorManager.Apply(accent, ApplicationTheme.Dark);
+                // Pushing the accent resources alone doesn't repaint chrome that already baked
+                // them at template time — a live theme switch left toggles/selection in the
+                // previous theme's accent until the dashboard was rebuilt. Re-applying the theme
+                // dictionary makes WPF-UI re-derive its control brushes from the accent above;
+                // updateAccent must stay false or the OS accent stomps that push (the startup bug).
+                ApplicationThemeManager.Apply(ApplicationTheme.Dark, updateAccent: false);
+            }
             catch { /* no-op: no live Application (e.g. bare test host) */ }
         }
     }
