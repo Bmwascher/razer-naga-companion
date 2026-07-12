@@ -150,43 +150,43 @@
           </Style.Triggers>
         </Style>
       </Viewbox.Style>
-      <Canvas Width="400" Height="220">
-        <!-- left-side profile, nose facing left (the thumb-grid side the user actually sees).
-             The wheel is drawn FIRST: seen along its axle it is a disc, and the opaque shell
-             painted over it leaves only the arc poking above the front-top edge visible. -->
-        <Ellipse Canvas.Left="64" Canvas.Top="84" Width="32" Height="32"
-                 Fill="{DynamicResource App.CanvasBrush}"/>
-        <Ellipse Canvas.Left="64" Canvas.Top="84" Width="32" Height="32"
-                 Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.ChipStroke}" StrokeThickness="1.5"/>
-        <!-- body shell: low nose, arch peaking ~60% back, rounded tail, flat base. The theme
-             fills are translucent tints, so the shell stacks an opaque CanvasBrush base under
-             the CardFill tint — the mouse reads as a card-surface shape, not a wire ghost -->
+      <Canvas Width="250" Height="400">
+        <!-- face-on thumb-panel view (user reference photo): mouse vertical, nose up, all 12
+             keys facing the viewer. The wheel nub is drawn FIRST so the shell painted over it
+             leaves only the sliver poking above the nose crown visible. -->
+        <!-- body shell: nose crown widening into the right-hand palm swell, fuller rounded
+             tail (face-on at the thumb panel, the wheel is hidden behind the crown — only the
+             main-button split seam shows). The theme fills are translucent tints, so the shell
+             stacks an opaque CanvasBrush base under the CardFill tint — the mouse reads as a
+             card-surface shape, not a wire ghost -->
         <Path Fill="{DynamicResource App.CanvasBrush}"
-              Data="M 34,200 C 22,190 16,152 26,126 C 32,110 42,103 54,101 C 112,84 168,46 246,38
-                    C 292,40 330,62 358,96 C 372,118 380,146 376,170 C 372,188 366,196 354,200 Z"/>
+              Data="M 78,36 C 94,18 126,16 142,28 C 174,52 204,98 214,154
+                    C 224,222 220,290 202,340 C 186,372 158,390 128,392 C 98,394 76,382 66,352
+                    C 52,314 46,262 48,210 C 50,160 54,110 62,66 C 66,44 72,40 78,36 Z"/>
         <Path StrokeThickness="1.5" Stroke="{DynamicResource App.CardStroke}" Fill="{DynamicResource App.CardFill}"
-              Data="M 34,200 C 22,190 16,152 26,126 C 32,110 42,103 54,101 C 112,84 168,46 246,38
-                    C 292,40 330,62 358,96 C 372,118 380,146 376,170 C 372,188 366,196 354,200 Z"/>
-        <!-- front click seam, nose ridge to the wheel well -->
+              Data="M 78,36 C 94,18 126,16 142,28 C 174,52 204,98 214,154
+                    C 224,222 220,290 202,340 C 186,372 158,390 128,392 C 98,394 76,382 66,352
+                    C 52,314 46,262 48,210 C 50,160 54,110 62,66 C 66,44 72,40 78,36 Z"/>
+        <!-- main-button split seam over the crown, and the thumb-shelf ridge above the grid -->
         <Path StrokeThickness="1" Stroke="{DynamicResource App.CardStroke}" Opacity="0.55"
-              Data="M 27,128 C 42,124 56,114 64,104"/>
-        <Ellipse Canvas.Left="50" Canvas.Top="55" Width="300" Height="140"
+              Data="M 112,19 C 111,32 110,44 110,58"/>
+        <Path StrokeThickness="1" Stroke="{DynamicResource App.CardStroke}" Opacity="0.4"
+              Data="M 56,126 C 92,116 134,114 168,122"/>
+        <Ellipse Canvas.Left="45" Canvas.Top="80" Width="170" Height="260"
                  Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
-        <!-- thumb side panel: 12 keys in the hardware's own layout — 4 columns front-to-back,
-             each numbered bottom-up (top row 3 6 9 12, middle 2 5 8 11, bottom 1 4 7 10; the
-             item order comes from Bind) — raked -8° to follow the shell line -->
-        <Canvas Canvas.Left="86" Canvas.Top="88" Width="190" Height="88"
+        <!-- thumb grid face-on, numbered like the hardware labels (1 2 3 / 4 5 6 / 7 8 9 /
+             10 11 12), raked -4° like the panel; no plate frame — on the real mouse the keys
+             sit directly on the shell, nearly edge-to-edge -->
+        <Canvas Canvas.Left="59" Canvas.Top="141" Width="150" Height="136"
                 RenderTransformOrigin="0.5,0.5">
-          <Canvas.RenderTransform><RotateTransform Angle="-7"/></Canvas.RenderTransform>
-          <Rectangle Width="190" Height="88" RadiusX="10" RadiusY="10"
-                     Fill="{DynamicResource App.CardFill}" Stroke="{DynamicResource App.CardStroke}" StrokeThickness="1"/>
-          <ItemsControl x:Name="GridKeys" Canvas.Left="3" Canvas.Top="2">
+          <Canvas.RenderTransform><RotateTransform Angle="-4"/></Canvas.RenderTransform>
+          <ItemsControl x:Name="GridKeys">
             <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate><UniformGrid Columns="4"/></ItemsPanelTemplate>
+              <ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <Border Width="40" Height="22" Margin="3" CornerRadius="4"
+                <Border Width="44" Height="28" Margin="3" CornerRadius="5"
                         RenderTransformOrigin="0.5,0.5"
                         MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave"
                         PreviewMouseLeftButtonDown="OnChipPressDown" PreviewMouseLeftButtonUp="OnChipPressUp"
@@ -208,7 +208,7 @@
                       </Style.Triggers>
                     </Style>
                   </Border.Style>
-                  <TextBlock Text="{Binding Label}" FontSize="10" HorizontalAlignment="Center"
+                  <TextBlock Text="{Binding Label}" FontSize="11" HorizontalAlignment="Center"
                              VerticalAlignment="Center" Foreground="{DynamicResource App.TextSecondary}"/>
                 </Border>
               </DataTemplate>
