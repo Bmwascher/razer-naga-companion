@@ -235,7 +235,9 @@
             <TextBlock Style="{DynamicResource NumeralText}" Text="{Binding DpiText}"/>
             <TextBlock Style="{DynamicResource LabelText}" Text="DPI" VerticalAlignment="Bottom" Margin="4,0,0,4"/>
           </StackPanel>
-          <Slider Minimum="0" Maximum="1"
+          <!-- SmallChange: WPF's 0.1 default on a 0..1 log slider makes one arrow press jump DPI
+               ~77% — 0.02 keeps keyboard steps near the old 100-DPI granularity at typical values -->
+          <Slider Minimum="0" Maximum="1" SmallChange="0.02" LargeChange="0.1"
                   Value="{Binding DpiSliderPos, Mode=TwoWay}" IsEnabled="{Binding DevicePresent}"
                   Thumb.DragCompleted="OnDpiDragCompleted" KeyUp="OnDpiSliderKeyUp"/>
           <ItemsControl ItemsSource="{Binding Presets}" Margin="0,8,0,0">
