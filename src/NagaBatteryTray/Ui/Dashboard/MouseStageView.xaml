@@ -150,56 +150,49 @@
           </Style.Triggers>
         </Style>
       </Viewbox.Style>
-      <Canvas Width="250" Height="400">
-        <!-- face-on thumb-panel view (user reference photo): mouse vertical, nose up, all 12
-             keys facing the viewer. The wheel nub is drawn FIRST so the shell painted over it
-             leaves only the sliver poking above the nose crown visible. -->
-        <!-- body shell traced from the product-render reference: slanted crown peaking right
-             (the main-button plate), full right cheek, long concave lower-left sweep to the
-             tail tip. The theme fills are translucent tints, so the shell stacks an opaque
-             CanvasBrush base under the CardFill tint — the mouse reads as a card-surface
-             shape, not a wire ghost -->
-        <Path Fill="{DynamicResource App.CanvasBrush}"
-              Data="M 145,12 C 156,14 164,27 169,44 C 174,60 176,74 180,92 C 200,134 217,190 216,250
-                    C 209,298 188,340 162,366 C 152,377 138,387 122,389 C 112,390 102,384 94,374
-                    C 48,318 29,222 31,154 C 30,134 31,118 35,96 C 38,76 46,60 58,52
-                    C 86,36 104,27 114,21 C 121,16 127,17 128,23 C 128,30 129,35 129,40
-                    C 129,45 136,45 136,40 C 136,32 136,26 137,20 C 137,13 141,11 145,12 Z"/>
-        <Path StrokeThickness="1.5" Stroke="{DynamicResource App.CardStroke}" Fill="{DynamicResource App.CardFill}"
-              Data="M 145,12 C 156,14 164,27 169,44 C 174,60 176,74 180,92 C 200,134 217,190 216,250
-                    C 209,298 188,340 162,366 C 152,377 138,387 122,389 C 112,390 102,384 94,374
-                    C 48,318 29,222 31,154 C 30,134 31,118 35,96 C 38,76 46,60 58,52
-                    C 86,36 104,27 114,21 C 121,16 127,17 128,23 C 128,30 129,35 129,40
-                    C 129,45 136,45 136,40 C 136,32 136,26 137,20 C 137,13 141,11 145,12 Z"/>
-        <!-- LED side-strip: soft accent wash along the right cheek, like the hardware's ring -->
-        <Path StrokeThickness="4" Stroke="{DynamicResource App.Accent}" Opacity="0.18"
-              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-              Data="M 180,92 C 200,134 216,190 215,250 C 208,296 188,338 163,364"/>
-        <!-- main-button plate: a distinct surface like the hardware's — top bevel to the left
-             corner, facet edge back to the slit, right side hugging the slit up to the tip -->
-        <Path Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.CardStroke}"
-              StrokeThickness="1" Opacity="0.9"
-              Data="M 121,18 C 104,26 84,35 58,52 C 95,63 124,69 148,75 C 143,58 135,38 128,25
-                    C 127,20 125,18 121,18 Z"/>
-        <!-- the split slit continuing from the crown notch down into the panel -->
-        <Path StrokeThickness="1" Stroke="{DynamicResource App.CardStroke}" Opacity="0.55"
-              Data="M 133,42 C 140,57 146,68 151,77 C 154,84 156,93 158,102"/>
-        <Ellipse Canvas.Left="50" Canvas.Top="90" Width="170" Height="260"
+      <Canvas Width="250" Height="445">
+        <!-- the stage is the user-supplied product render of the thumb panel (nose up, all 12
+             keys facing the viewer), clipped to the shell silhouette so it sits clean on any
+             theme canvas. DecodePixelWidth caps the decoded bitmap (~2 MB) well under the
+             source's full size; the dashboard releases it on close like everything else. -->
+        <Image Canvas.Left="0" Canvas.Top="0" Width="250" Height="445" Stretch="Fill">
+          <Image.Source>
+            <BitmapImage UriSource="Assets/naga-thumb.png" DecodePixelWidth="560"/>
+          </Image.Source>
+          <Image.Clip>
+            <!-- silhouette traced from this same render, transformed from the previous 250x400
+                 canvas space into this image's crop space -->
+            <PathGeometry Figures="M 145,12 C 156,14 164,27 169,44 C 174,60 176,74 180,92
+                    C 200,134 217,190 216,250 C 209,298 188,340 162,366 C 152,377 138,387 122,389
+                    C 112,390 102,384 94,374 C 48,318 29,222 31,154 C 30,134 31,118 35,96
+                    C 38,76 46,60 58,52 C 86,36 104,27 114,21 C 121,16 127,17 128,23
+                    C 128,30 129,35 129,40 C 129,45 136,45 136,40 C 136,32 136,26 137,20
+                    C 137,13 141,11 145,12 Z">
+              <PathGeometry.Transform>
+                <TransformGroup>
+                  <ScaleTransform ScaleX="1.0685" ScaleY="1.0677"/>
+                  <TranslateTransform X="-13.02" Y="6.27"/>
+                </TransformGroup>
+              </PathGeometry.Transform>
+            </PathGeometry>
+          </Image.Clip>
+        </Image>
+        <Ellipse Canvas.Left="35" Canvas.Top="90" Width="180" Height="280"
                  Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
-        <!-- thumb grid face-on, numbered like the hardware labels (1 2 3 / 4 5 6 / 7 8 9 /
-             10 11 12), near-level like the reference render; no plate frame — the keys sit
-             directly on the shell -->
-        <Canvas Canvas.Left="58" Canvas.Top="155" Width="138" Height="132"
+        <!-- interactive hit areas over the render's printed keys (1 2 3 / 4 5 6 / 7 8 9 /
+             10 11 12): invisible at rest, accent ring + wash on hover/capture -->
+        <Canvas Canvas.Left="49.9" Canvas.Top="157.8" Width="133" Height="158"
                 RenderTransformOrigin="0.5,0.5">
-          <Canvas.RenderTransform><RotateTransform Angle="-2"/></Canvas.RenderTransform>
+          <Canvas.RenderTransform><RotateTransform Angle="-3.5"/></Canvas.RenderTransform>
           <ItemsControl x:Name="GridKeys">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <Border Width="40" Height="27" Margin="3" CornerRadius="6"
+                <Border Width="40" Height="27" Margin="2.15,6.25" CornerRadius="6"
                         RenderTransformOrigin="0.5,0.5"
+                        AutomationProperties.Name="{Binding Label, StringFormat=Button {0}}"
                         MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave"
                         PreviewMouseLeftButtonDown="OnChipPressDown" PreviewMouseLeftButtonUp="OnChipPressUp"
                         MouseLeftButtonUp="OnChipClick"
@@ -209,9 +202,9 @@
                   </Border.RenderTransform>
                   <Border.Style>
                     <Style TargetType="Border">
-                      <Setter Property="Background" Value="{DynamicResource App.ChipFill}"/>
+                      <Setter Property="Background" Value="Transparent"/>
                       <Setter Property="BorderBrush" Value="Transparent"/>
-                      <Setter Property="BorderThickness" Value="1"/>
+                      <Setter Property="BorderThickness" Value="1.5"/>
                       <Style.Triggers>
                         <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                           <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
@@ -220,8 +213,6 @@
                       </Style.Triggers>
                     </Style>
                   </Border.Style>
-                  <TextBlock Text="{Binding Label}" FontSize="11" HorizontalAlignment="Center"
-                             VerticalAlignment="Center" Foreground="{DynamicResource App.TextSecondary}"/>
                 </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

@@ -24,4 +24,8 @@
     <PackageReference Include="HidSharp" Version="2.6.4" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- dashboard stage artwork: user-supplied Naga V2 Pro thumb-panel render -->
+    <Resource Include="Ui\Dashboard\Assets\naga-thumb.png" />
+  </ItemGroup>
 </Project>
