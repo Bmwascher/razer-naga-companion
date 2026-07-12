@@ -158,10 +158,6 @@ public sealed class AppHost
         { _settings.Settings.TrayIconStyle = style; _settings.Save(); _tray.SetGaugeStyle(style != "Text"); };
         view.ResetAllRequested += () =>
         {
-            var pick = System.Windows.MessageBox.Show(
-                "Rewrite all 12 grid buttons to their factory keys?", "Reset buttons",
-                System.Windows.MessageBoxButton.YesNo);
-            if (pick != System.Windows.MessageBoxResult.Yes) return;
             view.SetResetNote("Resetting…");
             _ = RunResetAllAsync(view, vm);
         };

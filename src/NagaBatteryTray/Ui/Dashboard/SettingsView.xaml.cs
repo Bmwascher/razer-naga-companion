@@ -12,6 +12,12 @@ public partial class SettingsView : UserControl
     public event Action<string>? TrayIconStyleChanged;
     public event Action? ResetAllRequested;
 
+    // Two-step inline confirm for "Reset all to factory" (replaces a MessageBox): first click arms
+    // it and starts a one-shot 5 s auto-revert, same undo-pattern token idiom as CalloutViewModel's
+    // OpenUndoWindowAsync; a second click within the window fires ResetAllRequested.
+    private bool _confirmingResetAll;
+    private int _resetConfirmVersion;
+
     public SettingsView()
     {
         InitializeComponent();
@@ -39,5 +45,39 @@ public partial class SettingsView : UserControl
     { if (ThemeList.SelectedItem is string name) ThemeChanged?.Invoke(name); }
     private void OnTrayIconStyleChanged(object s, SelectionChangedEventArgs e)
     { if (TrayIconStyleList.SelectedItem is string label) TrayIconStyleChanged?.Invoke(label == "Text only" ? "Text" : "Gauge"); }
-    private void OnResetAll(object s, RoutedEventArgs e) => ResetAllRequested?.Invoke();
+    private void OnResetAll(object s, RoutedEventArgs e)
+    {
+        if (_confirmingResetAll)
+        {
+            _resetConfirmVersion++; // invalidate the pending auto-revert
+            SetConfirmingResetAll(false);
+            ResetAllRequested?.Invoke();
+            return;
+        }
+        SetConfirmingResetAll(true);
+        _ = RevertConfirmAfterDelayAsync();
+    }
+
+    private async Task RevertConfirmAfterDelayAsync()
+    {
+        int version = ++_resetConfirmVersion;
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        if (version == _resetConfirmVersion) SetConfirmingResetAll(false);
+    }
+
+    private void SetConfirmingResetAll(bool confirming)
+    {
+        _confirmingResetAll = confirming;
+        ResetAllButton.Content = confirming ? "Press again to confirm" : "Reset all to factory";
+        if (confirming)
+        {
+            ResetAllButton.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "App.AccentSoft");
+            ResetAllButton.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "App.Accent");
+        }
+        else
+        {
+            ResetAllButton.ClearValue(System.Windows.Controls.Control.BackgroundProperty);
+            ResetAllButton.ClearValue(System.Windows.Controls.Control.BorderBrushProperty);
+        }
+    }
 }

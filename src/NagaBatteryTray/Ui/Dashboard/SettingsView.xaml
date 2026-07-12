@@ -55,7 +55,7 @@
         </DockPanel>
 
         <TextBlock Style="{DynamicResource LabelText}" Text="BUTTONS" Margin="0,8,0,0"/>
-        <ui:Button Content="Reset all to factory" Click="OnResetAll" Margin="0,6,0,0"/>
+        <ui:Button x:Name="ResetAllButton" Content="Reset all to factory" Click="OnResetAll" Margin="0,6,0,0"/>
         <TextBlock x:Name="ResetNote" Style="{DynamicResource SubtleText}" Text="" TextWrapping="Wrap"/>
 
         <TextBlock Style="{DynamicResource SubtleText}" Margin="0,14,0,0" TextTrimming="CharacterEllipsis"
