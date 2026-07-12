@@ -5,7 +5,9 @@
     HorizontalAlignment="Right" Width="340">
   <Border Style="{DynamicResource CardBorder}" Margin="0,8,12,12" Background="{DynamicResource App.CanvasBrush}">
     <ui:DynamicScrollViewer VerticalScrollBarVisibility="Auto">
-      <StackPanel Margin="4">
+      <!-- Right margin is the scrollbar's gutter: without it the bar overlays the right-aligned
+           toggles/spinners and cuts the theme selection rows (screenshot-confirmed). -->
+      <StackPanel Margin="4,4,14,4">
         <DockPanel Margin="0,0,0,10">
           <TextBlock Style="{DynamicResource BodyText}" FontSize="15" FontWeight="SemiBold" Text="Settings"/>
           <ui:Button DockPanel.Dock="Right" HorizontalAlignment="Right" Content="✕" Click="OnClose" Padding="8,3"/>
