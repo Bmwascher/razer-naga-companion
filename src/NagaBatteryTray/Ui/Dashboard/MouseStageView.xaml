@@ -21,6 +21,9 @@
         </Border.RenderTransform>
         <Border.Style>
           <Style TargetType="Border" BasedOn="{StaticResource ChipBorder}">
+            <!-- stroke diet: at rest the chip border is invisible (thickness kept so state
+                 changes never shift layout); a stroke only appears as a state signal below -->
+            <Setter Property="BorderBrush" Value="Transparent"/>
             <Style.Triggers>
               <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
@@ -29,6 +32,9 @@
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
                 <Setter Property="Background" Value="{DynamicResource App.AccentSoft}"/>
               </DataTrigger>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+              </Trigger>
             </Style.Triggers>
           </Style>
         </Border.Style>
@@ -36,7 +42,7 @@
           <TextBlock Style="{DynamicResource LabelText}" Text="{Binding Label, StringFormat=Button {0}}"/>
           <Grid HorizontalAlignment="Left">
             <Border Background="{DynamicResource App.ChipFill}" BorderBrush="{DynamicResource App.ChipStroke}"
-                    BorderThickness="1" CornerRadius="4" Padding="6,1">
+                    BorderThickness="1,1,1,2" CornerRadius="4" Padding="6,1">
               <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding BindingText}"
                          FontWeight="SemiBold" Foreground="{DynamicResource App.TextPrimary}">
                 <TextBlock.Style>
@@ -187,7 +193,7 @@
                 <Border.Style>
                   <Style TargetType="Border">
                     <Setter Property="Background" Value="{DynamicResource App.ChipFill}"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource App.ChipStroke}"/>
+                    <Setter Property="BorderBrush" Value="Transparent"/>
                     <Setter Property="BorderThickness" Value="1"/>
                     <Style.Triggers>
                       <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
