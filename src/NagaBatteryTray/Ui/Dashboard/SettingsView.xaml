@@ -4,7 +4,7 @@
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     HorizontalAlignment="Right" Width="340">
   <Border Style="{DynamicResource CardBorder}" Margin="0,8,12,12" Background="{DynamicResource App.CanvasBrush}">
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <ui:DynamicScrollViewer VerticalScrollBarVisibility="Auto">
       <StackPanel Margin="4">
         <DockPanel Margin="0,0,0,10">
           <TextBlock Style="{DynamicResource BodyText}" FontSize="15" FontWeight="SemiBold" Text="Settings"/>
@@ -60,6 +60,6 @@
                    Text="Razer Naga Companion"
                    ToolTip="Razer Naga Companion — github.com/Bmwascher/razer-naga-companion"/>
       </StackPanel>
-    </ScrollViewer>
+    </ui:DynamicScrollViewer>
   </Border>
 </UserControl>

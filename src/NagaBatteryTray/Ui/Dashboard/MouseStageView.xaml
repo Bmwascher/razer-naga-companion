@@ -186,10 +186,10 @@
       </Border>
       <Border Style="{DynamicResource CardBorder}">
         <StackPanel>
-          <DockPanel>
+          <DockPanel LastChildFill="False">
             <TextBlock Style="{DynamicResource LabelText}" Text="PROFILE"/>
-            <Button DockPanel.Dock="Right" Content="↻" FontSize="10" Padding="4,0"
-                    Click="OnRefreshLiveness" Opacity="0.6"/>
+            <ui:Button DockPanel.Dock="Right" Content="↻" Padding="6,2"
+                       Click="OnRefreshLiveness" Opacity="0.6"/>
           </DockPanel>
           <TextBlock Style="{DynamicResource BodyText}" Text="{Binding ProfileTitle}" FontWeight="SemiBold"/>
           <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding ProfileDetail}" TextWrapping="Wrap"/>
