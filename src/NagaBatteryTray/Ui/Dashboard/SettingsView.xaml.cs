@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using UserControl = System.Windows.Controls.UserControl; // WinForms' implicit using also exports one
 
 namespace NagaBatteryTray.Ui.Dashboard;
@@ -11,6 +12,12 @@ public partial class SettingsView : UserControl
     public event Action<string>? ThemeChanged;
     public event Action<string>? TrayIconStyleChanged;
     public event Action? ResetAllRequested;
+
+    // Scroll edge fades: ~16px top/bottom fade zones on the settings scroller, only active on the
+    // side that actually has more content to scroll to. A couple px of slack (not exact zero)
+    // absorbs float drift at the scroll extremes so a fully-scrolled edge doesn't flicker.
+    private const double FadeZonePx = 16.0;
+    private const double ScrollEpsilon = 2.0;
 
     // Two-step inline confirm for "Reset all to factory" (replaces a MessageBox): first click arms
     // it and starts a one-shot 5 s auto-revert, same undo-pattern token idiom as CalloutViewModel's
@@ -36,6 +43,28 @@ public partial class SettingsView : UserControl
         TrayIconStyleList.SelectionChanged -= OnTrayIconStyleChanged;
         TrayIconStyleList.SelectedItem = style == "Text" ? "Text only" : "Gauge";
         TrayIconStyleList.SelectionChanged += OnTrayIconStyleChanged;
+    }
+
+    private void OnScrollerScrollChanged(object s, ScrollChangedEventArgs e) => UpdateEdgeFade();
+    private void OnScrollerSizeChanged(object s, SizeChangedEventArgs e) => UpdateEdgeFade();
+
+    /// <summary>Recomputes the edge-fade gradient stops from the scroller's current geometry.
+    /// The mask lives on the ScrollViewer itself (not the scrolled content) so its bounding box is
+    /// the stable viewport frame: fade-zone offsets are a ~16px fraction of that stable frame, and
+    /// only the two edge stops' opacity toggles (solid unless there's more content that way).</summary>
+    private void UpdateEdgeFade()
+    {
+        double height = Scroller.ActualHeight;
+        if (height <= 0) return;
+        double zone = Math.Min(FadeZonePx / height, 0.5);
+
+        bool moreAbove = Scroller.VerticalOffset > ScrollEpsilon;
+        bool moreBelow = Scroller.VerticalOffset < Scroller.ScrollableHeight - ScrollEpsilon;
+
+        FadeTopEdge.Color = moreAbove ? Colors.Transparent : Colors.White;
+        FadeTopSolid.Offset = zone;
+        FadeBottomSolid.Offset = 1 - zone;
+        FadeBottomEdge.Color = moreBelow ? Colors.Transparent : Colors.White;
     }
 
     private void OnClose(object s, RoutedEventArgs e) => CloseRequested?.Invoke();

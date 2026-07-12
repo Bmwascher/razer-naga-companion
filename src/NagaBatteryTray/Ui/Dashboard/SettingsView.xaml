@@ -4,7 +4,21 @@
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     HorizontalAlignment="Right" Width="340">
   <Border Style="{DynamicResource CardBorder}" Margin="0,8,12,12" Background="{DynamicResource App.CanvasBrush}">
-    <ui:DynamicScrollViewer VerticalScrollBarVisibility="Auto">
+    <ui:DynamicScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto"
+                            ScrollChanged="OnScrollerScrollChanged" SizeChanged="OnScrollerSizeChanged">
+      <!-- Edge fades: a vertical 4-stop gradient masks the top/bottom ~16px of the viewport.
+           On the ScrollViewer itself (not the scrolled content) so the mask's bounding box is the
+           stable viewport frame, not content that translates underneath it. The two edge stops'
+           color (not just offset) is flipped opaque/transparent from code-behind per scroll
+           position; the two inner stops stay opaque and only their offsets move with viewport size. -->
+      <ui:DynamicScrollViewer.OpacityMask>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+          <GradientStop x:Name="FadeTopEdge" Color="White" Offset="0"/>
+          <GradientStop x:Name="FadeTopSolid" Color="White" Offset="0"/>
+          <GradientStop x:Name="FadeBottomSolid" Color="White" Offset="1"/>
+          <GradientStop x:Name="FadeBottomEdge" Color="White" Offset="1"/>
+        </LinearGradientBrush>
+      </ui:DynamicScrollViewer.OpacityMask>
       <!-- Right margin is the scrollbar's gutter: without it the bar overlays the right-aligned
            toggles/spinners and cuts the theme selection rows (screenshot-confirmed). -->
       <StackPanel Margin="4,4,14,4">
