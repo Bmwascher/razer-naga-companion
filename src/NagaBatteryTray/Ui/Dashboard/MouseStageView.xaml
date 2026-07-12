@@ -177,7 +177,7 @@
           <DockPanel Margin="0,6,0,0">
             <Button DockPanel.Dock="Right" Content="+" Click="OnAddPreset" Padding="8,2" Margin="6,0,0,0"/>
             <ui:NumberBox x:Name="NewPresetBox" Minimum="100" Maximum="30000" SmallChange="50"
-                          MaxDecimalPlaces="0" PlaceholderText="add preset"/>
+                          MaxDecimalPlaces="0" PlaceholderText="add"/>
           </DockPanel>
         </StackPanel>
       </Border>

@@ -56,8 +56,9 @@
         <ui:Button Content="Reset all to factory" Click="OnResetAll" Margin="0,6,0,0"/>
         <TextBlock x:Name="ResetNote" Style="{DynamicResource SubtleText}" Text="" TextWrapping="Wrap"/>
 
-        <TextBlock Style="{DynamicResource SubtleText}" Margin="0,14,0,0"
-                   Text="Razer Naga Companion — github.com/Bmwascher/razer-naga-companion"/>
+        <TextBlock Style="{DynamicResource SubtleText}" Margin="0,14,0,0" TextTrimming="CharacterEllipsis"
+                   Text="Razer Naga Companion"
+                   ToolTip="Razer Naga Companion — github.com/Bmwascher/razer-naga-companion"/>
       </StackPanel>
     </ScrollViewer>
   </Border>
