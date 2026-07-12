@@ -28,24 +28,27 @@
         </Border.Style>
         <StackPanel>
           <DockPanel>
-            <TextBlock Style="{DynamicResource LabelText}" Text="{Binding Label}"/>
+            <TextBlock Style="{DynamicResource LabelText}" Text="{Binding Label, StringFormat=Button {0}}"/>
             <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" FontSize="11"
                        Foreground="{DynamicResource Status.Positive}" Text="✓"
                        Visibility="{Binding CanUndo, Converter={StaticResource BoolToVis}}"/>
           </DockPanel>
-          <TextBlock TextTrimming="CharacterEllipsis"
-                     ToolTip="{Binding BindingText}">
-            <TextBlock.Style>
-              <Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
-                <Setter Property="Text" Value="{Binding BindingText}"/>
-                <Style.Triggers>
-                  <DataTrigger Binding="{Binding IsCapturing}" Value="True">
-                    <Setter Property="Text" Value="press a key…"/>
-                  </DataTrigger>
-                </Style.Triggers>
-              </Style>
-            </TextBlock.Style>
-          </TextBlock>
+          <Border Background="{DynamicResource App.ChipFill}" BorderBrush="{DynamicResource App.ChipStroke}"
+                  BorderThickness="1" CornerRadius="4" Padding="6,1" HorizontalAlignment="Left">
+            <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding BindingText}"
+                       FontWeight="SemiBold" Foreground="{DynamicResource App.TextPrimary}">
+              <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+                  <Setter Property="Text" Value="{Binding BindingText}"/>
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsCapturing}" Value="True">
+                      <Setter Property="Text" Value="press a key…"/>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
+          </Border>
           <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding Status}" FontSize="10"/>
           <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
             <Button Content="Undo" Click="OnUndo" FontSize="10" Padding="6,1"
