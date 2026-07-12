@@ -150,7 +150,13 @@ public sealed class AppHost
     {
         var view = new SettingsView { DataContext = vm };
         view.SetTrayIconStyle(_settings.Settings.TrayIconStyle);
-        view.CloseRequested += () => { vm.ApplyTo(_settings.Settings); _settings.Save(); win.HideOverlay(); };
+        // one delegate serves both dismiss paths (✕ button and scrim click-away). CloseRequested
+        // may use += because the view is new per gear click; OverlayDismissRequested lives on the
+        // per-dashboard window, so it's a single-subscriber ASSIGNMENT — a += here would stack a
+        // handler per gear click and save settings once per stacked handler on every dismiss.
+        Action dismiss = () => { vm.ApplyTo(_settings.Settings); _settings.Save(); win.HideOverlay(); };
+        view.CloseRequested += dismiss;
+        win.OverlayDismissRequested = dismiss;
         view.StartupToggled += enable => { SetStartup(enable); _tray.SetStartupChecked(enable); };
         view.ThemeChanged += name =>
         { ThemeManager.Apply(_app, name); _settings.Settings.Theme = ThemeManager.Resolve(name); _settings.Save(); };

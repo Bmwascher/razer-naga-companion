@@ -36,7 +36,8 @@
          fade never dims the drawer riding on top of it; OverlayContent slides via its own
          TranslateTransform, starting off-screen right (its docked width, 340) -->
     <Grid Grid.Row="1" Grid.RowSpan="2" x:Name="OverlayHost" Visibility="Collapsed">
-      <Border x:Name="Scrim" Background="{DynamicResource App.Scrim}" Opacity="0"/>
+      <Border x:Name="Scrim" Background="{DynamicResource App.Scrim}" Opacity="0"
+              MouseLeftButtonUp="OnScrimClick"/>
       <ContentControl x:Name="OverlayContent" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
         <ContentControl.RenderTransform>
           <TranslateTransform x:Name="OverlayTranslate" X="340"/>

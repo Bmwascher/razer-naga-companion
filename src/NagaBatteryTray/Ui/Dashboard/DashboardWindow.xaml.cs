@@ -20,6 +20,13 @@ public partial class DashboardWindow : FluentWindow
     public event Action<int>? ApplyDpiRequested;
     public event Action? LivenessRefreshRequested;
 
+    /// <summary>Raised when the scrim is clicked (click-away dismiss). Deliberately an
+    /// assignment-style single-subscriber delegate, NOT an event: AppHost re-wires it on every
+    /// gear click (ShowSettingsOverlay runs per click, the window lives per dashboard-open), and
+    /// `+=` on an event would stack a handler per click — each dismiss would then save settings
+    /// once per stacked handler. Assignment replaces the previous subscriber instead.</summary>
+    public Action? OverlayDismissRequested { get; set; }
+
     public DashboardWindow(DashboardViewModel vm)
     {
         InitializeComponent();
@@ -52,6 +59,7 @@ public partial class DashboardWindow : FluentWindow
         _overlayVersion++; // cancels any pending hide-collapse
         OverlayContent.Content = content;
         OverlayHost.Visibility = Visibility.Visible;
+        Scrim.IsHitTestVisible = true; // restore click-to-close (a mid-hide reopen left it off)
 
         Motion.Animate(Scrim, OpacityProperty, 1, Motion.Fade, Motion.EaseOut);
         if (Motion.Reduced)
@@ -75,6 +83,9 @@ public partial class DashboardWindow : FluentWindow
     public void HideOverlay()
     {
         int token = ++_overlayVersion;
+        // the host stays Visible until the fade's Completed collapse below — without this, the
+        // still-hit-testable scrim would swallow every dashboard click for the whole 220 ms hide
+        Scrim.IsHitTestVisible = false;
         var scrimFade = new DoubleAnimation(0, Motion.Fade) { EasingFunction = Motion.EaseOut };
         scrimFade.Completed += (_, _) =>
         {
@@ -90,6 +101,10 @@ public partial class DashboardWindow : FluentWindow
     }
 
     private void OnGear(object s, RoutedEventArgs e) => SettingsOverlayRequested?.Invoke();
+
+    // only fires for clicks on the scrim itself: OverlayContent is a sibling on top of it, so
+    // clicks on the drawer content never route through the scrim
+    private void OnScrimClick(object s, MouseButtonEventArgs e) => OverlayDismissRequested?.Invoke();
 
     private void BeginCapture(CalloutViewModel target)
     {
