@@ -23,7 +23,7 @@
       <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
         <TextBlock Text="{Binding PercentText}" FontWeight="ExtraLight" FontSize="40"
                    Foreground="{DynamicResource App.Numeral}" Margin="0,-4,0,0"/>
-        <Border Background="{DynamicResource App.ChipFill}" CornerRadius="20" Padding="8,3" Margin="10,6,0,0"
+        <Border Background="{DynamicResource App.ChipFill}" CornerRadius="12" Padding="8,3" Margin="10,6,0,0"
                 VerticalAlignment="Center"
                 Visibility="{Binding Charging, Converter={StaticResource BoolToVis}}">
           <StackPanel Orientation="Horizontal">
