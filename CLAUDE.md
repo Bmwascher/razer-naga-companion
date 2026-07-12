@@ -147,8 +147,9 @@ does, so launch it `-WindowStyle Hidden`.
   `DashboardWindow` (a WPF-UI `FluentWindow` shell; releases on close — the monitor's `StateChanged`
   subscription is removed and the field nulled, same release-on-close discipline the old Settings
   window had) hosts `MouseStageView` (a vector Naga silhouette with the 12 grid buttons as instant-apply
-  binding callout chips — click to capture a key, Disable, or Default, each with a 5 s one-shot undo;
-  hovering a chip or its grid key highlights both, satisfying the two-way hover-pairing requirement —
+  binding callout chips — click to capture a key, Disable, or Default, each with a 5 s one-shot undo,
+  actions revealed on hover/focus (reserved-height, so columns never shift); hovering a chip or its
+  grid key highlights both, satisfying the two-way hover-pairing requirement —
   plus a DPI card with app-side presets and a Profile card) and, as a right-docked overlay,
   `SettingsView` (theme picker, general toggles, battery polling, reset-all-buttons). `CalloutViewModel`
   is the per-button state machine (Idle → Capturing → Writing → Confirmed | Failed) that replaces

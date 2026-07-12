@@ -27,12 +27,7 @@
           </Style>
         </Border.Style>
         <StackPanel>
-          <DockPanel>
-            <TextBlock Style="{DynamicResource LabelText}" Text="{Binding Label, StringFormat=Button {0}}"/>
-            <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" FontSize="11"
-                       Foreground="{DynamicResource Status.Positive}" Text="✓"
-                       Visibility="{Binding CanUndo, Converter={StaticResource BoolToVis}}"/>
-          </DockPanel>
+          <TextBlock Style="{DynamicResource LabelText}" Text="{Binding Label, StringFormat=Button {0}}"/>
           <Border Background="{DynamicResource App.ChipFill}" BorderBrush="{DynamicResource App.ChipStroke}"
                   BorderThickness="1" CornerRadius="4" Padding="6,1" HorizontalAlignment="Left">
             <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding BindingText}"
@@ -51,6 +46,22 @@
           </Border>
           <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding Status}" FontSize="10"/>
           <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+            <StackPanel.Style>
+              <Style TargetType="StackPanel">
+                <Setter Property="Visibility" Value="Hidden"/>
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding CanUndo}" Value="True">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </StackPanel.Style>
             <Button Content="Undo" Click="OnUndo" FontSize="10" Padding="6,1"
                     Visibility="{Binding CanUndo, Converter={StaticResource BoolToVis}}"/>
             <Button Content="Disable" Click="OnDisable" FontSize="10" Padding="6,1" Margin="4,0,0,0"/>
