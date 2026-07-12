@@ -107,7 +107,12 @@ public partial class MouseStageView : UserControl
     private static void PressScale(UIElement el, double to)
     {
         if (Motion.Reduced) return;
-        if (((FrameworkElement)el).RenderTransform is not ScaleTransform st) return;
+        var fe = (FrameworkElement)el;
+        // The template's <ScaleTransform/> is shared across all stamped chips/keys and FROZEN
+        // by WPF's compiled-template optimization — animating it throws (crashed the app on
+        // the first real pointer interaction). Swap in a per-element transform before animating.
+        if (fe.RenderTransform is not ScaleTransform st || st.IsFrozen)
+            fe.RenderTransform = st = new ScaleTransform(1, 1);
         Motion.Animate(st, ScaleTransform.ScaleXProperty, to, Motion.Press, Motion.EaseOut);
         Motion.Animate(st, ScaleTransform.ScaleYProperty, to, Motion.Press, Motion.EaseOut);
     }
