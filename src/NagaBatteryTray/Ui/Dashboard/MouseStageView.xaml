@@ -96,6 +96,13 @@
             M 60,0 C 130,-6 180,40 180,150 C 180,260 150,340 90,340 C 30,340 0,280 0,190 C 0,80 10,6 60,0 Z
           </Path.Data>
         </Path>
+        <!-- top-down anatomy: button split, scroll wheel, thumb-plate frame -->
+        <Path StrokeThickness="1.5" Stroke="{DynamicResource App.CardStroke}" Data="M 120,14 L 120,70"/>
+        <Rectangle Canvas.Left="112" Canvas.Top="34" Width="16" Height="34" RadiusX="8" RadiusY="8"
+                   Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.CardStroke}" StrokeThickness="1"/>
+        <Rectangle Canvas.Left="44" Canvas.Top="82" Width="112" Height="144" RadiusX="12" RadiusY="12"
+                   Fill="{DynamicResource App.ChipFill}" Stroke="{DynamicResource App.CardStroke}" StrokeThickness="1"
+                   Opacity="0.85"/>
         <Ellipse Canvas.Left="20" Canvas.Top="40" Width="200" Height="290"
                  Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
         <!-- 12-key thumb grid, 3 cols × 4 rows -->
