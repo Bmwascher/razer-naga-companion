@@ -1,5 +1,8 @@
 using System.Windows;
+using System.Windows.Media;
+using Wpf.Ui.Appearance;
 using Application = System.Windows.Application;
+using Color = System.Windows.Media.Color;
 
 namespace NagaBatteryTray.Ui;
 
@@ -21,12 +24,29 @@ public static class ThemeManager
     public static Uri DictionaryUri(string? name) =>
         new($"pack://application:,,,/Ui/Themes/{Resolve(name)}.xaml");
 
+    /// <summary>Pulls the preset's own "App.Accent" brush color out of its ResourceDictionary, or
+    /// null if the dictionary doesn't carry one. Pure/testable without a live Application.</summary>
+    public static Color? AccentOf(ResourceDictionary dict) =>
+        dict.Contains("App.Accent") && dict["App.Accent"] is SolidColorBrush brush ? brush.Color : null;
+
     public static void Apply(Application app, string? name)
     {
         var next = new ResourceDictionary { Source = DictionaryUri(name) };
         var dicts = app.Resources.MergedDictionaries;
+        bool replaced = false;
         for (int i = 0; i < dicts.Count; i++)
-            if (dicts[i].Contains("App.ThemeName")) { dicts[i] = next; return; }
-        dicts.Add(next);
+            if (dicts[i].Contains("App.ThemeName")) { dicts[i] = next; replaced = true; break; }
+        if (!replaced) dicts.Add(next);
+
+        // WPF-UI's own control chrome (Slider thumb, ToggleSwitch, ListBox selection, NumberBox)
+        // colors from ApplicationAccentColorManager's SystemAccentColor* resources, which the
+        // dictionary swap above never touches — push the preset's accent into WPF-UI so that
+        // chrome follows the theme instead of the OS accent color. Guarded: a bare xunit test host
+        // has no live Application/resources for WPF-UI to update.
+        if (AccentOf(next) is { } accent)
+        {
+            try { ApplicationAccentColorManager.Apply(accent, ApplicationTheme.Dark); }
+            catch { /* no-op: no live Application (e.g. bare test host) */ }
+        }
     }
 }

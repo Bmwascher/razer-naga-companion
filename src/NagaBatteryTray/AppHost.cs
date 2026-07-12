@@ -39,8 +39,10 @@ public sealed class AppHost
         _app.Resources.MergedDictionaries.Add(new ControlsDictionary());
         _app.Resources.MergedDictionaries.Add(
             new ResourceDictionary { Source = new Uri("pack://application:,,,/Ui/Themes/DesignSystem.xaml") });
-        ThemeManager.Apply(_app, _settings.Settings.Theme);
+        // ApplicationThemeManager.Apply's default updateAccent:true pulls the OS accent color,
+        // which would stomp the preset accent ThemeManager.Apply just pushed — so it must run first.
         ApplicationThemeManager.Apply(ApplicationTheme.Dark);
+        ThemeManager.Apply(_app, _settings.Settings.Theme);
 
         _device = new RazerDevice(_settings);
         _monitor = new BatteryMonitor(_device, _settings, Dispatch);
