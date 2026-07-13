@@ -179,18 +179,29 @@
         </Image>
         <Ellipse Canvas.Left="35" Canvas.Top="90" Width="180" Height="280"
                  Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
-        <!-- interactive hit areas over the render's printed keys (1 2 3 / 4 5 6 / 7 8 9 /
-             10 11 12): invisible at rest, accent ring + wash on hover/capture -->
-        <Canvas Canvas.Left="49.9" Canvas.Top="157.8" Width="133" Height="158"
+        <!-- LED side-strip: the render is neutral grayscale, so the hardware's light ring is
+             drawn here in the live theme accent, following the right cheek of the shell -->
+        <Path StrokeThickness="8" Stroke="{DynamicResource App.Accent}" Opacity="0.1"
+              StrokeStartLineCap="Round" StrokeEndLineCap="Round" IsHitTestVisible="False"
+              Data="M 174,104 C 190,128 203,155 211,184 C 217,215 220,240 218,266
+                    C 216,290 208,318 196,340 C 190,350 184,356 176,360"/>
+        <Path StrokeThickness="3" Stroke="{DynamicResource App.Accent}" Opacity="0.3"
+              StrokeStartLineCap="Round" StrokeEndLineCap="Round" IsHitTestVisible="False"
+              Data="M 174,104 C 190,128 203,155 211,184 C 217,215 220,240 218,266
+                    C 216,290 208,318 196,340 C 190,350 184,356 176,360"/>
+        <!-- interactive keys over the render's blank keycaps (1 2 3 / 4 5 6 / 7 8 9 /
+             10 11 12): the render carries no numerals, so labels are drawn here in theme
+             colors; accent ring + wash on hover/capture -->
+        <Canvas Canvas.Left="49.4" Canvas.Top="154.3" Width="133" Height="162"
                 RenderTransformOrigin="0.5,0.5">
-          <Canvas.RenderTransform><RotateTransform Angle="-3.5"/></Canvas.RenderTransform>
+          <Canvas.RenderTransform><RotateTransform Angle="-1.5"/></Canvas.RenderTransform>
           <ItemsControl x:Name="GridKeys">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <Border Width="40" Height="27" Margin="2.15,6.25" CornerRadius="6"
+                <Border Width="40" Height="29" Margin="2.15,5.75" CornerRadius="6"
                         RenderTransformOrigin="0.5,0.5"
                         AutomationProperties.Name="{Binding Label, StringFormat=Button {0}}"
                         MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave"
@@ -213,6 +224,19 @@
                       </Style.Triggers>
                     </Style>
                   </Border.Style>
+                  <TextBlock Text="{Binding Label}" FontSize="12" FontWeight="SemiBold"
+                             HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock.Style>
+                      <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{DynamicResource App.TextSecondary}"/>
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource App.TextPrimary}"/>
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </TextBlock.Style>
+                  </TextBlock>
                 </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
