@@ -155,14 +155,14 @@
              keys facing the viewer), clipped to the shell silhouette so it sits clean on any
              theme canvas. DecodePixelWidth caps the decoded bitmap (~2 MB) well under the
              source's full size; the dashboard releases it on close like everything else. -->
-        <!-- underglow: the theme's glow bleeding around the shell from behind. The boost
-             layer fades in while any key is capturing — the mouse visibly "arms" during a
-             bind. Appearance-only opacity fades, interruptible (To-animations compose from
-             the current value), so no reduced-motion gate is needed. -->
-        <Ellipse Canvas.Left="15" Canvas.Top="50" Width="220" Height="350"
-                 Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
+        <!-- underglow halo: AccentSoft shaped by a radial opacity mask. (GlowSoft's gradient
+             tail is what would peek past the opaque shell, and at 2-4% alpha real displays
+             crush it to nothing — a flat accent tint under a mask keeps the fringe visible.)
+             Rest = half strength; while any key is capturing it brightens to full, so the
+             mouse visibly "arms" during a bind. Appearance-only, interruptible To-animations
+             — no reduced-motion gate needed. -->
         <Ellipse Canvas.Left="2" Canvas.Top="30" Width="246" Height="395"
-                 Fill="{DynamicResource App.AccentSoft}" IsHitTestVisible="False" Opacity="0">
+                 Fill="{DynamicResource App.AccentSoft}" IsHitTestVisible="False" Opacity="0.5">
           <Ellipse.OpacityMask>
             <RadialGradientBrush>
               <GradientStop Color="White" Offset="0.72"/>
@@ -184,7 +184,7 @@
                   <DataTrigger.ExitActions>
                     <BeginStoryboard>
                       <Storyboard>
-                        <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0"
+                        <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0.5"
                                          Duration="0:0:0.22" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
                       </Storyboard>
                     </BeginStoryboard>
