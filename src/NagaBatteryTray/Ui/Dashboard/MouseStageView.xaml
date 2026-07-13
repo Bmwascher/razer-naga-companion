@@ -155,6 +155,45 @@
              keys facing the viewer), clipped to the shell silhouette so it sits clean on any
              theme canvas. DecodePixelWidth caps the decoded bitmap (~2 MB) well under the
              source's full size; the dashboard releases it on close like everything else. -->
+        <!-- underglow: the theme's glow bleeding around the shell from behind. The boost
+             layer fades in while any key is capturing — the mouse visibly "arms" during a
+             bind. Appearance-only opacity fades, interruptible (To-animations compose from
+             the current value), so no reduced-motion gate is needed. -->
+        <Ellipse Canvas.Left="15" Canvas.Top="50" Width="220" Height="350"
+                 Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
+        <Ellipse Canvas.Left="2" Canvas.Top="30" Width="246" Height="395"
+                 Fill="{DynamicResource App.AccentSoft}" IsHitTestVisible="False" Opacity="0">
+          <Ellipse.OpacityMask>
+            <RadialGradientBrush>
+              <GradientStop Color="White" Offset="0.72"/>
+              <GradientStop Color="Transparent" Offset="1"/>
+            </RadialGradientBrush>
+          </Ellipse.OpacityMask>
+          <Ellipse.Style>
+            <Style TargetType="Ellipse">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding AnyCapturing}" Value="True">
+                  <DataTrigger.EnterActions>
+                    <BeginStoryboard>
+                      <Storyboard>
+                        <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1"
+                                         Duration="0:0:0.18" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
+                      </Storyboard>
+                    </BeginStoryboard>
+                  </DataTrigger.EnterActions>
+                  <DataTrigger.ExitActions>
+                    <BeginStoryboard>
+                      <Storyboard>
+                        <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0"
+                                         Duration="0:0:0.22" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
+                      </Storyboard>
+                    </BeginStoryboard>
+                  </DataTrigger.ExitActions>
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Ellipse.Style>
+        </Ellipse>
         <Image Canvas.Left="0" Canvas.Top="0" Width="250" Height="445" Stretch="Fill">
           <Image.Source>
             <BitmapImage UriSource="Assets/naga-thumb.png" DecodePixelWidth="560"/>
@@ -175,18 +214,6 @@
             </PathGeometry>
           </Image.Clip>
         </Image>
-        <Ellipse Canvas.Left="35" Canvas.Top="90" Width="180" Height="280"
-                 Fill="{DynamicResource App.GlowSoft}" IsHitTestVisible="False"/>
-        <!-- LED side-strip: the render is neutral grayscale, so the hardware's light ring is
-             drawn here in the live theme accent, following the right cheek of the shell -->
-        <Path StrokeThickness="8" Stroke="{DynamicResource App.Accent}" Opacity="0.1"
-              StrokeStartLineCap="Round" StrokeEndLineCap="Round" IsHitTestVisible="False"
-              Data="M 174,104 C 190,128 203,155 211,184 C 217,215 220,240 218,266
-                    C 216,290 208,318 196,340 C 190,350 184,356 176,360"/>
-        <Path StrokeThickness="3" Stroke="{DynamicResource App.Accent}" Opacity="0.3"
-              StrokeStartLineCap="Round" StrokeEndLineCap="Round" IsHitTestVisible="False"
-              Data="M 174,104 C 190,128 203,155 211,184 C 217,215 220,240 218,266
-                    C 216,290 208,318 196,340 C 190,350 184,356 176,360"/>
         <!-- interactive keys over the render's blank keycaps (1 2 3 / 4 5 6 / 7 8 9 /
              10 11 12): the render carries no numerals, so labels are drawn here in theme
              colors; accent ring + wash on hover/capture -->

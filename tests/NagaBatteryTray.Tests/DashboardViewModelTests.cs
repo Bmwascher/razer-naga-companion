@@ -25,6 +25,23 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public void AnyCapturing_tracks_callout_capture_state()
+    {
+        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        Assert.False(vm.AnyCapturing);
+
+        vm.Callout(3).BeginCapture();
+        Assert.True(vm.AnyCapturing);
+
+        vm.Callout(5).BeginCapture();
+        vm.Callout(3).CancelCapture();
+        Assert.True(vm.AnyCapturing); // one still armed
+
+        vm.Callout(5).CancelCapture();
+        Assert.False(vm.AnyCapturing);
+    }
+
+    [Fact]
     public void Preset_checkmark_follows_current_dpi()
     {
         var vm = new DashboardViewModel(Seeded(), false, NoWrite);

@@ -49,6 +49,12 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
             callouts.Add(c);
         }
         Callouts = callouts;
+        foreach (var c in callouts)
+            c.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(CalloutViewModel.IsCapturing))
+                    AnyCapturing = Callouts.Any(x => x.IsCapturing);
+            };
 
         Presets = new ObservableCollection<DpiPresetItem>();
         foreach (int v in source.DpiPresets.Distinct().OrderBy(v => v)) Presets.Add(NewItem(v));
@@ -60,6 +66,11 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     // ---- callouts ----
     public IReadOnlyList<CalloutViewModel> Callouts { get; }
     public CalloutViewModel Callout(int position) => Callouts[position - 1];
+
+    /// <summary>True while any grid button is capturing a key — drives the stage's
+    /// "arming" glow boost.</summary>
+    public bool AnyCapturing { get => _anyCapturing; private set => Set(ref _anyCapturing, value); }
+    private bool _anyCapturing;
 
     /// <summary>Settings-overlay "Reset all to factory": Default-write every grid button in position
     /// order via each chip's own instant-apply pipeline, counting verified successes (Status ==
