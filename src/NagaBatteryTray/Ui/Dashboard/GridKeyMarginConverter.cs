@@ -15,9 +15,12 @@ public sealed class GridKeyMarginConverter : IValueConverter
     /// <summary>position (1-12) -> (dx right+, dy down+), user-calibrated on the live render.</summary>
     internal static (double Dx, double Dy) NudgeFor(int position) => position switch
     {
-        1 or 2 or 3 => (-1, 2),
-        4 => (-1, 1),
-        5 => (0, 1),
+        1 or 2 => (-2, 3),
+        3 => (-2, 2),
+        4 => (-1, 2),
+        5 => (0, 2),
+        6 => (0, 1),
+        7 => (-1, 1),
         9 => (1, 0),
         12 => (0, -1),
         _ => (0, 0),

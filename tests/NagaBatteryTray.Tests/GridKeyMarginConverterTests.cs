@@ -11,7 +11,7 @@ public class GridKeyMarginConverterTests
     [Fact]
     public void Unnudged_key_gets_the_base_margin()
     {
-        var t = For(6);
+        var t = For(8);
         Assert.Equal(2.15, t.Left, 3);
         Assert.Equal(5.75, t.Top, 3);
         Assert.Equal(2.15, t.Right, 3);
@@ -21,11 +21,11 @@ public class GridKeyMarginConverterTests
     [Fact]
     public void Nudge_shifts_the_key_by_moving_margin_between_opposite_sides()
     {
-        var t = For(1); // calibrated: left 1, down 2
-        Assert.Equal(2.15 - 1, t.Left, 3);
-        Assert.Equal(5.75 + 2, t.Top, 3);
-        Assert.Equal(2.15 + 1, t.Right, 3);
-        Assert.Equal(5.75 - 2, t.Bottom, 3);
+        var t = For(1); // calibrated: left 2, down 3
+        Assert.Equal(2.15 - 2, t.Left, 3);
+        Assert.Equal(5.75 + 3, t.Top, 3);
+        Assert.Equal(2.15 + 2, t.Right, 3);
+        Assert.Equal(5.75 - 3, t.Bottom, 3);
     }
 
     [Fact]
