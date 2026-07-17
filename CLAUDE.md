@@ -146,11 +146,20 @@ does, so launch it `-WindowStyle Hidden`.
 - `Ui/Dashboard/` (replaces the deleted `SettingsWindow`/`SettingsViewModel`/`ButtonRowViewModel`) —
   `DashboardWindow` (a WPF-UI `FluentWindow` shell; releases on close — the monitor's `StateChanged`
   subscription is removed and the field nulled, same release-on-close discipline the old Settings
-  window had) hosts `MouseStageView` (a vector Naga silhouette with the 12 grid buttons as instant-apply
-  binding callout chips — click to capture a key, Disable, or Default, each with a 5 s one-shot undo,
-  actions revealed on hover/focus (reserved-height, so columns never shift); hovering a chip or its
-  grid key highlights both, satisfying the two-way hover-pairing requirement —
-  plus a DPI card with app-side presets and a Profile card) and, as a right-docked overlay,
+  window had) hosts `MouseStageView`: the stage is the user's **product render** of the thumb panel
+  (`Assets/naga-thumb.png`, a csproj `<Resource>`; grayscale blank-key AI edit of the real photo,
+  decoded at `DecodePixelWidth=560` ≈ 2 MB only while the dashboard is open) clipped to
+  `ShellOutline` — a silhouette **traced from the render's own pixels** (adaptive-threshold edge
+  scan; the shadowed lower-left tail is a synthesized closure to the measured tip). The SAME
+  geometry is stroked in four widening `App.AccentSoft` bands as a **rim glow behind the image**
+  (strokes only, per the no-effects rule) so the glow hugs the visible cutout edge exactly — rest
+  0.5 opacity, animating to 1.0 while any key captures (`DashboardViewModel.AnyCapturing`). The 12
+  grid keys are hit targets over the render's blank keycaps with **app-drawn theme-colored
+  numerals** (rows 1 2 3 / 4 5 6 / 7 8 9 / 10 11 12, face-on = hardware order), flanked by the 12
+  instant-apply binding callout chips — click to capture a key, Disable, or Default, each with a
+  5 s one-shot undo, actions revealed on hover/focus (reserved-height, so columns never shift);
+  hovering a chip or its grid key highlights both (two-way hover-pairing) —
+  plus a DPI card with app-side presets and a Profile card, and, as a right-docked overlay,
   `SettingsView` (theme picker, general toggles, battery polling, reset-all-buttons). `CalloutViewModel`
   is the per-button state machine (Idle → Capturing → Writing → Confirmed | Failed) that replaces
   `ButtonRowViewModel`'s staged-op model — every action writes instantly through `AppHost`'s
@@ -158,14 +167,19 @@ does, so launch it `-WindowStyle Hidden`.
   profile state plus the `Callouts` list); `ProfileLiveness` is a pure comparer — is the mouse currently
   ON the app's onboard slot? (a profile-0 **effective-action** read, hardware-verified in the Phase B
   spike, compared against the app slot's expected bytes) — driving the Profile card's live/not-live/
-  unknown text.
+  unknown text. WPF gotcha (fixed a first-click crash): a compiled template's plain
+  `<ScaleTransform/>` is shared + frozen across stamped elements — swap in a fresh per-element
+  transform before animating (`MouseStageView.PressScale`).
 - `Ui/Themes/` — `DesignSystem.xaml` (theme-independent status colors — `Status.Positive/Warning/
   Critical` — plus shared styles `CardBorder`/`ChipBorder`/`LabelText`/`NumeralText`/`BodyText`/
   `SubtleText`) and 5 preset theme dictionaries (Porcelain default, Razer, Ice, Ultraviolet, Ember),
   each defining the same 12 semantic `App.*` brush keys (canvas, card fill/stroke, chip fill/stroke,
   accent/accent-soft, text primary/secondary, numeral, glow, plus the `App.ThemeName` marker);
   `ThemeManager.Apply` swaps the marked dictionary in `Application.Resources.MergedDictionaries` at
-  runtime. Two hard rules: **no `DropShadowEffect`/`BitmapEffect` anywhere** (stays software-rendered —
+  runtime, then pushes the theme accent into WPF-UI (`ApplicationAccentColorManager.Apply` followed by
+  re-`ApplicationThemeManager.Apply` with `updateAccent: false` — the re-apply makes already-
+  instantiated Fluent chrome re-bake the pushed accent; keep `updateAccent: false` or the OS accent
+  stomps it). Two hard rules: **no `DropShadowEffect`/`BitmapEffect` anywhere** (stays software-rendered —
   glows are gradient brushes like `App.GlowSoft`, not effects), and **no hardcoded colors in themed
   XAML** — always a `DynamicResource App.*` key, never a literal color, so a theme swap actually
   repaints everything.
