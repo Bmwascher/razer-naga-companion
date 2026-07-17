@@ -151,6 +151,34 @@
         </Style>
       </Viewbox.Style>
       <Canvas Width="250" Height="445">
+        <Canvas.Resources>
+          <!-- the shell silhouette, traced from the render's own pixels (adaptive-threshold
+               edge scan of Assets/naga-thumb.png, mapped 738x1313 px -> this 250x445 canvas;
+               the shadowed lower-left flank is a smooth synthesized closure to the measured
+               tail tip). ONE geometry serves as both the image clip and the rim-glow stroke,
+               so the glow hugs the visible cutout edge exactly and the two can never drift. -->
+          <PathGeometry x:Key="ShellOutline" Figures="M 140.4,17.3 L 144.0,18.3 L 146.7,22.4
+                  L 147.4,26.4 L 148.4,30.5 L 149.4,34.6 L 150.4,38.6 L 151.4,42.7 L 152.4,46.8
+                  L 153.5,50.8 L 154.5,54.9 L 155.8,59.0 L 156.8,63.0 L 158.2,67.1 L 159.6,71.2
+                  L 160.9,75.2 L 162.6,79.3 L 164.0,83.4 L 166.0,87.4 L 167.7,91.5 L 170.1,95.6
+                  L 171.7,98.6 L 181.2,110.8 L 189.4,123.0 L 195.1,135.2 L 200.2,147.4
+                  L 204.9,159.6 L 209.0,171.8 L 212.7,184.0 L 215.8,196.2 L 218.5,208.4
+                  L 220.5,220.6 L 221.5,232.8 L 221.9,245.0 L 221.9,257.2 L 220.5,269.4
+                  L 218.8,281.6 L 215.8,293.8 L 212.4,306.0 L 208.0,318.2 L 202.6,330.4
+                  L 197.8,338.9 L 195.5,343.0 L 193.1,347.1 L 190.4,351.1 L 187.3,355.2
+                  L 184.3,359.3 L 177.2,363.3 L 173.4,367.4 L 167.3,371.5 L 162.6,375.5
+                  L 157.9,379.6 L 152.1,383.7 L 148.0,387.7 L 140.6,391.8 L 136.2,395.9
+                  L 127.7,399.9 L 120.9,404.0 L 113.8,408.1 L 106.4,412.1 L 100.3,416.2
+                  L 93.8,420.3 L 90.1,421.3 L 85.0,410.9 L 72.4,400.6 L 55.9,390.3 L 39.4,379.9
+                  L 26.7,369.6 L 21.7,359.3 L 21.7,355.2 L 20.3,351.1 L 20.3,347.1 L 18.3,343.0
+                  L 18.3,338.9 L 16.9,330.4 L 15.9,318.2 L 15.6,306.0 L 14.9,293.8 L 14.9,281.6
+                  L 15.6,269.4 L 15.6,257.2 L 15.2,245.0 L 15.2,232.8 L 16.6,220.6 L 18.0,208.4
+                  L 19.6,196.2 L 21.3,184.0 L 23.0,171.8 L 25.1,159.6 L 26.4,147.4 L 28.1,135.2
+                  L 29.5,123.0 L 30.8,110.8 L 31.8,98.6 L 32.2,95.6 L 32.5,91.5 L 32.9,87.4
+                  L 33.2,83.4 L 33.9,79.3 L 34.9,75.2 L 35.2,71.2 L 36.2,67.1 L 39.0,63.0
+                  L 44.4,59.0 L 52.5,54.9 L 60.6,50.8 L 69.1,46.8 L 77.9,42.7 L 86.7,38.6
+                  L 95.5,34.6 L 104.7,30.5 L 114.5,26.4 L 124.3,22.4 L 135.8,18.3 Z"/>
+        </Canvas.Resources>
         <!-- the stage is the user-supplied product render of the thumb panel (nose up, all 12
              keys facing the viewer), clipped to the shell silhouette so it sits clean on any
              theme canvas. DecodePixelWidth caps the decoded bitmap (~2 MB) well under the
@@ -163,19 +191,6 @@
              strokes only; appearance-only interruptible To-animations, no reduced-motion
              gate needed. -->
         <Canvas IsHitTestVisible="False" Opacity="0.5">
-          <Canvas.Resources>
-            <PathGeometry x:Key="ShellOutline" Figures="M 138,7 C 152,2 162,20 169,44
-                    C 174,60 176,74 180,92 C 200,134 217,190 216,250 C 209,298 188,340 162,366
-                    C 152,377 138,387 122,389 C 112,390 102,384 94,374 C 48,318 29,222 31,154
-                    C 30,134 31,118 35,96 C 38,76 46,60 58,52 C 88,34 112,16 138,7 Z">
-              <PathGeometry.Transform>
-                <TransformGroup>
-                  <ScaleTransform ScaleX="1.0685" ScaleY="1.0677"/>
-                  <TranslateTransform X="-13.02" Y="6.27"/>
-                </TransformGroup>
-              </PathGeometry.Transform>
-            </PathGeometry>
-          </Canvas.Resources>
           <Canvas.Style>
             <Style TargetType="Canvas">
               <Style.Triggers>
@@ -209,25 +224,11 @@
           <Path Data="{StaticResource ShellOutline}" Stroke="{DynamicResource App.AccentSoft}"
                 StrokeThickness="8" Opacity="1" StrokeLineJoin="Round"/>
         </Canvas>
-        <Image Canvas.Left="0" Canvas.Top="0" Width="250" Height="445" Stretch="Fill">
+        <Image Canvas.Left="0" Canvas.Top="0" Width="250" Height="445" Stretch="Fill"
+               Clip="{StaticResource ShellOutline}">
           <Image.Source>
             <BitmapImage UriSource="Assets/naga-thumb.png" DecodePixelWidth="560"/>
           </Image.Source>
-          <Image.Clip>
-            <!-- silhouette traced from this same render, transformed from the previous 250x400
-                 canvas space into this image's crop space -->
-            <PathGeometry Figures="M 138,7 C 152,2 162,20 169,44 C 174,60 176,74 180,92
-                    C 200,134 217,190 216,250 C 209,298 188,340 162,366 C 152,377 138,387 122,389
-                    C 112,390 102,384 94,374 C 48,318 29,222 31,154 C 30,134 31,118 35,96
-                    C 38,76 46,60 58,52 C 88,34 112,16 138,7 Z">
-              <PathGeometry.Transform>
-                <TransformGroup>
-                  <ScaleTransform ScaleX="1.0685" ScaleY="1.0677"/>
-                  <TranslateTransform X="-13.02" Y="6.27"/>
-                </TransformGroup>
-              </PathGeometry.Transform>
-            </PathGeometry>
-          </Image.Clip>
         </Image>
         <!-- interactive keys over the render's blank keycaps (1 2 3 / 4 5 6 / 7 8 9 /
              10 11 12): the render carries no numerals, so labels are drawn here in theme
