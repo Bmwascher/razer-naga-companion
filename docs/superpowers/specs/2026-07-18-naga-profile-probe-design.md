@@ -108,7 +108,7 @@ says so and records inventory only).
 ### 5.2 Hit rules (pure logic, unit-tested)
 
 Diff only the args region `[8..87]` of each reply — status/tid/envelope `[0..7]` and CRC/reserved
-`[88..89]` are excluded. A byte offset (or a contiguous multi-byte span) is a **hit** iff:
+`[88..89]` are excluded. Analysis is **per-byte**: a byte offset is a **hit** iff:
 
 1. **Stable within state** — identical across all samples of the same state.
 2. **Discriminating** — the state→value mapping is **bijective** over the visited slots. Any
@@ -117,7 +117,9 @@ Diff only the args region `[8..87]` of each reply — status/tid/envelope `[0..7
 3. **Reproduced** — the revisit state yields the starting state's value again.
 
 Offsets that vary but fail any rule are reported as *noise* (still captured — they may be counters
-or battery echoes worth knowing about).
+or battery echoes worth knowing about). Multi-byte encodings register through their individually
+bijective bytes (adjacent hits); an encoding bijective only as a whole span surfaces as adjacent
+noise findings whose recorded per-state values allow manual identification in the capture.
 
 ### 5.3 Candidate corpus
 
