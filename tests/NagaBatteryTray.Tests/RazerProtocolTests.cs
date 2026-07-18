@@ -379,4 +379,85 @@ public class RazerProtocolTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             RazerProtocol.BuildProfileGetProbeBuffer(0x1f, 0x02, 0x01, new byte[] { 0x01 }));
     }
+
+    // --- active-profile get (hardware-verified 2026-07-18) + set spike (undocumented, unverified) ---
+
+    private static byte[] MakeActiveProfileReply(byte status, byte slot)
+    {
+        var buf = new byte[91];
+        buf[1] = status;      // report[0]
+        buf[2] = 0x1f;        // transaction_id
+        buf[6] = 0x06;        // data_size
+        buf[7] = 0x05;        // command_class
+        buf[8] = 0x84;        // command_id (GET active profile)
+        buf[9] = slot;        // arg[0] active slot
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        buf[89] = crc;
+        return buf;
+    }
+
+    [Fact]
+    public void GetActiveProfile_buffer_has_correct_layout_and_crc()
+    {
+        byte[] buf = RazerProtocol.BuildGetActiveProfileBuffer(0x1f);
+        Assert.Equal(0x06, buf[6]); // data_size
+        Assert.Equal(0x05, buf[7]); // command_class
+        Assert.Equal(0x84, buf[8]); // command_id (GET)
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        Assert.Equal(crc, buf[89]);
+    }
+
+    [Fact]
+    public void ParseActiveProfileReply_success_decodes_slot()
+    {
+        var r = RazerProtocol.ParseActiveProfileReply(MakeActiveProfileReply(0x02, 3), out byte slot);
+        Assert.Equal(ReplyResult.Success, r);
+        Assert.Equal((byte)3, slot);
+    }
+
+    [Theory]
+    [InlineData((byte)0x00)]
+    [InlineData((byte)0x06)]
+    public void ParseActiveProfileReply_slot_out_of_range_is_failed(byte slot)
+    {
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseActiveProfileReply(MakeActiveProfileReply(0x02, slot), out _));
+    }
+
+    [Fact]
+    public void SetActiveProfile_buffer_has_correct_layout_and_crc()
+    {
+        byte[] buf = RazerProtocol.BuildSetActiveProfileBuffer(0x1f, 0x03);
+        Assert.Equal(0x01, buf[6]); // data_size
+        Assert.Equal(0x05, buf[7]); // command_class
+        Assert.Equal(0x04, buf[8]); // command_id (SET, undocumented)
+        Assert.Equal(0x03, buf[9]); // slot
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        Assert.Equal(crc, buf[89]);
+    }
+
+    [Theory]
+    [InlineData((byte)0x00)]
+    [InlineData((byte)0x06)]
+    public void SetActiveProfile_throws_on_out_of_range_slot(byte slot)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => RazerProtocol.BuildSetActiveProfileBuffer(0x1f, slot));
+    }
+
+    [Fact]
+    public void SetActiveProfile_ds06_overload_uses_six_byte_frame()
+    {
+        // fallback shape the --set-test spike tries when ds 0x01 is rejected
+        byte[] buf = RazerProtocol.BuildSetActiveProfileBuffer(0x1f, 0x02, RazerProtocol.DataSizeProfileList);
+        Assert.Equal(0x06, buf[6]);  // data_size
+        Assert.Equal(0x05, buf[7]);  // command_class
+        Assert.Equal(0x04, buf[8]);  // command_id (SET)
+        Assert.Equal(0x02, buf[9]);  // slot
+        Assert.Equal(0x00, buf[10]); // remaining args zero
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        Assert.Equal(crc, buf[89]);
+    }
 }

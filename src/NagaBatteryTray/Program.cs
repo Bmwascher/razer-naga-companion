@@ -42,7 +42,8 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--probe-profile")
         {
             AllocConsoleIfNeeded();
-            return Diagnostics.ProfileProbeCommand.Run();
+            return args.Length > 1 && args[1] == "--set-test" ? Diagnostics.ProfileProbeCommand.RunProfileSetTest()
+                : Diagnostics.ProfileProbeCommand.Run();
         }
 
         // Headless run-at-login registration (used by install.ps1). Registers a

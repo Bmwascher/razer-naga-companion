@@ -46,6 +46,8 @@ public static class RazerProtocol
 
     public const byte CommandClassProfile = 0x05;
     public const byte CommandIdGetProfileList = 0x81;
+    public const byte CommandIdGetActiveProfile = 0x84;  // hardware-verified 2026-07-18 (--probe-profile)
+    public const byte CommandIdSetActiveProfile = 0x04;  // undocumented; hardware-UNVERIFIED until --set-test passes
     public const byte CommandIdNewProfile = 0x02;
     public const byte CommandIdDeleteProfile = 0x03;
     public const byte DataSizeProfileList = 0x06;  // 1 capacity byte + up to 5 slot numbers
@@ -188,6 +190,49 @@ public static class RazerProtocol
             if (buffer91[10 + i] != 0) list.Add(buffer91[10 + i]);
         slots = list.ToArray();
         return ReplyResult.Success;
+    }
+
+    /// <summary>GET the active profile slot number (hardware-verified 2026-07-18, --probe-profile):
+    /// class 0x05, id 0x84, data_size 0x06, six zero args. Reply arg[0] (buffer[9]) is the slot.</summary>
+    public static byte[] BuildGetActiveProfileBuffer(byte transactionId)
+    {
+        Span<byte> args = stackalloc byte[6]; // zeroed
+        return BuildReport(transactionId, DataSizeProfileList, CommandClassProfile, CommandIdGetActiveProfile, args);
+    }
+
+    /// <summary>Decodes a get-active-profile reply: slot = buffer91[9] (report arg[0]). A decoded
+    /// value outside 1..5 is Failed (wrong-layout guard, same idiom as ParseDpiReply/ParseProfileListReply).</summary>
+    public static ReplyResult ParseActiveProfileReply(byte[] buffer91, out byte slot)
+    {
+        slot = 0;
+        var r = ValidateReply(buffer91);
+        if (r != ReplyResult.Success) return r;
+        byte s = buffer91[9];
+        if (s < 1 || s > 5) return ReplyResult.Failed;
+        slot = s;
+        return ReplyResult.Success;
+    }
+
+    /// <summary>SET the active profile to an EXISTING onboard slot (1..5). Undocumented command
+    /// (class 0x05, id 0x04) — hardware-UNVERIFIED until the --set-test spike passes; probe-only
+    /// caller for now. Mirrors BuildNewProfileBuffer/BuildDeleteProfileBuffer's single-arg shape
+    /// (data_size DataSizeProfileEdit).</summary>
+    public static byte[] BuildSetActiveProfileBuffer(byte transactionId, byte slot) =>
+        BuildSetActiveProfileBuffer(transactionId, slot, DataSizeProfileEdit);
+
+    /// <summary>Overload taking an explicit data_size, for the --set-test spike's fallback shape
+    /// (ds 0x06, mirroring BuildGetActiveProfileBuffer's frame) when the ds-0x01 shape is rejected.
+    /// Undocumented command — hardware-UNVERIFIED until the --set-test spike passes; probe-only
+    /// caller for now. Throws unless slot is 1..5 and dataSize is DataSizeProfileEdit (0x01) or
+    /// DataSizeProfileList (0x06).</summary>
+    public static byte[] BuildSetActiveProfileBuffer(byte transactionId, byte slot, byte dataSize)
+    {
+        if (slot < 1 || slot > 5) throw new ArgumentOutOfRangeException(nameof(slot));
+        if (dataSize != DataSizeProfileEdit && dataSize != DataSizeProfileList)
+            throw new ArgumentOutOfRangeException(nameof(dataSize));
+        Span<byte> args = stackalloc byte[dataSize]; // zeroed
+        args[0] = slot;
+        return BuildReport(transactionId, dataSize, CommandClassProfile, CommandIdSetActiveProfile, args);
     }
 
     public static byte[] BuildNewProfileBuffer(byte transactionId, byte slot)

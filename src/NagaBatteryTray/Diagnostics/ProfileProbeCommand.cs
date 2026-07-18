@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Threading;
 using Microsoft.Win32.SafeHandles;
 using HidSharp;
 using NagaBatteryTray.Hid;
@@ -9,9 +10,13 @@ using NagaBatteryTray.Ui;
 namespace NagaBatteryTray.Diagnostics;
 
 /// <summary>--probe-profile: read-only profile inventory + active-slot read hunt
-/// (spec docs/superpowers/specs/2026-07-18-naga-profile-probe-design.md). ZERO writes: every
-/// request is a get-half id — enforced by BuildProfileGetProbeBuffer's throw and by this file
-/// never referencing a Set/New/Delete builder.</summary>
+/// (spec docs/superpowers/specs/2026-07-18-naga-profile-probe-design.md). Run() remains ZERO
+/// writes: every request is a get-half id — enforced by BuildProfileGetProbeBuffer's throw and by
+/// Run() never referencing a Set/New/Delete builder. RunProfileSetTest() (--probe-profile --set-test)
+/// is a separately-invoked, explicitly consented write spike for the one undocumented command this
+/// file now knows how to build (class 0x05, id 0x04, likely set-active-profile): it targets only an
+/// EXISTING onboard slot and restores the original active slot before returning — it never creates,
+/// deletes, or writes a button binding.</summary>
 internal static class ProfileProbeCommand
 {
     internal static int Run()
@@ -85,26 +90,7 @@ internal static class ProfileProbeCommand
             else capture.Add("- pass 2: declined by user (recorded)");
         }
 
-        Console.WriteLine("\n[3/3] Integrity re-check (spec §4.5)");
-        if (!s.Alive())
-        {
-            capture.Add("## Integrity re-check\nIMPOSSIBLE — device not answering (no evidence of change; re-run when it reconnects).");
-            Console.WriteLine("  IMPOSSIBLE - device not answering (no evidence of change; re-run when it reconnects).");
-        }
-        else
-        {
-            var after = ReadInventory(s);
-            var (changed, inconclusive) = CompareInventories(inv, after);
-            capture.Add(RenderInventory(after, "Inventory (after)"));
-            string block = changed.Count == 0 && inconclusive.Count == 0
-                ? "UNCHANGED - every observable profile surface byte-identical to the pre-run inventory."
-                : changed.Count > 0
-                    ? "**CHANGED:** " + string.Join("; ", changed) +
-                      (inconclusive.Count > 0 ? "; inconclusive: " + string.Join("; ", inconclusive) : "")
-                    : "**INCONCLUSIVE:** " + string.Join("; ", inconclusive) + " (no byte evidence of change)";
-            capture.Add($"## Integrity re-check\n{block}");
-            Console.WriteLine($"  {block}");
-        }
+        IntegrityRecheck(s, capture, inv, "[3/3] Integrity re-check (spec §4.5)");
 
         InputFeelPrompt(capture, "final");
 
@@ -120,6 +106,231 @@ internal static class ProfileProbeCommand
         Console.WriteLine($"\n{verdict.Replace("## Verdict\n", "Verdict: ")}");
         Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");
         return 0;
+    }
+
+    /// <summary>--set-test: the opt-in write spike for the one undocumented command this probe now
+    /// knows how to build (class 0x05, id 0x04, likely set-active-profile). Never run implicitly by
+    /// Run() — separately invoked via --probe-profile --set-test. Targets only an EXISTING onboard
+    /// slot (target B, chosen from the live inventory) and restores the original active slot A
+    /// before returning; no create/delete/binding writes anywhere in this path.</summary>
+    internal static int RunProfileSetTest()
+    {
+        Console.WriteLine("Naga Battery Tray - active-profile SET spike (--probe-profile --set-test)\n");
+        Console.WriteLine("PREFLIGHT (spec §4.1): close the TRAY APP and ALL Razer software (Synapse etc.)");
+        Console.WriteLine("- a concurrent HID client interleaves exchanges and can corrupt the evidence.");
+        Console.Write("Both closed? Continue? [y/N] ");
+        if (Console.ReadKey(intercept: true).Key != ConsoleKey.Y) { Console.WriteLine("\naborted."); return 1; }
+        Console.WriteLine("\n");
+
+        var store = new JsonSettingsStore(JsonSettingsStore.DefaultPath());
+        int delay = store.Settings.SetReadDelayMs;
+
+        var session = ProfileSession.Open(store.GetCachedTransactionId(), delay);
+        if (session is null) { Console.WriteLine("No live mouse collection answered (connected? awake?)."); return 1; }
+
+        try
+        {
+            Console.WriteLine($"Live collection: PID 0x{session.Pid:x4}, tid 0x{session.Tid:x2} (resolved), SET->GET delay {delay} ms\n");
+
+            var capture = new ProfileCapture(session.Pid, session.Tid, delay);
+            Console.WriteLine($"Capture: {capture.StampedPath}\n");
+            capture.Add("set-active spike (0x05/0x04) — existing slots only");
+
+            Console.WriteLine("Inventory (before) + locating the active slot");
+            var before = ReadInventory(session);
+            capture.Add(RenderInventory(before, "Inventory (before)"));
+            PrintInventorySummary(before);
+
+            byte activeSlotA = 0;
+            var activeReply = session.Exchange(RazerProtocol.BuildGetActiveProfileBuffer(session.Tid));
+            bool activeOk = activeReply is not null &&
+                RazerProtocol.ParseActiveProfileReply(activeReply, out activeSlotA) == ReplyResult.Success;
+
+            if (!activeOk || !before.Slots.Contains(activeSlotA))
+            {
+                string why = !activeOk
+                    ? "active-profile read (0x05/0x84) failed — cannot identify slot A"
+                    : $"active-profile read says slot {activeSlotA}, not in the inventory's existing slot set [{ProbeCommand.Hex2(before.Slots)}]";
+                Console.WriteLine($"  ABORT: {why}");
+                capture.Add($"## Verdict\n**ABORTED:** {why} — no write attempted.");
+                return 0;
+            }
+
+            if (before.Slots.Length < 2)
+            {
+                string why = $"only {before.Slots.Length} existing slot(s): the set-test needs a second slot to switch to and restore from";
+                Console.WriteLine($"  ABORT: {why}");
+                capture.Add($"## Verdict\n**ABORTED:** {why} — no write attempted.");
+                return 0;
+            }
+
+            int idxA = Array.IndexOf(before.Slots, activeSlotA);
+            byte b = before.Slots[(idxA + 1) % before.Slots.Length];
+            Console.WriteLine($"  active slot A = {activeSlotA} ({ColourFor(activeSlotA)}); target slot B = {b} ({ColourFor(b)})");
+            capture.Add($"- active slot A = {activeSlotA} ({ColourFor(activeSlotA)}); target slot B = {b} ({ColourFor(b)})");
+
+            Console.WriteLine($"\nAbout to send the UNDOCUMENTED write 0x05/0x04 arg[0]={b} (likely set-active-profile).");
+            Console.WriteLine("Target is an EXISTING slot; recovery is the mouse's bottom button.");
+            Console.Write("Proceed? [y/N] ");
+            bool consented = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
+            Console.WriteLine();
+            capture.Add($"- consent (send 0x05/0x04 arg[0]={b}): {(consented ? "YES" : "declined")}");
+            if (!consented) { Console.WriteLine("  declined - no write sent."); return 0; }
+
+            var setReply1 = session.Exchange(RazerProtocol.BuildSetActiveProfileBuffer(session.Tid, b));
+            byte status1 = setReply1 is not null ? setReply1[1] : (byte)0x00;
+            bool ok1 = setReply1 is not null && status1 == 0x02;
+            capture.Add(ok1
+                ? $"- SET 0x05/0x04 (ds01) arg[0]={b}: accepted (status=0x02)"
+                : $"- SET 0x05/0x04 (ds01) arg[0]={b}: REJECTED status=0x{status1:x2} (ds01 shape)");
+            Console.WriteLine(ok1 ? "  ds01 SET accepted (status=0x02)" : $"  ds01 SET REJECTED status=0x{status1:x2}");
+
+            byte workingDataSize = RazerProtocol.DataSizeProfileEdit;
+            if (!ok1)
+            {
+                var setReply2 = session.Exchange(RazerProtocol.BuildSetActiveProfileBuffer(session.Tid, b, RazerProtocol.DataSizeProfileList));
+                byte status2 = setReply2 is not null ? setReply2[1] : (byte)0x00;
+                bool ok2 = setReply2 is not null && status2 == 0x02;
+                capture.Add(ok2
+                    ? $"- SET 0x05/0x04 (ds06 fallback) arg[0]={b}: accepted (status=0x02)"
+                    : $"- SET 0x05/0x04 (ds06 fallback) arg[0]={b}: REJECTED status=0x{status2:x2} (ds06 shape)");
+                Console.WriteLine(ok2 ? "  ds06 fallback SET accepted (status=0x02)" : $"  ds06 fallback SET REJECTED status=0x{status2:x2}");
+                workingDataSize = RazerProtocol.DataSizeProfileList;
+
+                if (!ok2)
+                {
+                    string rejectVerdict = $"## Verdict\n**SET REJECTED** — command does not exist in these shapes " +
+                                            $"(ds01 status=0x{status1:x2}, ds06 status=0x{status2:x2}).";
+                    capture.Add(rejectVerdict);
+                    Console.WriteLine($"\n{rejectVerdict.Replace("## Verdict\n", "Verdict: ")}");
+                    IntegrityRecheck(session, capture, before, "Integrity re-check (spec §4.5)");
+                    return 0;
+                }
+            }
+
+            Console.WriteLine("\nRead-back + LED confirm");
+            var rbReply = session.Exchange(RazerProtocol.BuildGetActiveProfileBuffer(session.Tid));
+            byte rbSlot = 0;
+            bool rbOk = rbReply is not null &&
+                RazerProtocol.ParseActiveProfileReply(rbReply, out rbSlot) == ReplyResult.Success;
+            capture.Add(rbReply is null
+                ? "- read-back after SET: NO REPLY (transport)"
+                : $"- read-back after SET: raw=[{ProbeCommand.Hex(rbReply, 91)}] parsed={(rbOk ? $"slot {rbSlot}" : "unparseable")}");
+            Console.WriteLine(rbOk ? $"  read-back says slot {rbSlot}" : "  read-back unreadable/unparseable");
+
+            Console.Write($"  Look at the mouse NOW: did the profile LED change to slot {b}'s colour ({ColourFor(b)})? [y/N] ");
+            bool ledB = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
+            Console.WriteLine();
+            capture.Add($"- LED confirm (expected slot {b}, {ColourFor(b)}): {(ledB ? "YES matches" : "no / not observed")}");
+
+            Console.Write("\nPower-cycle the mouse to test persistence across a reboot? [y/N] ");
+            bool doCycle = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
+            Console.WriteLine();
+            bool? persistedAcrossCycle = null;
+            if (doCycle)
+            {
+                Console.WriteLine("  Power-cycle the mouse now (switch underneath), then press Enter.");
+                Console.ReadLine();
+                Console.Write("  Reconnecting");
+                ProfileSession? reconnected = null;
+                for (int i = 0; i < 60 && reconnected is null; i++)
+                {
+                    reconnected = ProfileSession.Open(store.GetCachedTransactionId(), delay);
+                    if (reconnected is null) { Console.Write("."); Thread.Sleep(1000); }
+                }
+                Console.WriteLine();
+                if (reconnected is null)
+                {
+                    capture.Add("- persistence check: reconnect FAILED after 60 s — cannot verify.");
+                    Console.WriteLine("  reconnect failed after 60 s - cannot verify persistence.");
+                }
+                else
+                {
+                    session.Dispose();
+                    session = reconnected;
+                    var cycleReply = session.Exchange(RazerProtocol.BuildGetActiveProfileBuffer(session.Tid));
+                    byte cycleSlot = 0;
+                    bool cycleOk = cycleReply is not null &&
+                        RazerProtocol.ParseActiveProfileReply(cycleReply, out cycleSlot) == ReplyResult.Success;
+                    persistedAcrossCycle = cycleOk && cycleSlot == b;
+                    capture.Add(cycleOk
+                        ? $"- persistence check: slot {cycleSlot} after power-cycle ({(persistedAcrossCycle == true ? "HELD" : "DID NOT HOLD")})"
+                        : "- persistence check: unreadable after power-cycle");
+                    Console.WriteLine($"  persistence: {(cycleOk ? $"slot {cycleSlot} ({(persistedAcrossCycle == true ? "held" : "did not hold")})" : "unreadable")}");
+                }
+            }
+            else capture.Add("- persistence check: skipped by user");
+
+            Console.WriteLine("\nRestore original active slot A");
+            var restoreReply = session.Exchange(RazerProtocol.BuildSetActiveProfileBuffer(session.Tid, activeSlotA, workingDataSize));
+            bool restoreOk = restoreReply is not null && restoreReply[1] == 0x02;
+            capture.Add(restoreOk
+                ? $"- restore SET arg[0]={activeSlotA} (ds{(workingDataSize == RazerProtocol.DataSizeProfileEdit ? "01" : "06")}): accepted (status=0x02)"
+                : $"- restore SET arg[0]={activeSlotA}: REJECTED status=0x{(restoreReply is not null ? restoreReply[1] : (byte)0):x2}");
+            Console.WriteLine(restoreOk ? "  restore accepted" : "  restore REJECTED");
+
+            var restoreRbReply = session.Exchange(RazerProtocol.BuildGetActiveProfileBuffer(session.Tid));
+            byte restoreRbSlot = 0;
+            bool restoreRbOk = restoreRbReply is not null &&
+                RazerProtocol.ParseActiveProfileReply(restoreRbReply, out restoreRbSlot) == ReplyResult.Success;
+            capture.Add(restoreRbOk ? $"- restore read-back: slot {restoreRbSlot}" : "- restore read-back: unreadable/unparseable");
+
+            Console.Write($"  Look at the mouse NOW: did the profile LED return to slot {activeSlotA}'s colour ({ColourFor(activeSlotA)})? [y/N] ");
+            bool ledA = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
+            Console.WriteLine();
+            capture.Add($"- LED confirm restore (expected slot {activeSlotA}, {ColourFor(activeSlotA)}): {(ledA ? "YES matches" : "no / not observed")}");
+
+            IntegrityRecheck(session, capture, before, "Integrity re-check (spec §4.5)");
+            InputFeelPrompt(capture, "final");
+
+            string finalVerdict;
+            if (rbOk && rbSlot == b && ledB)
+            {
+                string persistClause = persistedAcrossCycle == true ? " + persisted across power-cycle" : "";
+                finalVerdict = $"## Verdict\n**SET-ACTIVE VERIFIED** (read-back + LED confirm{persistClause}).";
+            }
+            else if (!rbOk)
+                finalVerdict = "## Verdict\n**SET-ACTIVE INDETERMINATE** — read-back after SET was unreadable/unparseable; treat 0x05/0x04 as NOT verified.";
+            else if (rbSlot != b)
+                finalVerdict = $"## Verdict\n**SET-ACTIVE FAILED** — read-back says slot {rbSlot} but slot {b} was requested; treat 0x05/0x04 as NOT set-active.";
+            else
+                finalVerdict = $"## Verdict\n**SET-ACTIVE UNCONFIRMED** — read-back says slot {b} but the LED confirmation says otherwise (or wasn't observed) — treat 0x05/0x04 as NOT verified as set-active by physical ground truth.";
+
+            capture.Add(finalVerdict);
+            Console.WriteLine($"\n{finalVerdict.Replace("## Verdict\n", "Verdict: ")}");
+            Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");
+            return 0;
+        }
+        finally
+        {
+            session?.Dispose();
+        }
+    }
+
+    /// <summary>Shared by Run() and RunProfileSetTest() (spec §4.5): byte-compare the observable
+    /// profile surfaces before vs after, via CompareInventories, and record the UNCHANGED / CHANGED /
+    /// INCONCLUSIVE verdict block. header is the printed section title (callers vary in step count).</summary>
+    private static void IntegrityRecheck(ProfileSession s, ProfileCapture capture, InventorySnapshot before, string header)
+    {
+        Console.WriteLine($"\n{header}");
+        if (!s.Alive())
+        {
+            capture.Add("## Integrity re-check\nIMPOSSIBLE — device not answering (no evidence of change; re-run when it reconnects).");
+            Console.WriteLine("  IMPOSSIBLE - device not answering (no evidence of change; re-run when it reconnects).");
+            return;
+        }
+
+        var after = ReadInventory(s);
+        var (changed, inconclusive) = CompareInventories(before, after);
+        capture.Add(RenderInventory(after, "Inventory (after)"));
+        string block = changed.Count == 0 && inconclusive.Count == 0
+            ? "UNCHANGED - every observable profile surface byte-identical to the pre-run inventory."
+            : changed.Count > 0
+                ? "**CHANGED:** " + string.Join("; ", changed) +
+                  (inconclusive.Count > 0 ? "; inconclusive: " + string.Join("; ", inconclusive) : "")
+                : "**INCONCLUSIVE:** " + string.Join("; ", inconclusive) + " (no byte evidence of change)";
+        capture.Add($"## Integrity re-check\n{block}");
+        Console.WriteLine($"  {block}");
     }
 
     // ---- session ----
