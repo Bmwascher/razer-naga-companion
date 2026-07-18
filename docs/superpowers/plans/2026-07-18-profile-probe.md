@@ -1107,3 +1107,30 @@ git commit -m "feat(probe): --probe-profile passes 1+2 with sourced corpus, orac
 - **Spec coverage:** §4.1 preflight/tid/delay → Task 4; §4.2 inventory/decode policy → Task 4; §4.3 fingerprint + LED-only fallback → Tasks 2/4/5; §4.4 passes + opt-in → Task 5; §4.5 integrity → Task 5; §4.6/§9 capture/checkpoint/indexing → Tasks 4/5; §5.1 tour/revisit/2-samples/≥2-slots → Task 5 (`RunTour`, slot-count guard); §5.2 hit rules → Task 3; §5.3 corpus tuples/sources/control/scoped miss → Task 5; §6 read-only construction/sentinel/input-feel → Tasks 1/5; §7 code layout → file map; §8 tests → Tasks 1–3; §10 outcomes → Task 5 verdict + Task 6 step 3.
 - **Placeholders:** the one deliberate open list — pass-1 shortlist entries — is not a TBD: Task 5 step 1 defines the exact research procedure, the acceptance rule (readable source required), and the deterministic fallback (control-only shortlist).
 - **Type consistency:** `SlotActions`/`StateSamples`/`OffsetFinding`/`OffsetClass` names and shapes match across Tasks 2–5; `ProbeCommand.Exchange(h, req, delayMs)` signature in Task 4 matches Task 5's uses via `ProfileSession.Exchange`; `RazerProtocol.BuildProfileGetProbeBuffer(tid, id, dataSize, args)` matches Tasks 1/5.
+
+---
+
+## Post-plan amendments (2026-07-18)
+
+After execution, two review waves amended the delivered code beyond this plan's literal text — the
+task step code blocks above are historical (what was first written), not current. Read the source
+files, not this document, for the shipped behavior:
+
+1. **Final-review fixes (commit `4eca372`)** — abort verdict branch (`RunTour` returning null now
+   surfaces as an ABORTED verdict rather than falling through to NO HIT), the integrity re-check
+   gated on `ProfileSession.Alive()` before re-reading the inventory, and capture-rendering polish.
+2. **Cross-model-review fixes (commit `23ee0fb`)** — `OffsetFinding` gained a `Length` field and
+   `int`-typed values (was `byte`) with an adjacent-pair tuple pass in `AnalyzeCandidate` (catches
+   2-byte encodings bijective only as a pair); CRC-gated analyzability (a sample must be full-length,
+   status-success, *and* CRC-valid to enter analysis); `CompareInventories` returns a
+   `(Changed, Inconclusive)` pair instead of a flat diff list.
+3. **This wave** — symmetric readability classification in `CompareInventories` (a "changed" verdict
+   now requires both readings to have succeeded and differ; a one-sided readability flip in either
+   direction is Inconclusive, never Changed — closing the gap where an unreadable-before →
+   readable-after transition could masquerade as a proven change); the CRC-gated analyzability
+   predicate extracted to `internal static bool ProfileProbeCommand.SampleAnalyzable(byte[])`; and
+   unit tests for both (`tests/NagaBatteryTray.Tests/ProfileProbeCommandTests.cs`).
+
+The spec (`docs/superpowers/specs/2026-07-18-naga-profile-probe-design.md` §4.5, §5.2, §6) is the
+authoritative record of current behavior — consult it, not this plan's code blocks, when the two
+diverge.

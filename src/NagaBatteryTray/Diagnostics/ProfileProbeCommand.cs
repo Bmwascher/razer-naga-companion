@@ -175,7 +175,7 @@ internal static class ProfileProbeCommand
 
     // ---- inventory ----
 
-    private sealed record InventorySnapshot(bool ListOk, byte Capacity, byte[] Slots, bool ModeOk, byte Mode,
+    internal sealed record InventorySnapshot(bool ListOk, byte Capacity, byte[] Slots, bool ModeOk, byte Mode,
         IReadOnlyList<SlotActions> Rows, RawButtonAction?[] Effective);
 
     private static InventorySnapshot ReadInventory(ProfileSession s)
@@ -417,6 +417,12 @@ internal static class ProfileProbeCommand
         return crc == r[89];
     }
 
+    /// <summary>A sample is analyzable only when it is a full-length, status-success, CRC-valid
+    /// reply — a failure reply's body is typically the echoed request and a CRC-bad reply is
+    /// corrupt evidence, so diffing either would manufacture noise (spec §5.2/§9).</summary>
+    internal static bool SampleAnalyzable(byte[] reply) =>
+        reply.Length == RazerProtocol.BufferLength && reply[1] == 0x02 && CrcOk(reply);
+
     private static void InputFeelPrompt(ProfileCapture capture, string when)
     {
         Console.Write($"\n  INPUT-FEEL CHECK ({when}, hard gate): move the mouse around now - any stutter/lag? [y/N] ");
@@ -463,7 +469,7 @@ internal static class ProfileProbeCommand
             foreach (var v in visits)
             {
                 var samples = v.Replies[cand.Key];
-                if (samples.Any(r => r.Length != RazerProtocol.BufferLength || r[1] != 0x02 || !CrcOk(r))) { complete = false; break; }
+                if (samples.Any(r => !SampleAnalyzable(r))) { complete = false; break; }
                 states.Add(new StateSamples(v.EffectiveSlot, samples));
             }
             if (!complete)
@@ -494,22 +500,29 @@ internal static class ProfileProbeCommand
 
     /// <summary>Spec §4.5: byte-compare the observable profile surfaces before vs after, separating
     /// proven changes from inconclusive observations (an unreadable-after surface is missing
-    /// evidence, not proof of a change). The profile-0 read-through view is deliberately excluded —
-    /// it legitimately follows the active slot. When the after-list itself is unreadable, per-slot
-    /// comparisons are skipped entirely (no after-list means no basis to say a slot went missing).</summary>
-    private static (List<string> Changed, List<string> Inconclusive) CompareInventories(InventorySnapshot before, InventorySnapshot after)
+    /// evidence, not proof of a change). A "changed" verdict requires BOTH readings to have
+    /// succeeded and differ — a one-sided readability flip (either direction) is Inconclusive, never
+    /// Changed, so an unreadable-before -> readable-after transition can't masquerade as a proven
+    /// change. The profile-0 read-through view is deliberately excluded — it legitimately follows the
+    /// active slot. When the after-list itself is unreadable, per-slot comparisons are skipped
+    /// entirely (no after-list means no basis to say a slot went missing).</summary>
+    internal static (List<string> Changed, List<string> Inconclusive) CompareInventories(InventorySnapshot before, InventorySnapshot after)
     {
         var changed = new List<string>();
         var inconclusive = new List<string>();
 
         if (before.ListOk && !after.ListOk)
             inconclusive.Add("profile list unreadable after");
-        else if (before.ListOk != after.ListOk || before.Capacity != after.Capacity || !before.Slots.SequenceEqual(after.Slots))
+        else if (!before.ListOk && after.ListOk)
+            inconclusive.Add("profile list readable only after");
+        else if (before.ListOk && after.ListOk && (before.Capacity != after.Capacity || !before.Slots.SequenceEqual(after.Slots)))
             changed.Add("profile list changed");
 
         if (before.ModeOk && !after.ModeOk)
             inconclusive.Add("device mode unreadable after");
-        else if (before.ModeOk != after.ModeOk || before.Mode != after.Mode)
+        else if (!before.ModeOk && after.ModeOk)
+            inconclusive.Add("device mode readable only after");
+        else if (before.ModeOk && after.ModeOk && before.Mode != after.Mode)
             changed.Add("device mode changed");
 
         if (after.ListOk)
