@@ -225,6 +225,10 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
 - [ ] Profile probing — read-only `--probe-profile` spike (next after the GUI branch merges).
 - [ ] DPI stages + polling rate — program the onboard 5-stage DPI table (+ stage up/down) and
   polling-rate get/set; both openrazer-validated commands, write-on-action only (ordered 2026-07-17).
+  Includes the deferred **DPI card rework** (user, 2026-07-17): the app-side preset list likely
+  becomes the onboard stage table; known gripes to fix then — a hovered preset row paints the
+  themed button hover background and reads as a text-input box, and the hover-revealed ✕ floats
+  far right of the value.
 - [ ] Lighting (last) — thumb-grid / scroll-wheel zone effects + brightness, theme-sync candidate;
   openrazer class 0x03/0x0F matrix commands.
 
