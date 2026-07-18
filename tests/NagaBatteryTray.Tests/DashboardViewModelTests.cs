@@ -150,6 +150,52 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public async Task ResetAllAsync_counts_a_busy_chip_as_failed_not_reset()
+    {
+        var pending = new TaskCompletionSource<bool>();
+        bool first = true;
+        Task<bool> Write(int p, ButtonActionKind k, byte m, byte u)
+        {
+            if (first) { first = false; return pending.Task; }
+            return Task.FromResult(true);
+        }
+        var vm = new DashboardViewModel(Seeded(), false, Write);
+        var inFlight = vm.Callout(3).DisableAsync(); // occupies chip 3
+
+        var (ok, failed) = await vm.ResetAllAsync();
+        Assert.Equal(11, ok);
+        Assert.Equal(1, failed);
+
+        pending.SetResult(true);
+        await inFlight;
+    }
+
+    [Fact]
+    public void SetAdoptedSlot_updates_the_profile_card_identity_mid_session()
+    {
+        var vm = new DashboardViewModel(new AppSettings(), false, NoWrite); // fresh install: no slot
+        Assert.Contains("No app profile yet", vm.ProfileTitle);
+
+        vm.SetAdoptedSlot(3);
+        Assert.Contains("Slot 3 · green", vm.ProfileTitle);
+        Assert.DoesNotContain("live", vm.ProfileDetail); // Unchecked: identity only, no claim
+    }
+
+    [Fact]
+    public void ApplyTo_preserves_an_untouched_sub15_cadence_but_clamps_a_user_change()
+    {
+        var src = new AppSettings { PollIntervalSeconds = 10 }; // documented hand-edit bypass
+        var vm = new DashboardViewModel(src, false, NoWrite);
+        var target = new AppSettings();
+        vm.ApplyTo(target);
+        Assert.Equal(10, target.PollIntervalSeconds);           // untouched → passes through
+
+        vm.PollSeconds = 3;
+        vm.ApplyTo(target);
+        Assert.Equal(15, target.PollIntervalSeconds);           // user change → floor applies
+    }
+
+    [Fact]
     public void DpiSliderPos_endpoints_map_to_dpi_range()
     {
         var vm = new DashboardViewModel(Seeded(), false, NoWrite);

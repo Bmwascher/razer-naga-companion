@@ -86,13 +86,15 @@ public static class Motion
     /// (slides/scales) is replaced by gentler opacity fades instead.</summary>
     public static bool Reduced => !SystemParameters.ClientAreaAnimation;
 
-    /// <summary>One-shot, event-driven, To-only animation with HandoffBehavior.Compose: From is
-    /// left unset so it starts at the element's current presentation value, and Compose means an
-    /// animation already in flight on the same property retargets smoothly instead of snapping.</summary>
+    /// <summary>One-shot, event-driven, To-only animation with HandoffBehavior.SnapshotAndReplace:
+    /// From is left unset so it starts at the current presentation value — for a To-only tween the
+    /// snapshot makes an in-flight animation retarget just as smoothly as Compose, but the old
+    /// clock is RELEASED. (Compose retained every prior clock in the property's composition chain,
+    /// so a session of chip presses accumulated clocks unboundedly — against the perf gate.)</summary>
     public static void Animate(UIElement el, DependencyProperty prop, double to, Duration d, IEasingFunction ease)
     {
         var anim = new DoubleAnimation { To = to, Duration = d, EasingFunction = ease };
-        el.BeginAnimation(prop, anim, HandoffBehavior.Compose);
+        el.BeginAnimation(prop, anim, HandoffBehavior.SnapshotAndReplace);
     }
 
     /// <summary>Same, for animating a property on a Transform/Brush/other Animatable (e.g. a
@@ -100,7 +102,7 @@ public static class Motion
     public static void Animate(Animatable target, DependencyProperty prop, double to, Duration d, IEasingFunction ease)
     {
         var anim = new DoubleAnimation { To = to, Duration = d, EasingFunction = ease };
-        target.BeginAnimation(prop, anim, HandoffBehavior.Compose);
+        target.BeginAnimation(prop, anim, HandoffBehavior.SnapshotAndReplace);
     }
 
     private static BezierEase Frozen(BezierEase ease)

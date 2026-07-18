@@ -26,6 +26,7 @@ public sealed class AppHost
     private TrayIconController _tray = null!;
     private PopupWindow? _popup;
     private DashboardWindow? _dashboard;
+    private DashboardViewModel? _dashboardVm; // live only while _dashboard is; adoption notifications
     private DeviceChangeWatcher? _deviceWatcher;
     private CancellationTokenSource? _deviceDebounce;
 
@@ -123,10 +124,12 @@ public sealed class AppHost
             vm.ApplyTo(_settings.Settings);
             _settings.Save();
             _dashboard = null; // release-on-close: idle memory returns to baseline
+            _dashboardVm = null;
             _ = TrimAfterCloseAsync();
         };
         vm.ApplyState(_monitor.State);
         _dashboard = win;
+        _dashboardVm = vm;
         win.Show();
         _ = SeedDashboardAsync(vm);
     }
@@ -211,6 +214,8 @@ public sealed class AppHost
         await SeedFactoryMapAsync(free);
         _settings.Settings.OnboardSlot = free;
         _settings.Save();
+        // the open dashboard's VM was built before the slot existed — tell its Profile card
+        Dispatch(() => _dashboardVm?.SetAdoptedSlot(free));
         return free;
     }
 

@@ -13,7 +13,7 @@
     <StackPanel>
       <DockPanel>
         <StackPanel Orientation="Horizontal">
-          <TextBlock Text="&#x1F40D;" FontSize="13" Foreground="#44D62C" VerticalAlignment="Center"/>
+          <TextBlock Text="&#x1F40D;" FontSize="13" Foreground="{DynamicResource App.Accent}" VerticalAlignment="Center"/>
           <TextBlock Text="Naga V2 Pro" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource App.TextPrimary}"
                      VerticalAlignment="Center" Margin="5,0,0,0"/>
         </StackPanel>

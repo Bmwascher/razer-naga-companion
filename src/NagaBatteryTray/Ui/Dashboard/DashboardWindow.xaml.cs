@@ -105,7 +105,7 @@ public partial class DashboardWindow : FluentWindow
             if (token != _overlayVersion) return; // superseded by a ShowOverlay mid-hide
             OverlayHost.Visibility = Visibility.Collapsed;
         };
-        Scrim.BeginAnimation(OpacityProperty, scrimFade, HandoffBehavior.Compose);
+        Scrim.BeginAnimation(OpacityProperty, scrimFade, HandoffBehavior.SnapshotAndReplace);
 
         if (Motion.Reduced)
             Motion.Animate(OverlayContent, OpacityProperty, 0, Motion.Fade, Motion.EaseOut);
@@ -138,7 +138,7 @@ public partial class DashboardWindow : FluentWindow
         _capturing = null;
         if (key == Key.Escape) { chip.CancelCapture(); return; }
         if (!KeyToHidUsage.TryGetUsage(key, out byte usage))
-        { chip.CancelCapture(); chip.Status = $"{key} can't be bound"; return; }
+        { chip.CancelCapture(); chip.RejectKey($"{key} can't be bound"); return; }
         _ = chip.CaptureAsync(KeyToHidUsage.ToModifierBits(Keyboard.Modifiers), usage);
     }
 }

@@ -125,10 +125,16 @@ public partial class MouseStageView : UserControl
     private void OnDefault(object s, RoutedEventArgs e)
     { var vm = Vm(s); vm.CancelCapture(); _ = vm.DefaultAsync(); }
 
-    private void OnDpiDragCompleted(object s, System.Windows.Controls.Primitives.DragCompletedEventArgs e) =>
+    // every pointer interaction with the slider (thumb drag, track click, page-jump hold)
+    // ends in a mouse-up — apply once there
+    private void OnDpiPointerUp(object s, System.Windows.Input.MouseButtonEventArgs e) =>
         ApplyDpiRequested?.Invoke(((DashboardViewModel)DataContext).Dpi);
     private void OnDpiSliderKeyUp(object s, System.Windows.Input.KeyEventArgs e)
-    { if (e.Key == System.Windows.Input.Key.Enter)
+    { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Left
+          or System.Windows.Input.Key.Right or System.Windows.Input.Key.Up
+          or System.Windows.Input.Key.Down or System.Windows.Input.Key.PageUp
+          or System.Windows.Input.Key.PageDown or System.Windows.Input.Key.Home
+          or System.Windows.Input.Key.End)
         ApplyDpiRequested?.Invoke(((DashboardViewModel)DataContext).Dpi); }
 
     private void OnApplyPreset(object s, RoutedEventArgs e)

@@ -60,37 +60,53 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
     public void BeginCapture() { Status = ""; Failed = false; IsCapturing = true; }
     public void CancelCapture() => IsCapturing = false;
 
+    /// <summary>Capture ended on a key with no HID usage mapping: surface why nothing happened.
+    /// Failed drives the key-box's red border + tooltip — the compact row has no status line,
+    /// so writing Status alone renders nowhere (review find).</summary>
+    public void RejectKey(string message) { Status = message; Failed = true; }
+
     public Task CaptureAsync(byte modifiers, byte usage)
     {
         IsCapturing = false;
         return ApplyAsync(ButtonActionKind.Key, modifiers, usage, offerUndo: true);
     }
 
-    public Task DisableAsync() => ApplyAsync(ButtonActionKind.Disabled, 0, 0, offerUndo: true);
-    public Task DefaultAsync() => ApplyAsync(ButtonActionKind.Default, 0, 0, offerUndo: true);
+    public Task<bool> DisableAsync() => ApplyAsync(ButtonActionKind.Disabled, 0, 0, offerUndo: true);
+    public Task<bool> DefaultAsync() => ApplyAsync(ButtonActionKind.Default, 0, 0, offerUndo: true);
 
     public Task UndoAsync()
     {
-        if (!CanUndo) return Task.CompletedTask;
+        // busy guard BEFORE consuming CanUndo: clicking ↶ while another write is in flight
+        // used to burn the one-shot undo on ApplyAsync's silent IsBusy return (review find)
+        if (!CanUndo || IsBusy) return Task.CompletedTask;
         CanUndo = false;
         var (k, m, u) = _prev;
         return ApplyAsync(k, m, u, offerUndo: false);
     }
 
-    private async Task ApplyAsync(ButtonActionKind kind, byte modifiers, byte usage, bool offerUndo)
+    /// <summary>True = the binding is verified on the mouse (written, or already identical).
+    /// False = busy-skipped or the write failed — callers counting outcomes (reset-all) use
+    /// this, never the display Status string.</summary>
+    private async Task<bool> ApplyAsync(ButtonActionKind kind, byte modifiers, byte usage, bool offerUndo)
     {
-        if (IsBusy) return;
+        if (IsBusy) return false;
+        // no-op suppression (ported from the staged model): re-applying the exact current
+        // binding skips the HID round-trip — no false "Not applied" when the mouse naps, no
+        // slot creation for a no-op. Default stays exempt: it's the always-available repair path.
+        if (kind != ButtonActionKind.Default && kind == _kind && modifiers == _mods && usage == _usage)
+        { Status = "Applied"; return true; }
         IsBusy = true;
         Failed = false;
         Status = "Writing…";
         bool ok = await _write(Position, kind, modifiers, usage);
         IsBusy = false;
-        if (!ok) { Status = "Not applied — wiggle the mouse and retry"; Failed = true; return; }
+        if (!ok) { Status = "Not applied — wiggle the mouse and retry"; Failed = true; return false; }
 
         _prev = (_kind, _mods, _usage);
         SetApplied(kind, modifiers, usage);
         Status = "Applied";
         if (offerUndo) _ = OpenUndoWindowAsync();
+        return true;
     }
 
     private async Task OpenUndoWindowAsync()

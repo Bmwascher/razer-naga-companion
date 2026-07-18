@@ -14,7 +14,7 @@
          "press a key…" swaps in while capturing, and a failed write turns the key-box red
          with the failure message as its tooltip. -->
     <DataTemplate x:Key="ChipTemplate">
-      <Border Margin="0,2" MinWidth="150" Padding="8,5"
+      <Border Margin="0,2" MinWidth="150"
               RenderTransformOrigin="0.5,0.5"
               MouseEnter="OnChipEnter" MouseLeave="OnChipLeave" Cursor="Hand"
               Focusable="True" KeyboardNavigation.IsTabStop="True"
@@ -28,8 +28,11 @@
         <Border.Style>
           <Style TargetType="Border" BasedOn="{StaticResource ChipBorder}">
             <!-- stroke diet: at rest the chip border is invisible (thickness kept so state
-                 changes never shift layout); a stroke only appears as a state signal below -->
+                 changes never shift layout); a stroke only appears as a state signal below.
+                 Padding lives HERE, not as a local attribute - a local value outranks style
+                 triggers, which silently killed the engaged-row 10,9 expansion (review find) -->
             <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Padding" Value="8,5"/>
             <Style.Triggers>
               <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
@@ -398,10 +401,14 @@
             <TextBlock Style="{DynamicResource LabelText}" Text="DPI" VerticalAlignment="Bottom" Margin="4,0,0,4"/>
           </StackPanel>
           <!-- SmallChange: WPF's 0.1 default on a 0..1 log slider makes one arrow press jump DPI
-               ~77% — 0.02 keeps keyboard steps near the old 100-DPI granularity at typical values -->
+               ~77% — 0.02 keeps keyboard steps near the old 100-DPI granularity at typical values.
+               Apply-on-PreviewMouseUp, not Thumb.DragCompleted: a track click / page jump never
+               raises DragCompleted, so it used to change the DISPLAYED DPI without ever writing
+               the mouse (review find); every pointer interaction ends in a mouse-up. -->
           <Slider Minimum="0" Maximum="1" SmallChange="0.02" LargeChange="0.1"
+                  IsMoveToPointEnabled="True"
                   Value="{Binding DpiSliderPos, Mode=TwoWay}" IsEnabled="{Binding DevicePresent}"
-                  Thumb.DragCompleted="OnDpiDragCompleted" KeyUp="OnDpiSliderKeyUp"/>
+                  PreviewMouseUp="OnDpiPointerUp" KeyUp="OnDpiSliderKeyUp"/>
           <ItemsControl ItemsSource="{Binding Presets}" Margin="0,8,0,0">
             <ItemsControl.ItemTemplate>
               <DataTemplate>

@@ -158,6 +158,74 @@ public class CalloutViewModelTests
     }
 
     [Fact]
+    public async Task Reapplying_the_identical_binding_skips_the_write()
+    {
+        var (vm, rec, _) = NewVm(5);
+        await vm.DisableAsync();                 // Default -> Disabled: real write
+        Assert.True(await vm.DisableAsync());    // Disabled -> Disabled: verified no-op
+        Assert.Single(rec.Writes);
+        Assert.Equal("Applied", vm.Status);
+    }
+
+    [Fact]
+    public async Task Default_is_exempt_from_noop_suppression_as_the_repair_path()
+    {
+        var (vm, rec, _) = NewVm(4);             // untouched chip is already "Default"
+        Assert.True(await vm.DefaultAsync());
+        Assert.Single(rec.Writes);               // still writes the factory action
+    }
+
+    [Fact]
+    public async Task Undo_clicked_while_another_write_is_in_flight_is_not_consumed()
+    {
+        var writes = new List<TaskCompletionSource<bool>>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) =>
+        { var tcs = new TaskCompletionSource<bool>(); writes.Add(tcs); return tcs.Task; },
+        () => new TaskCompletionSource().Task);
+
+        var applyA = vm.CaptureAsync(0x00, 0x04); // A
+        writes[0].SetResult(true);
+        await applyA;
+        Assert.True(vm.CanUndo);
+
+        var applyB = vm.DisableAsync();           // in flight — IsBusy
+        await vm.UndoAsync();                     // must be a no-op, not consume the undo
+        Assert.True(vm.CanUndo);
+        Assert.Equal(2, writes.Count);            // A + B only, no undo write
+
+        writes[1].SetResult(true);
+        await applyB;
+    }
+
+    [Fact]
+    public async Task Busy_chip_reports_false_so_reset_all_counts_it_failed()
+    {
+        var writes = new List<TaskCompletionSource<bool>>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) =>
+        { var tcs = new TaskCompletionSource<bool>(); writes.Add(tcs); return tcs.Task; });
+
+        var inFlight = vm.DisableAsync();
+        Assert.False(await vm.DefaultAsync());    // busy-skip = not reset
+
+        writes[0].SetResult(true);
+        await inFlight;
+    }
+
+    [Fact]
+    public async Task RejectKey_surfaces_visibly_and_clears_on_next_capture()
+    {
+        var (vm, _, _) = NewVm();
+        vm.BeginCapture();
+        vm.CancelCapture();
+        vm.RejectKey("PrintScreen can't be bound");
+        Assert.True(vm.Failed);                   // Failed drives the visible red border + tooltip
+        Assert.Contains("can't be bound", vm.Status);
+
+        vm.BeginCapture();
+        Assert.False(vm.Failed);
+    }
+
+    [Fact]
     public void CancelCapture_returns_to_idle()
     {
         var (vm, rec, _) = NewVm();

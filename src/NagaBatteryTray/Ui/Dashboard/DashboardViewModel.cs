@@ -23,7 +23,8 @@ public sealed class DpiPresetItem : INotifyPropertyChanged
 
 public sealed class DashboardViewModel : INotifyPropertyChanged
 {
-    private readonly int? _slot;
+    private int? _slot; // mutable: a fresh install adopts its slot mid-session (SetAdoptedSlot)
+    private readonly int _seededPollSeconds, _seededPollChargingSeconds;
     private int _dpi = RazerProtocol.DpiMin;
     private bool _devicePresent, _deviceOnline, _runAtStartup, _lowBatteryNotify;
     private int _lowBatteryThreshold, _pollSeconds, _pollChargingSeconds;
@@ -36,8 +37,8 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         _runAtStartup = runAtStartup;
         _lowBatteryThreshold = source.LowBatteryThreshold;
         _lowBatteryNotify = source.LowBatteryNotify;
-        _pollSeconds = source.PollIntervalSeconds;
-        _pollChargingSeconds = source.PollIntervalChargingSeconds;
+        _pollSeconds = _seededPollSeconds = source.PollIntervalSeconds;
+        _pollChargingSeconds = _seededPollChargingSeconds = source.PollIntervalChargingSeconds;
         _theme = source.Theme;
 
         var callouts = new List<CalloutViewModel>(NagaV2ProButtons.Count);
@@ -81,8 +82,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         int ok = 0, failed = 0;
         foreach (var c in Callouts)
         {
-            await c.DefaultAsync();
-            if (c.Status == "Applied") ok++; else failed++;
+            // count the write's own verdict, not the display Status string — a busy chip's
+            // in-flight write would otherwise leave a stale "Applied"/"Writing…" miscount
+            if (await c.DefaultAsync()) ok++; else failed++;
         }
         return (ok, failed);
     }
@@ -166,6 +168,16 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public string ProfileTitle { get => _profileTitle; private set => Set(ref _profileTitle, value); }
     public string ProfileDetail { get => _profileDetail; private set => Set(ref _profileDetail, value); }
 
+    /// <summary>First remap on a fresh install adopts a slot AFTER this VM was built — update the
+    /// identity the Profile card renders. Liveness deliberately resets to Unchecked (identity only,
+    /// no claim): the mouse isn't necessarily ON the new slot until the user selects it.</summary>
+    public void SetAdoptedSlot(int slot)
+    {
+        if (_slot == slot) return;
+        _slot = slot;
+        SetLiveness(ProfileLivenessState.Unchecked);
+    }
+
     public void SetLiveness(ProfileLivenessState state)
     {
         string identity = _slot is { } n ? $"Slot {n} · {SlotColour(n)}" : "";
@@ -188,13 +200,18 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public string Theme { get => _theme; set => Set(ref _theme, value); }
     public IReadOnlyList<string> ThemeNames => Ui.ThemeManager.PresetNames;
 
-    /// <summary>Ports the old SettingsViewModel.ApplyTo clamps: cadence floor 15 s, threshold 1..100.</summary>
+    /// <summary>Ports the old SettingsViewModel.ApplyTo clamps: cadence floor 15 s, threshold 1..100.
+    /// The floor only clamps values the USER changed — an untouched cadence passes through as
+    /// seeded, so the documented hand-edited-settings.json sub-15 bypass survives the dashboard's
+    /// unconditional save-on-close (review find).</summary>
     public void ApplyTo(AppSettings target)
     {
         target.LowBatteryThreshold = Math.Clamp(LowBatteryThreshold, 1, 100);
         target.LowBatteryNotify = LowBatteryNotify;
-        target.PollIntervalSeconds = Math.Max(15, PollSeconds);
-        target.PollIntervalChargingSeconds = Math.Max(15, PollChargingSeconds);
+        target.PollIntervalSeconds =
+            PollSeconds == _seededPollSeconds ? _seededPollSeconds : Math.Max(15, PollSeconds);
+        target.PollIntervalChargingSeconds =
+            PollChargingSeconds == _seededPollChargingSeconds ? _seededPollChargingSeconds : Math.Max(15, PollChargingSeconds);
         target.Theme = Ui.ThemeManager.Resolve(Theme);
         target.DpiPresets = Presets.Select(p => p.Value).ToList();
     }

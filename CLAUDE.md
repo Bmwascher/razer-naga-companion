@@ -227,8 +227,10 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
   polling-rate get/set; both openrazer-validated commands, write-on-action only (ordered 2026-07-17).
   Includes the deferred **DPI card rework** (user, 2026-07-17): the app-side preset list likely
   becomes the onboard stage table; known gripes to fix then — a hovered preset row paints the
-  themed button hover background and reads as a text-input box, and the hover-revealed ✕ floats
-  far right of the value.
+  themed button hover background and reads as a text-input box, the hover-revealed ✕ floats
+  far right of the value, and (branch review, 2026-07-17) a failed DPI apply is silent — the old
+  Settings window said "Couldn't confirm — wiggle the mouse and retry", the card needs a status
+  surface for that again.
 - [ ] Lighting (last) — thumb-grid / scroll-wheel zone effects + brightness, theme-sync candidate;
   openrazer class 0x03/0x0F matrix commands.
 
