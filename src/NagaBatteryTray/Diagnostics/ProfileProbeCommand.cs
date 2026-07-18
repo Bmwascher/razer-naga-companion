@@ -177,6 +177,8 @@ internal static class ProfileProbeCommand
             Console.WriteLine($"  active slot A = {activeSlotA} ({ColourFor(activeSlotA)}); target slot B = {b} ({ColourFor(b)})");
             capture.Add($"- active slot A = {activeSlotA} ({ColourFor(activeSlotA)}); target slot B = {b} ({ColourFor(b)})");
 
+            InputFeelPrompt(capture, "baseline, pre-write");
+
             Console.WriteLine($"\nAbout to send the UNDOCUMENTED write 0x05/0x04 arg[0]={b} (likely set-active-profile).");
             Console.WriteLine("Target is an EXISTING slot; recovery is the mouse's bottom button.");
             Console.Write("Proceed? [y/N] ");
@@ -198,13 +200,29 @@ internal static class ProfileProbeCommand
             capture.Add(ok1
                 ? $"- SET 0x05/0x04 (ds01) arg[0]={b}: accepted (status=0x02)"
                 : transportNull1
-                    ? $"- SET 0x05/0x04 (ds01) arg[0]={b}: NO REPLY (transport)"
+                    ? "- set ds01: NO REPLY (transport)"
                     : $"- SET 0x05/0x04 (ds01) arg[0]={b}: REJECTED status=0x{status1:x2} (ds01 shape)");
             Console.WriteLine(ok1
                 ? "  ds01 SET accepted (status=0x02)"
                 : transportNull1
                     ? "  ds01 SET: NO REPLY (transport)"
                     : $"  ds01 SET REJECTED status=0x{status1:x2}");
+
+            // A transport-null on the FIRST set attempt is undiagnosable (never sent, or sent then
+            // lost) — don't compound the ambiguity by also sending the ds06 fallback; go straight to
+            // INDETERMINATE. The ds06 fallback below is only reached with a real (non-null) rejected
+            // status on ds01.
+            if (transportNull1)
+            {
+                IntegrityRecheck(session, capture, before, "Integrity re-check (spec §4.5)");
+                InputFeelPrompt(capture, "final");
+
+                string transportVerdict = "## Verdict\n**INDETERMINATE** — transport failure during the set attempt; no conclusion about 0x05/0x04; re-run.";
+                capture.Add(transportVerdict);
+                Console.WriteLine($"\n{transportVerdict.Replace("## Verdict\n", "Verdict: ")}");
+                Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");
+                return 0;
+            }
 
             byte workingDataSize = RazerProtocol.DataSizeProfileEdit;
             if (!ok1)
@@ -230,10 +248,11 @@ internal static class ProfileProbeCommand
                     IntegrityRecheck(session, capture, before, "Integrity re-check (spec §4.5)");
                     InputFeelPrompt(capture, "final");
 
-                    string abortVerdict = (transportNull1 || transportNull2)
+                    // transportNull1 is always false here (that case returns above before the ds06
+                    // fallback is ever sent), so a transport failure at this stage can only be ds06's.
+                    string abortVerdict = transportNull2
                         ? "## Verdict\n**INDETERMINATE** — transport failure, no conclusion about 0x05/0x04; re-run " +
-                          $"(ds01 {(transportNull1 ? "NO REPLY (transport)" : $"status=0x{status1:x2}")}, " +
-                          $"ds06 {(transportNull2 ? "NO REPLY (transport)" : $"status=0x{status2:x2}")})."
+                          $"(ds01 status=0x{status1:x2}, ds06 NO REPLY (transport))."
                         : $"## Verdict\n**SET NOT ACCEPTED** — not accepted in these shapes on this run " +
                           $"(ds01 status=0x{status1:x2}, ds06 status=0x{status2:x2}).";
                     capture.Add(abortVerdict);
@@ -257,6 +276,8 @@ internal static class ProfileProbeCommand
             bool ledB = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
             Console.WriteLine();
             capture.Add($"- LED confirm (expected slot {b}, {ColourFor(b)}): {(ledB ? "YES matches" : "no / not observed")}");
+
+            InputFeelPrompt(capture, "post-set, pre-restore");
 
             Console.Write("\nPower-cycle the mouse to test persistence across a reboot? [y/N] ");
             bool doCycle = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
@@ -298,11 +319,18 @@ internal static class ProfileProbeCommand
 
             Console.WriteLine("\nRestore original active slot A");
             var restoreReply = session.Exchange(RazerProtocol.BuildSetActiveProfileBuffer(session.Tid, activeSlotA, workingDataSize));
+            bool restoreTransportNull = restoreReply is null;
             bool restoreOk = restoreReply is not null && restoreReply[1] == 0x02;
             capture.Add(restoreOk
                 ? $"- restore SET arg[0]={activeSlotA} (ds{(workingDataSize == RazerProtocol.DataSizeProfileEdit ? "01" : "06")}): accepted (status=0x02)"
-                : $"- restore SET arg[0]={activeSlotA}: REJECTED status=0x{(restoreReply is not null ? restoreReply[1] : (byte)0):x2}");
-            Console.WriteLine(restoreOk ? "  restore accepted" : "  restore REJECTED");
+                : restoreTransportNull
+                    ? "- restore: NO REPLY (transport)"
+                    : $"- restore SET arg[0]={activeSlotA}: REJECTED status=0x{restoreReply![1]:x2}");
+            Console.WriteLine(restoreOk
+                ? "  restore accepted"
+                : restoreTransportNull
+                    ? "  restore: NO REPLY (transport)"
+                    : "  restore REJECTED");
 
             var restoreRbReply = session.Exchange(RazerProtocol.BuildGetActiveProfileBuffer(session.Tid));
             byte restoreRbSlot = 0;
@@ -340,6 +368,10 @@ internal static class ProfileProbeCommand
             else
                 finalVerdict = $"## Verdict\n**SET-ACTIVE UNCONFIRMED** — read-back says slot {b} but the LED confirmation says otherwise (or wasn't observed) — treat 0x05/0x04 as NOT verified as set-active by physical ground truth.";
 
+            // A restore-phase failure (including a transport null on the restore SET) never downgrades
+            // the SET-ACTIVE verdict above — that claim was already established by the read-back + LED
+            // confirm captured before restore ran; a failed/unconfirmed restore only appends a recovery
+            // clause here, it doesn't retract SET-ACTIVE.
             if (!restoreConfirmed)
                 finalVerdict += "; restore FAILED/unconfirmed — recover via bottom button";
 
