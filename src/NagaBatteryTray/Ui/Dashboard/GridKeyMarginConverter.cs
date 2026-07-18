@@ -7,7 +7,11 @@ namespace NagaBatteryTray.Ui.Dashboard;
 /// <summary>Per-key margin for the stage's 12 grid keys: the shared base margin plus a
 /// hand-tuned (dx, dy) nudge aligning each hit ring to its keycap in the render (the caps
 /// aren't on a perfectly uniform pitch). Opposite sides compensate, so every cell presents
-/// the same total margin to the UniformGrid and only the child shifts — layout never moves.</summary>
+/// the same total margin to the UniformGrid and only the child shifts — layout never moves.
+/// CALIBRATION PAIR: these values live in the stage's 250x445 canvas space together with the
+/// grid Canvas placement (Left=49.4 Top=154.3, rotate -1.5°, 40x29 keys) in
+/// MouseStageView.xaml — if Assets/naga-thumb.png is ever re-exported or re-cropped, BOTH
+/// must be re-derived from the render's keycap pixels (px→canvas: x*250/738, y*445/1313).</summary>
 public sealed class GridKeyMarginConverter : IValueConverter
 {
     private const double BaseX = 2.15, BaseY = 5.75;

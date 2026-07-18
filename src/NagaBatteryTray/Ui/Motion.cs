@@ -90,16 +90,9 @@ public static class Motion
     /// From is left unset so it starts at the current presentation value — for a To-only tween the
     /// snapshot makes an in-flight animation retarget just as smoothly as Compose, but the old
     /// clock is RELEASED. (Compose retained every prior clock in the property's composition chain,
-    /// so a session of chip presses accumulated clocks unboundedly — against the perf gate.)</summary>
-    public static void Animate(UIElement el, DependencyProperty prop, double to, Duration d, IEasingFunction ease)
-    {
-        var anim = new DoubleAnimation { To = to, Duration = d, EasingFunction = ease };
-        el.BeginAnimation(prop, anim, HandoffBehavior.SnapshotAndReplace);
-    }
-
-    /// <summary>Same, for animating a property on a Transform/Brush/other Animatable (e.g. a
-    /// chip's ScaleTransform.ScaleX) rather than a UIElement's own property.</summary>
-    public static void Animate(Animatable target, DependencyProperty prop, double to, Duration d, IEasingFunction ease)
+    /// so a session of chip presses accumulated clocks unboundedly — against the perf gate.)
+    /// IAnimatable covers both UIElements and Transforms/Brushes with one overload.</summary>
+    public static void Animate(IAnimatable target, DependencyProperty prop, double to, Duration d, IEasingFunction ease)
     {
         var anim = new DoubleAnimation { To = to, Duration = d, EasingFunction = ease };
         target.BeginAnimation(prop, anim, HandoffBehavior.SnapshotAndReplace);

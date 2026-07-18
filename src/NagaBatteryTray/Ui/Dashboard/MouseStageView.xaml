@@ -5,8 +5,16 @@
     xmlns:motion="clr-namespace:NagaBatteryTray.Ui"
     xmlns:local="clr-namespace:NagaBatteryTray.Ui.Dashboard">
   <UserControl.Resources>
-    <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     <local:GridKeyMarginConverter x:Key="GridKeyMargin"/>
+    <!-- during the undo window only ↶ shows - undo is the salient act and the expanded 15px
+         binding text needs the width; Disable/Default return after the 5s window -->
+    <Style x:Key="HideDuringUndoButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding CanUndo}" Value="True">
+          <Setter Property="Visibility" Value="Collapsed"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
     <!-- compact callout row: number + binding key-box + hover-revealed icon actions, one
          ~30px line per button (the old card reserved label/status/action rows and read as
          mostly empty space). Actions are Hidden, not Collapsed, so revealing them never
@@ -37,16 +45,17 @@
               <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
               </DataTrigger>
-              <!-- engaged row expands (capture / undo window / keyboard focus) so its
-                   contents read at full size; hover deliberately does NOT expand - browsing
-                   the list shouldn't make rows jump -->
+              <!-- IsEngaged (capturing OR undo window) is the ONE expansion signal - padding
+                   here, font in the key-box - so the engaged look can't drift across states;
+                   keyboard focus gets padding+border but keeps the resting font (tabbing
+                   through shouldn't balloon text); hover deliberately does NOT expand -
+                   browsing the list shouldn't make rows jump -->
+              <DataTrigger Binding="{Binding IsEngaged}" Value="True">
+                <Setter Property="Padding" Value="10,9"/>
+              </DataTrigger>
               <DataTrigger Binding="{Binding IsCapturing}" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
                 <Setter Property="Background" Value="{DynamicResource App.AccentSoft}"/>
-                <Setter Property="Padding" Value="10,9"/>
-              </DataTrigger>
-              <DataTrigger Binding="{Binding CanUndo}" Value="True">
-                <Setter Property="Padding" Value="10,9"/>
               </DataTrigger>
               <Trigger Property="IsKeyboardFocusWithin" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
@@ -89,16 +98,11 @@
                     <Setter Property="Text" Value="{Binding BindingText}"/>
                     <Setter Property="FontSize" Value="13"/>
                     <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsEngaged}" Value="True">
+                        <Setter Property="FontSize" Value="15"/>
+                      </DataTrigger>
                       <DataTrigger Binding="{Binding IsCapturing}" Value="True">
                         <Setter Property="Text" Value="press a key…"/>
-                        <Setter Property="FontSize" Value="15"/>
-                      </DataTrigger>
-                      <DataTrigger Binding="{Binding CanUndo}" Value="True">
-                        <Setter Property="FontSize" Value="15"/>
-                      </DataTrigger>
-                      <!-- AncestorLevel=2: level 1 is this key-box's own Border, level 2 the row -->
-                      <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=Border, AncestorLevel=2}}" Value="True">
-                        <Setter Property="FontSize" Value="15"/>
                       </DataTrigger>
                     </Style.Triggers>
                   </Style>
@@ -168,7 +172,7 @@
                         <BeginStoryboard>
                           <Storyboard>
                             <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1"
-                                             Duration="0:0:0.15" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
+                                             Duration="{x:Static motion:Motion.Micro}" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
                           </Storyboard>
                         </BeginStoryboard>
                       </DataTrigger.EnterActions>
@@ -177,30 +181,10 @@
                 </Style>
               </Button.Style>
             </Button>
-            <!-- during the undo window only ↶ shows - undo is the salient act, and the
-                 expanded 15px binding text needs the width; both return after the 5s window -->
-            <Button Content="⊘" ToolTip="Disable" Click="OnDisable" FontSize="13" Padding="0,1" Width="28" Margin="3,0,0,0">
-              <Button.Style>
-                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                  <Style.Triggers>
-                    <DataTrigger Binding="{Binding CanUndo}" Value="True">
-                      <Setter Property="Visibility" Value="Collapsed"/>
-                    </DataTrigger>
-                  </Style.Triggers>
-                </Style>
-              </Button.Style>
-            </Button>
-            <Button Content="⟲" ToolTip="Default" Click="OnDefault" FontSize="13" Padding="0,1" Width="28" Margin="3,0,0,0">
-              <Button.Style>
-                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                  <Style.Triggers>
-                    <DataTrigger Binding="{Binding CanUndo}" Value="True">
-                      <Setter Property="Visibility" Value="Collapsed"/>
-                    </DataTrigger>
-                  </Style.Triggers>
-                </Style>
-              </Button.Style>
-            </Button>
+            <Button Content="⊘" ToolTip="Disable" Click="OnDisable" FontSize="13" Padding="0,1" Width="28"
+                    Margin="3,0,0,0" Style="{StaticResource HideDuringUndoButton}"/>
+            <Button Content="⟲" ToolTip="Default" Click="OnDefault" FontSize="13" Padding="0,1" Width="28"
+                    Margin="3,0,0,0" Style="{StaticResource HideDuringUndoButton}"/>
           </StackPanel>
           <!-- capture card: while capturing the row grows into a card - "press a key…" up
                top, and the alternative actions as full-size text buttons below (this is
@@ -287,7 +271,7 @@
                     <BeginStoryboard>
                       <Storyboard>
                         <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1"
-                                         Duration="0:0:0.18" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
+                                         Duration="{x:Static motion:Motion.Fade}" EasingFunction="{x:Static motion:Motion.EaseOut}"/>
                       </Storyboard>
                     </BeginStoryboard>
                   </DataTrigger.EnterActions>
@@ -334,7 +318,7 @@
                         Margin="{Binding Position, Converter={StaticResource GridKeyMargin}}"
                         RenderTransformOrigin="0.5,0.5"
                         AutomationProperties.Name="{Binding Label, StringFormat=Button {0}}"
-                        MouseEnter="OnKeyEnter" MouseLeave="OnKeyLeave"
+                        MouseEnter="OnChipEnter" MouseLeave="OnChipLeave"
                         PreviewMouseLeftButtonDown="OnChipPressDown" PreviewMouseLeftButtonUp="OnChipPressUp"
                         MouseLeftButtonUp="OnChipClick"
                         IsEnabled="{Binding DataContext.DeviceOnline, RelativeSource={RelativeSource AncestorType=UserControl}}">

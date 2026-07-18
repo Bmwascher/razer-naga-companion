@@ -5,9 +5,6 @@
     WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
     AllowsTransparency="True" Background="Transparent"
     SizeToContent="WidthAndHeight" Topmost="True">
-  <Window.Resources>
-    <BooleanToVisibilityConverter x:Key="BoolToVis"/>
-  </Window.Resources>
   <Border Width="264" Background="{DynamicResource App.CanvasBrush}" CornerRadius="12" Padding="15" Margin="12"
           BorderBrush="{DynamicResource App.CardStroke}" BorderThickness="1">
     <StackPanel>

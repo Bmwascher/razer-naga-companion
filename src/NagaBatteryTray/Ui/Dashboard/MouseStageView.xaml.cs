@@ -87,10 +87,9 @@ public partial class MouseStageView : UserControl
     private static CalloutViewModel Vm(object sender) =>
         (CalloutViewModel)((FrameworkElement)sender).DataContext;
 
+    // shared by the callout rows AND the stage's grid keys — both hover-pair via IsHighlighted
     private void OnChipEnter(object s, RoutedEventArgs e) => Vm(s).IsHighlighted = true;
     private void OnChipLeave(object s, RoutedEventArgs e) { Vm(s).IsHighlighted = false; ReleasePress(s); }
-    private void OnKeyEnter(object s, RoutedEventArgs e) => Vm(s).IsHighlighted = true;
-    private void OnKeyLeave(object s, RoutedEventArgs e) { Vm(s).IsHighlighted = false; ReleasePress(s); }
 
     private void OnChipClick(object s, RoutedEventArgs e) => CaptureRequested?.Invoke(Vm(s));
     private void OnChipKeyUp(object s, System.Windows.Input.KeyEventArgs e)

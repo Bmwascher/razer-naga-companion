@@ -121,8 +121,7 @@ public sealed class AppHost
         win.Closed += (_, _) =>
         {
             _monitor.StateChanged -= onState; // release-on-close: don't leave the VM rooted by the app-lifetime monitor
-            vm.ApplyTo(_settings.Settings);
-            _settings.Save();
+            SaveDashboardSettings(vm);
             _dashboard = null; // release-on-close: idle memory returns to baseline
             _dashboardVm = null;
             _ = TrimAfterCloseAsync();
@@ -157,7 +156,7 @@ public sealed class AppHost
         // may use += because the view is new per gear click; OverlayDismissRequested lives on the
         // per-dashboard window, so it's a single-subscriber ASSIGNMENT — a += here would stack a
         // handler per gear click and save settings once per stacked handler on every dismiss.
-        Action dismiss = () => { vm.ApplyTo(_settings.Settings); _settings.Save(); win.HideOverlay(); };
+        Action dismiss = () => { SaveDashboardSettings(vm); win.HideOverlay(); };
         view.CloseRequested += dismiss;
         win.OverlayDismissRequested = dismiss;
         view.StartupToggled += enable => { SetStartup(enable); _tray.SetStartupChecked(enable); };
@@ -171,6 +170,14 @@ public sealed class AppHost
             _ = RunResetAllAsync(view, vm);
         };
         win.ShowOverlay(view);
+    }
+
+    /// <summary>The one dashboard persist step — overlay dismiss and window close both run it,
+    /// so additions (clamps, new settings) can't diverge between the two paths.</summary>
+    private void SaveDashboardSettings(DashboardViewModel vm)
+    {
+        vm.ApplyTo(_settings.Settings);
+        _settings.Save();
     }
 
     private async Task ApplyDpiAsync(DashboardViewModel vm, int dpi)

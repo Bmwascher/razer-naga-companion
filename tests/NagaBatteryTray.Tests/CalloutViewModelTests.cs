@@ -158,6 +158,23 @@ public class CalloutViewModelTests
     }
 
     [Fact]
+    public async Task IsEngaged_spans_capture_through_the_undo_window()
+    {
+        var (vm, _, undo) = NewVm();
+        Assert.False(vm.IsEngaged);
+
+        vm.BeginCapture();
+        Assert.True(vm.IsEngaged);            // capturing
+
+        await vm.CaptureAsync(0x00, 0x04);    // capture ends, undo window opens
+        Assert.True(vm.IsEngaged);            // undo window
+
+        undo.SetResult();                     // the 5 s window elapses
+        await Task.Yield();
+        Assert.False(vm.IsEngaged);
+    }
+
+    [Fact]
     public async Task Reapplying_the_identical_binding_skips_the_write()
     {
         var (vm, rec, _) = NewVm(5);

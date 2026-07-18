@@ -1,14 +1,11 @@
-using System.ComponentModel;
 using NagaBatteryTray.Monitoring;
 using Media = System.Windows.Media;
 
 namespace NagaBatteryTray.Ui;
 
-public sealed class PopupViewModel : INotifyPropertyChanged
+public sealed class PopupViewModel : ObservableObject
 {
     public const double BarTrackWidth = 234;
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 
     private string _percentText = "-";
     private string _status = "no response";
@@ -23,7 +20,7 @@ public sealed class PopupViewModel : INotifyPropertyChanged
     public double BarFraction
     {
         get => _barFraction;
-        private set { if (Set(ref _barFraction, value)) OnChanged(nameof(BarPixelWidth)); }
+        private set { if (Set(ref _barFraction, value)) Notify(nameof(BarPixelWidth)); }
     }
     public double BarPixelWidth => BarFraction * BarTrackWidth;
     public Media.Brush Accent { get => _accent; private set => Set(ref _accent, value); }
@@ -59,14 +56,4 @@ public sealed class PopupViewModel : INotifyPropertyChanged
         var c = IconRenderer.ColorForLevel(s.Percent, s.Charging); // System.Drawing.Color
         Accent = new Media.SolidColorBrush(Media.Color.FromRgb(c.R, c.G, c.B));
     }
-
-    private bool Set<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? name = null)
-    {
-        if (Equals(field, value)) return false;
-        field = value;
-        OnChanged(name);
-        return true;
-    }
-
-    private void OnChanged(string? name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

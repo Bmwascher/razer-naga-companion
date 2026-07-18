@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using NagaBatteryTray.Hid;
 
 namespace NagaBatteryTray.Ui.Dashboard;
@@ -8,7 +6,7 @@ namespace NagaBatteryTray.Ui.Dashboard;
 /// (Idle → Capturing → Writing → Confirmed | Failed) with a one-shot undo window after each
 /// verified write. The write delegate is AppHost's slot pipeline; Kind=Default means
 /// "write the factory action and drop the table entry".</summary>
-public sealed class CalloutViewModel : INotifyPropertyChanged
+public sealed class CalloutViewModel : ObservableObject
 {
     public delegate Task<bool> WriteBinding(int position, ButtonActionKind kind, byte modifiers, byte usage);
 
@@ -29,8 +27,6 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
         _undoWindow = undoWindow ?? (() => Task.Delay(TimeSpan.FromSeconds(5)));
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
-
     public int Position { get; }
     public string Label => Position.ToString();
 
@@ -41,12 +37,24 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
         _ => KeyToHidUsage.Describe(0, NagaV2ProButtons.FactoryBindingForPosition(Position).HidUsage),
     };
 
-    public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) Notify(nameof(BindingText)); } }
+    public bool IsCapturing
+    {
+        get => _isCapturing;
+        private set { if (Set(ref _isCapturing, value)) { Notify(nameof(BindingText)); Notify(nameof(IsEngaged)); } }
+    }
     public bool IsBusy { get => _isBusy; private set => Set(ref _isBusy, value); }
     /// <summary>Last write failed — the compact row has no status line, so this drives the
     /// key-box's red border (with Status as its tooltip) until the next attempt.</summary>
     public bool Failed { get => _failed; private set => Set(ref _failed, value); }
-    public bool CanUndo { get => _canUndo; private set => Set(ref _canUndo, value); }
+    public bool CanUndo
+    {
+        get => _canUndo;
+        private set { if (Set(ref _canUndo, value)) Notify(nameof(IsEngaged)); }
+    }
+    /// <summary>The row the user is working with — capturing, or inside the undo window. The
+    /// view's ONE expansion signal (padding + font), so the engaged look can't drift across
+    /// per-state trigger copies.</summary>
+    public bool IsEngaged => IsCapturing || CanUndo;
     public bool IsHighlighted { get => _isHighlighted; set => Set(ref _isHighlighted, value); }
     public string Status { get => _status; set => Set(ref _status, value); }
 
@@ -116,14 +124,4 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
         await _undoWindow();
         if (version == _undoVersion) CanUndo = false;
     }
-
-    private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
-    {
-        if (Equals(field, value)) return false;
-        field = value;
-        Notify(name);
-        return true;
-    }
-
-    private void Notify(string? name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

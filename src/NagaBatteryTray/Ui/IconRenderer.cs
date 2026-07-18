@@ -55,22 +55,21 @@ public static class IconRenderer
 
             if (gauge)
             {
-                // Coin: a filled dark disc is the whole gauge body (digits + ring both sit on it).
-                // No inset — every pixel of a 16 px tray slot counts; the in-app downscale below
-                // keeps the edge clean without a guard margin.
-                float coinMargin = 0f;
-                var coinRect = new RectangleF(coinMargin, coinMargin, render - 2f * coinMargin, render - 2f * coinMargin);
+                // Coin: a filled dark disc is the whole gauge body (digits + ring both sit on it),
+                // edge-to-edge — every pixel of a 16 px tray slot counts; the in-app downscale
+                // below keeps the edge clean without a guard margin.
+                var coinRect = new RectangleF(0f, 0f, render, render);
                 using (var coinBrush = new SolidBrush(CoinFill))
                     g.FillEllipse(coinBrush, coinRect);
 
                 // Ring at the rim: track is a faint full circle; the arc depletes clockwise from 12
                 // o'clock and is colored by battery level (green/amber/red, green while charging).
-                // Inset by half its own width beyond the coin margin so the ring reads as the coin's
-                // rim rather than floating separately from it.
+                // Inset by half its own width so the ring reads as the coin's rim rather than
+                // floating separately from it.
                 // Hairline rim: floored at 1 FINAL pixel (render/size supersample px) so antialiasing
                 // can never dither it into a dashed circle at 16 px.
                 ringW = MathF.Max(render * 0.055f, render / (float)size);
-                float ringInset = coinMargin + ringW / 2f;
+                float ringInset = ringW / 2f;
                 var ringRect = new RectangleF(ringInset, ringInset, render - 2f * ringInset, render - 2f * ringInset);
                 using (var track = new Pen(Color.FromArgb(45, 255, 255, 255), ringW))
                     g.DrawEllipse(track, ringRect);

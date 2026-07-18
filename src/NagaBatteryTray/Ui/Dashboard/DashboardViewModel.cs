@@ -1,27 +1,19 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using NagaBatteryTray.Hid;
 using NagaBatteryTray.Monitoring;
 using NagaBatteryTray.Settings;
 
 namespace NagaBatteryTray.Ui.Dashboard;
 
-public sealed class DpiPresetItem : INotifyPropertyChanged
+public sealed class DpiPresetItem : ObservableObject
 {
     private bool _isActive;
     public DpiPresetItem(int value) { Value = value; }
     public int Value { get; }
-    public bool IsActive
-    {
-        get => _isActive;
-        set { if (_isActive == value) return; _isActive = value;
-              PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsActive))); }
-    }
-    public event PropertyChangedEventHandler? PropertyChanged;
+    public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
 }
 
-public sealed class DashboardViewModel : INotifyPropertyChanged
+public sealed class DashboardViewModel : ObservableObject
 {
     private int? _slot; // mutable: a fresh install adopts its slot mid-session (SetAdoptedSlot)
     private readonly int _seededPollSeconds, _seededPollChargingSeconds;
@@ -58,11 +50,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
             };
 
         Presets = new ObservableCollection<DpiPresetItem>();
-        foreach (int v in source.DpiPresets.Distinct().OrderBy(v => v)) Presets.Add(NewItem(v));
+        foreach (int v in source.DpiPresets.Distinct().OrderBy(v => v)) Presets.Add(new DpiPresetItem(v));
         SetLiveness(_slot is null ? ProfileLivenessState.NotAdopted : ProfileLivenessState.Unchecked);
     }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 
     // ---- callouts ----
     public IReadOnlyList<CalloutViewModel> Callouts { get; }
@@ -143,7 +133,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         if (Presets.Any(p => p.Value == value)) return;
         int at = 0;
         while (at < Presets.Count && Presets[at].Value < value) at++;
-        Presets.Insert(at, NewItem(value));
+        Presets.Insert(at, new DpiPresetItem(value));
         RefreshActive();
     }
 
@@ -157,7 +147,6 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public bool CanSavePreset { get => _canSavePreset; private set => Set(ref _canSavePreset, value); }
     private bool _canSavePreset;
 
-    private static DpiPresetItem NewItem(int v) => new(v);
     private void RefreshActive()
     {
         foreach (var p in Presets) p.IsActive = DevicePresent && p.Value == Dpi;
@@ -216,12 +205,4 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         target.DpiPresets = Presets.Select(p => p.Value).ToList();
     }
 
-    private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
-    {
-        if (Equals(field, value)) return false;
-        field = value;
-        Notify(name);
-        return true;
-    }
-    private void Notify(string? name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
