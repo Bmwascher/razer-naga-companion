@@ -219,3 +219,19 @@ this spike's zero-writes scope); a future opt-in spike could test it and retire 
 step entirely.
 
 Follow-up ordered: the §10 Hit path — Profile card direct read, event-driven only.
+
+## 12. Set-active spike (`--probe-profile --set-test`, ordered 2026-07-18)
+
+Tests the §11 corollary: is `0x05/0x04` SET-active-profile? **This sub-mode writes** — one
+undocumented command, opt-in via its own consent prompt; `Run()` (the plain probe) remains
+zero-writes. Envelope: targets only slots from the live inventory (builder-enforced 1..5, plus an
+inventory range guard against wrong-layout lists); flow = read active A (`0x05/0x84`,
+**echo-checked** so a SET's own reflected reply can't pose as the read-back) → consent → set to the
+next existing slot B (ds `0x01`, one ds `0x06` fallback if rejected) → read-back + **user LED
+confirmation as physical ground truth** → optional power-cycle persistence check → restore to A
+(same shape; any unconfirmed restore prints the bottom-button recovery immediately and taints the
+verdict) → §4.5 integrity re-check → input-feel. Verdict grammar: VERIFIED (read-back = B AND LED
+confirmed, persistence clause appended) / NOT ACCEPTED (genuine non-success statuses on both
+shapes, scoped to "this run") / INDETERMINATE (any transport null — never misrecorded as
+rejection) / DECLINED. A pass finalizes the Profile card design: direct active-slot read + an
+"Activate" write-on-action button, retiring the bottom-button step.
