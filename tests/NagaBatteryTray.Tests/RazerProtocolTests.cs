@@ -426,6 +426,24 @@ public class RazerProtocolTests
     }
 
     [Fact]
+    public void ParseActiveProfileReply_set_echo_is_failed()
+    {
+        // an accepted SET's reply echoes class 0x05 / id 0x04 (not the GET id 0x84) at the same
+        // arg[0]=slot offset — must not be misread as a successful read-back (echo-check guard)
+        var buf = new byte[91];
+        buf[1] = 0x02;  // status accepted
+        buf[2] = 0x1f;  // transaction_id
+        buf[6] = 0x01;  // data_size (ds01 SET shape)
+        buf[7] = 0x05;  // command_class (profile)
+        buf[8] = 0x04;  // command_id (SET, not GET 0x84)
+        buf[9] = 3;     // arg[0] echoed slot
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        buf[89] = crc;
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseActiveProfileReply(buf, out _));
+    }
+
+    [Fact]
     public void SetActiveProfile_buffer_has_correct_layout_and_crc()
     {
         byte[] buf = RazerProtocol.BuildSetActiveProfileBuffer(0x1f, 0x03);
@@ -459,5 +477,14 @@ public class RazerProtocolTests
         byte crc = 0;
         for (int i = 3; i <= 88; i++) crc ^= buf[i];
         Assert.Equal(crc, buf[89]);
+    }
+
+    [Fact]
+    public void SetActiveProfile_ds06_overload_throws_on_unrecognized_data_size()
+    {
+        // only the ds01 (single-slot-byte) and ds06 (mirroring get-active-profile) shapes are wired;
+        // anything else must never reach the device
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            RazerProtocol.BuildSetActiveProfileBuffer(0x1f, 0x02, 0x0a));
     }
 }

@@ -200,13 +200,17 @@ public static class RazerProtocol
         return BuildReport(transactionId, DataSizeProfileList, CommandClassProfile, CommandIdGetActiveProfile, args);
     }
 
-    /// <summary>Decodes a get-active-profile reply: slot = buffer91[9] (report arg[0]). A decoded
-    /// value outside 1..5 is Failed (wrong-layout guard, same idiom as ParseDpiReply/ParseProfileListReply).</summary>
+    /// <summary>Decodes a get-active-profile reply: slot = buffer91[9] (report arg[0]). Echo check
+    /// (same idiom as ParseButtonReply): the reply must echo class 0x05 / id 0x84 (GET), else Failed —
+    /// otherwise an accepted SET's reply (class 0x05, id 0x04, arg[0]=slot, status 0x02) would parse as
+    /// a successful GET read-back since both frames carry the slot at the same offset. A decoded
+    /// value outside 1..5 is also Failed (wrong-layout guard, same idiom as ParseDpiReply/ParseProfileListReply).</summary>
     public static ReplyResult ParseActiveProfileReply(byte[] buffer91, out byte slot)
     {
         slot = 0;
         var r = ValidateReply(buffer91);
         if (r != ReplyResult.Success) return r;
+        if (buffer91[7] != CommandClassProfile || buffer91[8] != CommandIdGetActiveProfile) return ReplyResult.Failed;
         byte s = buffer91[9];
         if (s < 1 || s > 5) return ReplyResult.Failed;
         slot = s;

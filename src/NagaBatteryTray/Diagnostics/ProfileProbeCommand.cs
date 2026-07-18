@@ -141,6 +141,14 @@ internal static class ProfileProbeCommand
             capture.Add(RenderInventory(before, "Inventory (before)"));
             PrintInventorySummary(before);
 
+            if (!before.Slots.All(slot => slot is >= 1 and <= 5))
+            {
+                string outOfRangeWhy = "inventory slot values out of range — wrong-layout list, aborting";
+                Console.WriteLine($"  ABORT: {outOfRangeWhy}");
+                capture.Add($"## Verdict\n**ABORTED:** {outOfRangeWhy} — no write attempted.");
+                return 0;
+            }
+
             byte activeSlotA = 0;
             var activeReply = session.Exchange(RazerProtocol.BuildGetActiveProfileBuffer(session.Tid));
             bool activeOk = activeReply is not null &&
@@ -175,35 +183,62 @@ internal static class ProfileProbeCommand
             bool consented = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
             Console.WriteLine();
             capture.Add($"- consent (send 0x05/0x04 arg[0]={b}): {(consented ? "YES" : "declined")}");
-            if (!consented) { Console.WriteLine("  declined - no write sent."); return 0; }
+            if (!consented)
+            {
+                Console.WriteLine("  declined - no write sent.");
+                capture.Add("## Verdict\n**DECLINED** — no write sent.");
+                Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");
+                return 0;
+            }
 
             var setReply1 = session.Exchange(RazerProtocol.BuildSetActiveProfileBuffer(session.Tid, b));
+            bool transportNull1 = setReply1 is null;
             byte status1 = setReply1 is not null ? setReply1[1] : (byte)0x00;
             bool ok1 = setReply1 is not null && status1 == 0x02;
             capture.Add(ok1
                 ? $"- SET 0x05/0x04 (ds01) arg[0]={b}: accepted (status=0x02)"
-                : $"- SET 0x05/0x04 (ds01) arg[0]={b}: REJECTED status=0x{status1:x2} (ds01 shape)");
-            Console.WriteLine(ok1 ? "  ds01 SET accepted (status=0x02)" : $"  ds01 SET REJECTED status=0x{status1:x2}");
+                : transportNull1
+                    ? $"- SET 0x05/0x04 (ds01) arg[0]={b}: NO REPLY (transport)"
+                    : $"- SET 0x05/0x04 (ds01) arg[0]={b}: REJECTED status=0x{status1:x2} (ds01 shape)");
+            Console.WriteLine(ok1
+                ? "  ds01 SET accepted (status=0x02)"
+                : transportNull1
+                    ? "  ds01 SET: NO REPLY (transport)"
+                    : $"  ds01 SET REJECTED status=0x{status1:x2}");
 
             byte workingDataSize = RazerProtocol.DataSizeProfileEdit;
             if (!ok1)
             {
                 var setReply2 = session.Exchange(RazerProtocol.BuildSetActiveProfileBuffer(session.Tid, b, RazerProtocol.DataSizeProfileList));
+                bool transportNull2 = setReply2 is null;
                 byte status2 = setReply2 is not null ? setReply2[1] : (byte)0x00;
                 bool ok2 = setReply2 is not null && status2 == 0x02;
                 capture.Add(ok2
                     ? $"- SET 0x05/0x04 (ds06 fallback) arg[0]={b}: accepted (status=0x02)"
-                    : $"- SET 0x05/0x04 (ds06 fallback) arg[0]={b}: REJECTED status=0x{status2:x2} (ds06 shape)");
-                Console.WriteLine(ok2 ? "  ds06 fallback SET accepted (status=0x02)" : $"  ds06 fallback SET REJECTED status=0x{status2:x2}");
+                    : transportNull2
+                        ? $"- SET 0x05/0x04 (ds06 fallback) arg[0]={b}: NO REPLY (transport)"
+                        : $"- SET 0x05/0x04 (ds06 fallback) arg[0]={b}: REJECTED status=0x{status2:x2} (ds06 shape)");
+                Console.WriteLine(ok2
+                    ? "  ds06 fallback SET accepted (status=0x02)"
+                    : transportNull2
+                        ? "  ds06 fallback SET: NO REPLY (transport)"
+                        : $"  ds06 fallback SET REJECTED status=0x{status2:x2}");
                 workingDataSize = RazerProtocol.DataSizeProfileList;
 
                 if (!ok2)
                 {
-                    string rejectVerdict = $"## Verdict\n**SET REJECTED** — command does not exist in these shapes " +
-                                            $"(ds01 status=0x{status1:x2}, ds06 status=0x{status2:x2}).";
-                    capture.Add(rejectVerdict);
-                    Console.WriteLine($"\n{rejectVerdict.Replace("## Verdict\n", "Verdict: ")}");
                     IntegrityRecheck(session, capture, before, "Integrity re-check (spec §4.5)");
+                    InputFeelPrompt(capture, "final");
+
+                    string abortVerdict = (transportNull1 || transportNull2)
+                        ? "## Verdict\n**INDETERMINATE** — transport failure, no conclusion about 0x05/0x04; re-run " +
+                          $"(ds01 {(transportNull1 ? "NO REPLY (transport)" : $"status=0x{status1:x2}")}, " +
+                          $"ds06 {(transportNull2 ? "NO REPLY (transport)" : $"status=0x{status2:x2}")})."
+                        : $"## Verdict\n**SET NOT ACCEPTED** — not accepted in these shapes on this run " +
+                          $"(ds01 status=0x{status1:x2}, ds06 status=0x{status2:x2}).";
+                    capture.Add(abortVerdict);
+                    Console.WriteLine($"\n{abortVerdict.Replace("## Verdict\n", "Verdict: ")}");
+                    Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");
                     return 0;
                 }
             }
@@ -280,13 +315,22 @@ internal static class ProfileProbeCommand
             Console.WriteLine();
             capture.Add($"- LED confirm restore (expected slot {activeSlotA}, {ColourFor(activeSlotA)}): {(ledA ? "YES matches" : "no / not observed")}");
 
+            bool restoreConfirmed = restoreOk && restoreRbOk && restoreRbSlot == activeSlotA && ledA;
+            if (!restoreConfirmed)
+                Console.WriteLine($"  the mouse may still be on slot {b} — press the BOTTOM button until the LED shows {ColourFor(activeSlotA)}");
+
             IntegrityRecheck(session, capture, before, "Integrity re-check (spec §4.5)");
             InputFeelPrompt(capture, "final");
 
             string finalVerdict;
             if (rbOk && rbSlot == b && ledB)
             {
-                string persistClause = persistedAcrossCycle == true ? " + persisted across power-cycle" : "";
+                string persistClause = persistedAcrossCycle switch
+                {
+                    true => " + persisted across power-cycle",
+                    false => "; did NOT persist across power-cycle",
+                    null => "",
+                };
                 finalVerdict = $"## Verdict\n**SET-ACTIVE VERIFIED** (read-back + LED confirm{persistClause}).";
             }
             else if (!rbOk)
@@ -295,6 +339,9 @@ internal static class ProfileProbeCommand
                 finalVerdict = $"## Verdict\n**SET-ACTIVE FAILED** — read-back says slot {rbSlot} but slot {b} was requested; treat 0x05/0x04 as NOT set-active.";
             else
                 finalVerdict = $"## Verdict\n**SET-ACTIVE UNCONFIRMED** — read-back says slot {b} but the LED confirmation says otherwise (or wasn't observed) — treat 0x05/0x04 as NOT verified as set-active by physical ground truth.";
+
+            if (!restoreConfirmed)
+                finalVerdict += "; restore FAILED/unconfirmed — recover via bottom button";
 
             capture.Add(finalVerdict);
             Console.WriteLine($"\n{finalVerdict.Replace("## Verdict\n", "Verdict: ")}");
