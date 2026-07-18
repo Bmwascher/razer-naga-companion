@@ -146,8 +146,10 @@ zero-argument ds-0x06 form of class-0x05 ids 0x80..0x9f on this firmware.*
 - **Pass 2 is opt-in** with the residual-risk statement (§4.4); declining still yields the full
   inventory + pass-1 evidence.
 - **Input-feel check (hard gate)**: a recorded prompt — "move the mouse now; any stutter/lag?
-  [y/N]" — during the densest burst (mid pass 2 when it runs, otherwise mid pass 1) and again
-  after completion; both answers land in the capture, mirroring the Phase B spike's recorded check.
+  [y/N]" — fired mid-tour in **every pass that runs** (pass 1 can't know whether pass 2 will be
+  opted into, so each tour carries its own check; pass 2's sweep is the densest burst when it
+  happens) and again after completion; all answers land in the capture, mirroring the Phase B
+  spike's recorded check.
 - Standard pacing: busy-retry, configured SET→GET delay, one exchange at a time.
 
 ## 7. Code changes
