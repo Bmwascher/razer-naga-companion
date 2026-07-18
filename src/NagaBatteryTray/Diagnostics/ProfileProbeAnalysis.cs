@@ -6,6 +6,18 @@ namespace NagaBatteryTray.Diagnostics;
 /// onboard slot. Index = grid position - 1; null = that button's read failed.</summary>
 internal readonly record struct SlotActions(byte Slot, RawButtonAction?[] Actions);
 
+/// <summary>One candidate's replies (full 91-byte buffers) collected during one state visit
+/// (spec §5.1). The tour's last visit re-visits the first slot; AnalyzeCandidate enforces
+/// reproduction through the duplicated slot number.</summary>
+internal sealed record StateSamples(byte Slot, IReadOnlyList<byte[]> Replies);
+
+internal enum OffsetClass { Hit, Noise }
+
+/// <summary>A reply byte that varies across states. ReportOffset uses 90-byte report indexing
+/// (args live at report [8..87]); SlotToValue is the observed mapping (any encoding accepted —
+/// bijectivity is required, literal slot numbers are not).</summary>
+internal sealed record OffsetFinding(int ReportOffset, OffsetClass Class, IReadOnlyDictionary<byte, byte> SlotToValue);
+
 /// <summary>Pure analysis for --probe-profile (spec 2026-07-18 §4.3/§5.2): fingerprint selection
 /// and diff-across-states hit detection. No I/O — an analyzer bug must never force recollecting
 /// hardware evidence.</summary>
@@ -62,5 +74,36 @@ internal static class ProfileProbeAnalysis
     {
         var matches = inventory.Where(s => positions.All(p => SameAction(s.Actions[p - 1], observed[p - 1]))).ToList();
         return matches.Count == 1 ? matches[0].Slot : null;
+    }
+
+    /// <summary>Diff-across-states hit detection (spec §5.2). Hit = stable within every visit,
+    /// bijective slot→value over ≥ 2 slots, reproduced on the revisit. Varies-but-fails = Noise
+    /// (still reported — counters/echoes are worth seeing). Constant offsets are omitted.</summary>
+    internal static IReadOnlyList<OffsetFinding> AnalyzeCandidate(IReadOnlyList<StateSamples> visits)
+    {
+        var findings = new List<OffsetFinding>();
+        if (visits.Count == 0 ||
+            visits.Any(v => v.Replies.Count == 0 || v.Replies.Any(r => r.Length != RazerProtocol.BufferLength)))
+            return findings;
+
+        for (int off = 8; off <= 87; off++)
+        {
+            int b = off + 1; // buffer prepends the report id
+            bool stable = visits.All(v => v.Replies.All(r => r[b] == v.Replies[0][b]));
+            var visitValues = visits.Select(v => (v.Slot, Value: v.Replies[0][b])).ToList();
+            if (stable && visitValues.Select(x => x.Value).Distinct().Count() == 1) continue; // constant
+
+            var slotToValue = new Dictionary<byte, byte>();
+            bool reproduced = true;
+            foreach (var (slot, value) in visitValues)
+            {
+                if (slotToValue.TryGetValue(slot, out byte prior)) { if (prior != value) reproduced = false; }
+                else slotToValue[slot] = value;
+            }
+            bool bijective = slotToValue.Values.Distinct().Count() == slotToValue.Count && slotToValue.Count >= 2;
+            var cls = stable && reproduced && bijective ? OffsetClass.Hit : OffsetClass.Noise;
+            findings.Add(new OffsetFinding(off, cls, slotToValue));
+        }
+        return findings;
     }
 }

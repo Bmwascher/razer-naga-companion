@@ -96,4 +96,65 @@ public class ProfileProbeAnalysisTests
         var ambiguous = new List<SlotActions> { new(1, Row()), new(2, Row()) };
         Assert.Null(ProfileProbeAnalysis.MatchFingerprint(ambiguous, new[] { 3 }, Row()));
     }
+
+    /// <summary>91-byte reply with given (reportOffset, value) pairs set; buffer[i] = report[i-1].</summary>
+    private static byte[] ReplyAt(params (int ReportOffset, byte Value)[] set)
+    {
+        var buf = new byte[91];
+        buf[1] = 0x02; // status success at report[0]
+        foreach (var (off, v) in set) buf[off + 1] = v;
+        return buf;
+    }
+
+    private static StateSamples Visit(byte slot, byte value, byte value2nd = 0xff) =>
+        new(slot, new List<byte[]>
+        {
+            ReplyAt((20, value)),
+            ReplyAt((20, value2nd == 0xff ? value : value2nd)),
+        });
+
+    [Fact]
+    public void Analyze_finds_a_zero_based_hit_at_the_varying_offset()
+    {
+        var visits = new List<StateSamples> { Visit(1, 0x00), Visit(2, 0x01), Visit(3, 0x02), Visit(1, 0x00) };
+        var f = Assert.Single(ProfileProbeAnalysis.AnalyzeCandidate(visits));
+        Assert.Equal(20, f.ReportOffset);
+        Assert.Equal(OffsetClass.Hit, f.Class);
+        Assert.Equal((byte)0x01, f.SlotToValue[2]); // encoding is 0-based — accepted as-is
+    }
+
+    [Fact]
+    public void Analyze_accepts_bitmask_encodings()
+    {
+        var visits = new List<StateSamples> { Visit(1, 0x02), Visit(2, 0x04), Visit(3, 0x08), Visit(1, 0x02) };
+        Assert.Equal(OffsetClass.Hit, Assert.Single(ProfileProbeAnalysis.AnalyzeCandidate(visits)).Class);
+    }
+
+    [Fact]
+    public void Analyze_marks_revisit_mismatch_as_noise()
+    {
+        var visits = new List<StateSamples> { Visit(1, 0x10), Visit(2, 0x20), Visit(1, 0x30) };
+        Assert.Equal(OffsetClass.Noise, Assert.Single(ProfileProbeAnalysis.AnalyzeCandidate(visits)).Class);
+    }
+
+    [Fact]
+    public void Analyze_marks_non_bijective_mapping_as_noise()
+    {
+        var visits = new List<StateSamples> { Visit(1, 0x07), Visit(2, 0x07), Visit(3, 0x08), Visit(1, 0x07) };
+        Assert.Equal(OffsetClass.Noise, Assert.Single(ProfileProbeAnalysis.AnalyzeCandidate(visits)).Class);
+    }
+
+    [Fact]
+    public void Analyze_marks_instability_within_a_visit_as_noise()
+    {
+        var visits = new List<StateSamples> { Visit(1, 0x10, 0x11), Visit(2, 0x20), Visit(1, 0x10) };
+        Assert.Equal(OffsetClass.Noise, Assert.Single(ProfileProbeAnalysis.AnalyzeCandidate(visits)).Class);
+    }
+
+    [Fact]
+    public void Analyze_does_not_report_constant_offsets()
+    {
+        var visits = new List<StateSamples> { Visit(1, 0x42), Visit(2, 0x42), Visit(1, 0x42) };
+        Assert.Empty(ProfileProbeAnalysis.AnalyzeCandidate(visits));
+    }
 }
