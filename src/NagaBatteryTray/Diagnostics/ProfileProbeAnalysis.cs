@@ -13,10 +13,11 @@ internal sealed record StateSamples(byte Slot, IReadOnlyList<byte[]> Replies);
 
 internal enum OffsetClass { Hit, Noise }
 
-/// <summary>A reply byte that varies across states. ReportOffset uses 90-byte report indexing
-/// (args live at report [8..87]); SlotToValue is the observed mapping (any encoding accepted —
-/// bijectivity is required, literal slot numbers are not).</summary>
-internal sealed record OffsetFinding(int ReportOffset, OffsetClass Class, IReadOnlyDictionary<byte, byte> SlotToValue);
+/// <summary>A reply span that varies across states. ReportOffset uses 90-byte report indexing
+/// (args live at report [8..87]); Length is 1 (single byte, value = the byte) or 2 (adjacent pair,
+/// value = big-endian first&lt;&lt;8 | second). SlotToValue is the observed mapping (any encoding
+/// accepted — bijectivity is required, literal slot numbers are not).</summary>
+internal sealed record OffsetFinding(int ReportOffset, int Length, OffsetClass Class, IReadOnlyDictionary<byte, int> SlotToValue);
 
 /// <summary>Pure analysis for --probe-profile (spec 2026-07-18 §4.3/§5.2): fingerprint selection
 /// and diff-across-states hit detection. No I/O — an analyzer bug must never force recollecting
@@ -78,7 +79,10 @@ internal static class ProfileProbeAnalysis
 
     /// <summary>Diff-across-states hit detection (spec §5.2). Hit = stable within every visit,
     /// bijective slot→value over ≥ 2 slots, reproduced on the revisit. Varies-but-fails = Noise
-    /// (still reported — counters/echoes are worth seeing). Constant offsets are omitted.</summary>
+    /// (still reported — counters/echoes are worth seeing). Constant offsets are omitted.
+    /// After the per-byte pass, an adjacent-pair pass catches 2-byte encodings that are bijective
+    /// only as a tuple (each half alone fails per-byte bijectivity) — evaluated only where neither
+    /// byte alone already hit, so it only ever adds Hits, never pair-level Noise.</summary>
     internal static IReadOnlyList<OffsetFinding> AnalyzeCandidate(IReadOnlyList<StateSamples> visits)
     {
         var findings = new List<OffsetFinding>();
@@ -86,6 +90,7 @@ internal static class ProfileProbeAnalysis
             visits.Any(v => v.Replies.Count == 0 || v.Replies.Any(r => r.Length != RazerProtocol.BufferLength)))
             return findings;
 
+        var byteClass = new Dictionary<int, OffsetClass>(); // offsets that varied (produced a per-byte finding)
         for (int off = 8; off <= 87; off++)
         {
             int b = off + 1; // buffer prepends the report id
@@ -102,7 +107,32 @@ internal static class ProfileProbeAnalysis
             }
             bool bijective = slotToValue.Values.Distinct().Count() == slotToValue.Count && slotToValue.Count >= 2;
             var cls = stable && reproduced && bijective ? OffsetClass.Hit : OffsetClass.Noise;
-            findings.Add(new OffsetFinding(off, cls, slotToValue));
+            byteClass[off] = cls;
+            findings.Add(new OffsetFinding(off, 1, cls, slotToValue.ToDictionary(kv => kv.Key, kv => (int)kv.Value)));
+        }
+
+        for (int off = 8; off <= 86; off++)
+        {
+            bool aHit = byteClass.TryGetValue(off, out var ca) && ca == OffsetClass.Hit;
+            bool bHit = byteClass.TryGetValue(off + 1, out var cb) && cb == OffsetClass.Hit;
+            if (aHit || bHit) continue;
+            if (!byteClass.ContainsKey(off) && !byteClass.ContainsKey(off + 1)) continue; // neither byte varies
+
+            int b0 = off + 1, b1 = off + 2; // buffer indices for report offsets off, off+1
+            bool stable = visits.All(v => v.Replies.All(r => r[b0] == v.Replies[0][b0] && r[b1] == v.Replies[0][b1]));
+            if (!stable) continue;
+
+            var slotToValue = new Dictionary<byte, int>();
+            bool reproduced = true;
+            foreach (var v in visits)
+            {
+                int value = (v.Replies[0][b0] << 8) | v.Replies[0][b1];
+                if (slotToValue.TryGetValue(v.Slot, out int prior)) { if (prior != value) reproduced = false; }
+                else slotToValue[v.Slot] = value;
+            }
+            bool bijective = slotToValue.Values.Distinct().Count() == slotToValue.Count && slotToValue.Count >= 2;
+            if (reproduced && bijective)
+                findings.Add(new OffsetFinding(off, 2, OffsetClass.Hit, slotToValue));
         }
         return findings;
     }

@@ -85,9 +85,12 @@ an undocumented id is *probably* inert but unproven on this firmware.
 ### 4.5 Post-run integrity re-check
 
 After the last pass: re-read the profile list, device mode, and **all** per-slot bindings, and
-byte-compare against the §4.2 inventory. Any difference is printed loudly and recorded. This is the
-session's evidence that the nominally read-only run left every observable profile surface unchanged
-(it cannot *prevent* a misbehaving command — that's the §4.4 opt-in — but it detects one).
+byte-compare against the §4.2 inventory. Any difference is printed loudly and recorded. Results are
+classified as **proven changes** (both readings succeeded and differ) versus **inconclusive**
+observations (a surface that was readable before and is not after — missing evidence, not proof of
+change). This is the session's evidence that the nominally read-only run left every observable
+profile surface unchanged (it cannot *prevent* a misbehaving command — that's the §4.4 opt-in — but
+it detects one).
 
 ### 4.6 Report
 
@@ -117,9 +120,12 @@ Diff only the args region `[8..87]` of each reply — status/tid/envelope `[0..7
 3. **Reproduced** — the revisit state yields the starting state's value again.
 
 Offsets that vary but fail any rule are reported as *noise* (still captured — they may be counters
-or battery echoes worth knowing about). Multi-byte encodings register through their individually
-bijective bytes (adjacent hits); an encoding bijective only as a whole span surfaces as adjacent
-noise findings whose recorded per-state values allow manual identification in the capture.
+or battery echoes worth knowing about). Analysis runs in two passes: per-byte first, then an
+adjacent-pair pass over report offsets whose two constituent bytes neither one alone is a hit —
+evaluating the pair as a big-endian tuple under the same three rules. So a 2-byte encoding is
+detected automatically whether it happens to be bijective byte-by-byte or only as a tuple; only an
+exotic encoding spanning more than 2 bytes would fall back to manual inspection of the recorded
+per-byte noise values in the capture.
 
 ### 5.3 Candidate corpus
 

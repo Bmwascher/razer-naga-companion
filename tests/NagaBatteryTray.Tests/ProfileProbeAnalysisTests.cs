@@ -113,14 +113,20 @@ public class ProfileProbeAnalysisTests
             ReplyAt((20, value2nd == 0xff ? value : value2nd)),
         });
 
+    /// <summary>A state visit with two independent report offsets set (report offsets 20 and 21),
+    /// both samples identical (stable within the visit) — for adjacent-pair-span tests.</summary>
+    private static StateSamples VisitPair(byte slot, byte v20, byte v21) =>
+        new(slot, new List<byte[]> { ReplyAt((20, v20), (21, v21)), ReplyAt((20, v20), (21, v21)) });
+
     [Fact]
     public void Analyze_finds_a_zero_based_hit_at_the_varying_offset()
     {
         var visits = new List<StateSamples> { Visit(1, 0x00), Visit(2, 0x01), Visit(3, 0x02), Visit(1, 0x00) };
         var f = Assert.Single(ProfileProbeAnalysis.AnalyzeCandidate(visits));
         Assert.Equal(20, f.ReportOffset);
+        Assert.Equal(1, f.Length);
         Assert.Equal(OffsetClass.Hit, f.Class);
-        Assert.Equal((byte)0x01, f.SlotToValue[2]); // encoding is 0-based — accepted as-is
+        Assert.Equal(0x01, f.SlotToValue[2]); // encoding is 0-based — accepted as-is
     }
 
     [Fact]
@@ -156,5 +162,45 @@ public class ProfileProbeAnalysisTests
     {
         var visits = new List<StateSamples> { Visit(1, 0x42), Visit(2, 0x42), Visit(1, 0x42) };
         Assert.Empty(ProfileProbeAnalysis.AnalyzeCandidate(visits));
+    }
+
+    [Fact]
+    public void Analyze_finds_an_adjacent_pair_hit_when_neither_byte_alone_is_bijective()
+    {
+        // slot1 (0x00,0x00), slot2 (0x00,0x01), slot3 (0x01,0x00), revisit slot1 (0x00,0x00):
+        // report[20] alone is {1:0x00, 2:0x00, 3:0x01} (slots 1&2 collide) and report[21] alone is
+        // {1:0x00, 2:0x01, 3:0x00} (slots 1&3 collide) — neither byte is bijective on its own, but
+        // the (20,21) tuple is: {1:0x0000, 2:0x0001, 3:0x0100}.
+        var visits = new List<StateSamples>
+        {
+            VisitPair(1, 0x00, 0x00), VisitPair(2, 0x00, 0x01), VisitPair(3, 0x01, 0x00), VisitPair(1, 0x00, 0x00),
+        };
+        var findings = ProfileProbeAnalysis.AnalyzeCandidate(visits);
+
+        Assert.DoesNotContain(findings, f => f.Length == 1 && f.Class == OffsetClass.Hit);
+        var hit = Assert.Single(findings, f => f.Class == OffsetClass.Hit);
+        Assert.Equal(20, hit.ReportOffset);
+        Assert.Equal(2, hit.Length);
+        Assert.Equal(3, hit.SlotToValue.Count);
+        Assert.Equal(0x0000, hit.SlotToValue[1]);
+        Assert.Equal(0x0001, hit.SlotToValue[2]);
+        Assert.Equal(0x0100, hit.SlotToValue[3]);
+
+        // the two per-byte findings still surface, just as Noise (filtered by Class).
+        Assert.Equal(2, findings.Count(f => f.Length == 1 && f.Class == OffsetClass.Noise));
+    }
+
+    [Fact]
+    public void Analyze_pair_span_is_not_a_hit_when_the_tuple_is_not_bijective()
+    {
+        // same shape as the positive test, but slot3 (0x00,0x01) duplicates slot2's tuple -> no
+        // bijective pair, so no hit of any length (only per-byte noise).
+        var visits = new List<StateSamples>
+        {
+            VisitPair(1, 0x00, 0x00), VisitPair(2, 0x00, 0x01), VisitPair(3, 0x00, 0x01), VisitPair(1, 0x00, 0x00),
+        };
+        var findings = ProfileProbeAnalysis.AnalyzeCandidate(visits);
+
+        Assert.DoesNotContain(findings, f => f.Class == OffsetClass.Hit);
     }
 }

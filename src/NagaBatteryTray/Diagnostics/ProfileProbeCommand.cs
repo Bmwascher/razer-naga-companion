@@ -94,12 +94,16 @@ internal static class ProfileProbeCommand
         else
         {
             var after = ReadInventory(s);
-            var diffs = CompareInventories(inv, after);
+            var (changed, inconclusive) = CompareInventories(inv, after);
             capture.Add(RenderInventory(after, "Inventory (after)"));
-            capture.Add(diffs.Count == 0
-                ? "## Integrity re-check\nUNCHANGED - every observable profile surface byte-identical to the pre-run inventory."
-                : "## Integrity re-check\n**CHANGED:** " + string.Join("; ", diffs));
-            Console.WriteLine(diffs.Count == 0 ? "  UNCHANGED - all profile surfaces byte-identical." : $"  **CHANGED:** {string.Join("; ", diffs)}");
+            string block = changed.Count == 0 && inconclusive.Count == 0
+                ? "UNCHANGED - every observable profile surface byte-identical to the pre-run inventory."
+                : changed.Count > 0
+                    ? "**CHANGED:** " + string.Join("; ", changed) +
+                      (inconclusive.Count > 0 ? "; inconclusive: " + string.Join("; ", inconclusive) : "")
+                    : "**INCONCLUSIVE:** " + string.Join("; ", inconclusive) + " (no byte evidence of change)";
+            capture.Add($"## Integrity re-check\n{block}");
+            Console.WriteLine($"  {block}");
         }
 
         InputFeelPrompt(capture, "final");
@@ -108,7 +112,7 @@ internal static class ProfileProbeCommand
             ? $"## Verdict\n**ABORTED** during {abortedDuring} — partial evidence only; no verdict on the corpus."
             : hits.Count > 0
                 ? "## Verdict\n**HIT:** " + string.Join("; ", hits.Select(h =>
-                      $"{h.Cand.Key} report[{h.Hit.ReportOffset}] ({string.Join(", ", h.Hit.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->0x{kv.Value:x2}"))})"))
+                      $"{h.Cand.Key} {OffsetLabel(h.Hit)} ({string.Join(", ", h.Hit.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->{ValueHex(h.Hit, kv.Value)}"))})"))
                   + "\nFollow-up: teach RazerDevice/BatteryMonitor the read; event-driven only (no polling)."
                 : "## Verdict\nNO HIT in the enumerated corpus (see corpus tables above for the exact shapes tried). " +
                   "The Profile card keeps the effective-action inference.";
@@ -435,9 +439,18 @@ internal static class ProfileProbeCommand
         return sb.ToString();
     }
 
+    /// <summary>Label/value formatting for an OffsetFinding, length-aware: a single byte reads as
+    /// report[N] / 0x{v:x2}, an adjacent pair as report[N..N+1] / 0x{v:x4}.</summary>
+    private static string OffsetLabel(OffsetFinding f) =>
+        f.Length == 1 ? $"report[{f.ReportOffset}]" : $"report[{f.ReportOffset}..{f.ReportOffset + 1}]";
+
+    private static string ValueHex(OffsetFinding f, int value) =>
+        f.Length == 1 ? $"0x{value:x2}" : $"0x{value:x4}";
+
     /// <summary>Runs the pure analyzer per candidate and records the outcome. Only candidates whose
-    /// every sample answered status 0x02 are analyzable (a failure reply's body is typically the
-    /// echoed request — diffing it would manufacture noise).</summary>
+    /// every sample answered status 0x02 with a valid CRC are analyzable (a failure reply's body is
+    /// typically the echoed request, and a CRC-bad reply is corrupt evidence — diffing either would
+    /// manufacture noise).</summary>
     private static List<(ProbeCandidate Cand, OffsetFinding Hit)> AnalyzeAndRecord(
         ProfileCapture capture, IReadOnlyList<ProbeCandidate> corpus, List<VisitRecord> visits, string passName)
     {
@@ -450,12 +463,12 @@ internal static class ProfileProbeCommand
             foreach (var v in visits)
             {
                 var samples = v.Replies[cand.Key];
-                if (samples.Any(r => r.Length != RazerProtocol.BufferLength || r[1] != 0x02)) { complete = false; break; }
+                if (samples.Any(r => r.Length != RazerProtocol.BufferLength || r[1] != 0x02 || !CrcOk(r))) { complete = false; break; }
                 states.Add(new StateSamples(v.EffectiveSlot, samples));
             }
             if (!complete)
             {
-                sb.AppendLine($"- {cand.Key}: not analyzable (missing/non-success replies — see visit tables)");
+                sb.AppendLine($"- {cand.Key}: not analyzable (missing/non-success/CRC-invalid replies — see visit tables)");
                 if (cand.CommandId == RazerProtocol.CommandIdGetProfileList && cand.Status == "hardware-verified")
                     sb.AppendLine("  - **WARNING: the hardware-verified control did not answer cleanly — treat this run as suspect.**");
                 continue;
@@ -465,8 +478,8 @@ internal static class ProfileProbeCommand
             if (findings.Count == 0) sb.AppendLine($"- {cand.Key}: all reply bytes constant across states");
             foreach (var f in findings)
             {
-                string map = string.Join(", ", f.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->0x{kv.Value:x2}"));
-                sb.AppendLine($"- {cand.Key} report[{f.ReportOffset}]: **{f.Class}** ({map})");
+                string map = string.Join(", ", f.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->{ValueHex(f, kv.Value)}"));
+                sb.AppendLine($"- {cand.Key} {OffsetLabel(f)}: **{f.Class}** ({map})");
                 if (f.Class == OffsetClass.Hit)
                 {
                     if (cand.Status == "hardware-verified" && cand.CommandId == RazerProtocol.CommandIdGetProfileList)
@@ -479,37 +492,45 @@ internal static class ProfileProbeCommand
         return hits;
     }
 
-    /// <summary>Spec §4.5: byte-compare the observable profile surfaces before vs after. The
-    /// profile-0 read-through view is deliberately excluded — it legitimately follows the active slot.</summary>
-    private static List<string> CompareInventories(InventorySnapshot before, InventorySnapshot after)
+    /// <summary>Spec §4.5: byte-compare the observable profile surfaces before vs after, separating
+    /// proven changes from inconclusive observations (an unreadable-after surface is missing
+    /// evidence, not proof of a change). The profile-0 read-through view is deliberately excluded —
+    /// it legitimately follows the active slot. When the after-list itself is unreadable, per-slot
+    /// comparisons are skipped entirely (no after-list means no basis to say a slot went missing).</summary>
+    private static (List<string> Changed, List<string> Inconclusive) CompareInventories(InventorySnapshot before, InventorySnapshot after)
     {
-        var diffs = new List<string>();
+        var changed = new List<string>();
+        var inconclusive = new List<string>();
+
         if (before.ListOk && !after.ListOk)
-            diffs.Add("profile list unreadable after (inconclusive)");
+            inconclusive.Add("profile list unreadable after");
         else if (before.ListOk != after.ListOk || before.Capacity != after.Capacity || !before.Slots.SequenceEqual(after.Slots))
-            diffs.Add("profile list changed");
+            changed.Add("profile list changed");
 
         if (before.ModeOk && !after.ModeOk)
-            diffs.Add("device mode unreadable after (inconclusive)");
+            inconclusive.Add("device mode unreadable after");
         else if (before.ModeOk != after.ModeOk || before.Mode != after.Mode)
-            diffs.Add("device mode changed");
+            changed.Add("device mode changed");
 
-        foreach (var b in before.Rows)
+        if (after.ListOk)
         {
-            var a = after.Rows.FirstOrDefault(r => r.Slot == b.Slot);
-            if (a.Actions is null) { diffs.Add($"slot {b.Slot} missing after"); continue; }
-            for (int p = 1; p <= NagaV2ProButtons.Count; p++)
+            foreach (var b in before.Rows)
             {
-                var x = b.Actions[p - 1]; var y = a.Actions[p - 1];
-                bool same = (x is null && y is null) ||
-                    (x is { } xa && y is { } ya && xa.Category == ya.Category && xa.Data.SequenceEqual(ya.Data));
-                if (same) continue;
-                diffs.Add(x is not null && y is null
-                    ? $"slot {b.Slot} pos {p} unreadable after (inconclusive)"
-                    : $"slot {b.Slot} pos {p} changed");
+                var a = after.Rows.FirstOrDefault(r => r.Slot == b.Slot);
+                if (a.Actions is null) { changed.Add($"slot {b.Slot} missing after"); continue; }
+                for (int p = 1; p <= NagaV2ProButtons.Count; p++)
+                {
+                    var x = b.Actions[p - 1]; var y = a.Actions[p - 1];
+                    bool same = (x is null && y is null) ||
+                        (x is { } xa && y is { } ya && xa.Category == ya.Category && xa.Data.SequenceEqual(ya.Data));
+                    if (same) continue;
+                    if (x is not null && y is null) inconclusive.Add($"slot {b.Slot} pos {p} unreadable after");
+                    else if (x is null && y is not null) inconclusive.Add($"slot {b.Slot} pos {p} readable only after");
+                    else changed.Add($"slot {b.Slot} pos {p} changed");
+                }
             }
         }
-        return diffs;
+        return (changed, inconclusive);
     }
 
     // ---- capture ----
