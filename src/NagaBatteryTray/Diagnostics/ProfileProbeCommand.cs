@@ -33,7 +33,7 @@ internal static class ProfileProbeCommand
         var capture = new ProfileCapture(s.Pid, s.Tid, delay);
         Console.WriteLine($"Capture: {capture.StampedPath}\n");
 
-        Console.WriteLine("[1/2] Inventory (verified commands only)");
+        Console.WriteLine("[1/3] Inventory (verified commands only)");
         var inv = ReadInventory(s);
         capture.Add(RenderInventory(inv, "Inventory (before)"));
         PrintInventorySummary(inv);
@@ -50,7 +50,10 @@ internal static class ProfileProbeCommand
         {
             string why = $"only {inv.Slots.Length} existing slot(s): diff-across-states cannot discriminate (spec §5.1) - inventory-only run";
             Console.WriteLine($"  {why}");
-            capture.Add($"- {why}\n\n## Verdict\nINVENTORY ONLY - create a second onboard slot (e.g. via the dashboard) and re-run to hunt.");
+            string verdictLine = inv.ListOk
+                ? "INVENTORY ONLY - create a second onboard slot (e.g. via the dashboard) and re-run to hunt."
+                : "profile list UNREADABLE — cannot enumerate slots; re-run when the list answers";
+            capture.Add($"- {why}\n\n## Verdict\n{verdictLine}");
             return 0;
         }
 
@@ -58,6 +61,7 @@ internal static class ProfileProbeCommand
         var corpus1 = Shortlist();
         capture.Add(RenderCorpus(s, corpus1, "pass 1 (sourced shortlist)"));
         var visits1 = RunTour(s, capture, inv, fingerprint, corpus1, "pass 1");
+        string? abortedDuring = visits1 is null ? "pass 1" : null;
         var hits = visits1 is null
             ? new List<(ProbeCandidate Cand, OffsetFinding Hit)>()
             : AnalyzeAndRecord(capture, corpus1, visits1, "pass 1");
@@ -75,28 +79,39 @@ internal static class ProfileProbeCommand
                 var corpus2 = SweepCorpus(corpus1);
                 capture.Add(RenderCorpus(s, corpus2, "pass 2 (blind sweep, opt-in)"));
                 var visits2 = RunTour(s, capture, inv, fingerprint, corpus2, "pass 2");
-                if (visits2 is not null) hits = AnalyzeAndRecord(capture, corpus2, visits2, "pass 2");
+                if (visits2 is null) abortedDuring = "pass 2";
+                else hits = AnalyzeAndRecord(capture, corpus2, visits2, "pass 2");
             }
             else capture.Add("- pass 2: declined by user (recorded)");
         }
 
         Console.WriteLine("\n[3/3] Integrity re-check (spec §4.5)");
-        var after = ReadInventory(s);
-        var diffs = CompareInventories(inv, after);
-        capture.Add(RenderInventory(after, "Inventory (after)"));
-        capture.Add(diffs.Count == 0
-            ? "## Integrity re-check\nUNCHANGED - every observable profile surface byte-identical to the pre-run inventory."
-            : "## Integrity re-check\n**CHANGED:** " + string.Join("; ", diffs));
-        Console.WriteLine(diffs.Count == 0 ? "  UNCHANGED - all profile surfaces byte-identical." : $"  **CHANGED:** {string.Join("; ", diffs)}");
+        if (!s.Alive())
+        {
+            capture.Add("## Integrity re-check\nIMPOSSIBLE — device not answering (no evidence of change; re-run when it reconnects).");
+            Console.WriteLine("  IMPOSSIBLE - device not answering (no evidence of change; re-run when it reconnects).");
+        }
+        else
+        {
+            var after = ReadInventory(s);
+            var diffs = CompareInventories(inv, after);
+            capture.Add(RenderInventory(after, "Inventory (after)"));
+            capture.Add(diffs.Count == 0
+                ? "## Integrity re-check\nUNCHANGED - every observable profile surface byte-identical to the pre-run inventory."
+                : "## Integrity re-check\n**CHANGED:** " + string.Join("; ", diffs));
+            Console.WriteLine(diffs.Count == 0 ? "  UNCHANGED - all profile surfaces byte-identical." : $"  **CHANGED:** {string.Join("; ", diffs)}");
+        }
 
         InputFeelPrompt(capture, "final");
 
-        string verdict = hits.Count > 0
-            ? "## Verdict\n**HIT:** " + string.Join("; ", hits.Select(h =>
-                  $"{h.Cand.Key} report[{h.Hit.ReportOffset}] ({string.Join(", ", h.Hit.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->0x{kv.Value:x2}"))})"))
-              + "\nFollow-up: teach RazerDevice/BatteryMonitor the read; event-driven only (no polling)."
-            : "## Verdict\nNO HIT in the enumerated corpus (see corpus tables above for the exact shapes tried). " +
-              "The Profile card keeps the effective-action inference.";
+        string verdict = abortedDuring is not null
+            ? $"## Verdict\n**ABORTED** during {abortedDuring} — partial evidence only; no verdict on the corpus."
+            : hits.Count > 0
+                ? "## Verdict\n**HIT:** " + string.Join("; ", hits.Select(h =>
+                      $"{h.Cand.Key} report[{h.Hit.ReportOffset}] ({string.Join(", ", h.Hit.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->0x{kv.Value:x2}"))})"))
+                  + "\nFollow-up: teach RazerDevice/BatteryMonitor the read; event-driven only (no polling)."
+                : "## Verdict\nNO HIT in the enumerated corpus (see corpus tables above for the exact shapes tried). " +
+                  "The Profile card keeps the effective-action inference.";
         capture.Add(verdict);
         Console.WriteLine($"\n{verdict.Replace("## Verdict\n", "Verdict: ")}");
         Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");
@@ -321,8 +336,10 @@ internal static class ProfileProbeCommand
                 Console.WriteLine($"  WARNING: fingerprint says slot {o}, LED typed {typed} - recording both; analysis uses {o}.");
 
             var byCandidate = new Dictionary<string, List<byte[]>>();
-            foreach (var cand in corpus)
+            for (int idx = 0; idx < corpus.Count; idx++)
             {
+                var cand = corpus[idx];
+                Console.WriteLine($"    {cand.Key} ({idx + 1}/{corpus.Count})...");
                 if (!s.Alive())
                 {
                     capture.Add($"- **ABORT** during {passName} visit {i + 1} ({cand.Key}): battery sentinel went silent (spec §6). Partial evidence above stands.");
@@ -381,9 +398,19 @@ internal static class ProfileProbeCommand
                 var r = v.Replies[cand.Key][i];
                 sb.AppendLine(r.Length == 0
                     ? $"- {cand.Key} sample {i + 1}: NO REPLY (transport)"
-                    : $"- {cand.Key} sample {i + 1}: status=0x{r[1]:x2} [{ProbeCommand.Hex(r, 91)}]");
+                    : $"- {cand.Key} sample {i + 1}: status=0x{r[1]:x2} crc={(CrcOk(r) ? "ok" : "BAD")} [{ProbeCommand.Hex(r, 91)}]");
             }
         return sb.ToString();
+    }
+
+    /// <summary>Same CRC check RazerProtocol.ValidateReply applies to a reply (private there): XOR of
+    /// buffer[3..88] inclusive vs buffer[89]. Reimplemented here since this file only sees the public
+    /// surface (spec §5.3 read-only boundary).</summary>
+    private static bool CrcOk(byte[] r)
+    {
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= r[i];
+        return crc == r[89];
     }
 
     private static void InputFeelPrompt(ProfileCapture capture, string when)
@@ -426,7 +453,13 @@ internal static class ProfileProbeCommand
                 if (samples.Any(r => r.Length != RazerProtocol.BufferLength || r[1] != 0x02)) { complete = false; break; }
                 states.Add(new StateSamples(v.EffectiveSlot, samples));
             }
-            if (!complete) { sb.AppendLine($"- {cand.Key}: not analyzable (missing/non-success replies — see visit tables)"); continue; }
+            if (!complete)
+            {
+                sb.AppendLine($"- {cand.Key}: not analyzable (missing/non-success replies — see visit tables)");
+                if (cand.CommandId == RazerProtocol.CommandIdGetProfileList && cand.Status == "hardware-verified")
+                    sb.AppendLine("  - **WARNING: the hardware-verified control did not answer cleanly — treat this run as suspect.**");
+                continue;
+            }
 
             var findings = ProfileProbeAnalysis.AnalyzeCandidate(states);
             if (findings.Count == 0) sb.AppendLine($"- {cand.Key}: all reply bytes constant across states");
@@ -451,9 +484,16 @@ internal static class ProfileProbeCommand
     private static List<string> CompareInventories(InventorySnapshot before, InventorySnapshot after)
     {
         var diffs = new List<string>();
-        if (before.ListOk != after.ListOk || before.Capacity != after.Capacity || !before.Slots.SequenceEqual(after.Slots))
+        if (before.ListOk && !after.ListOk)
+            diffs.Add("profile list unreadable after (inconclusive)");
+        else if (before.ListOk != after.ListOk || before.Capacity != after.Capacity || !before.Slots.SequenceEqual(after.Slots))
             diffs.Add("profile list changed");
-        if (before.ModeOk != after.ModeOk || before.Mode != after.Mode) diffs.Add("device mode changed");
+
+        if (before.ModeOk && !after.ModeOk)
+            diffs.Add("device mode unreadable after (inconclusive)");
+        else if (before.ModeOk != after.ModeOk || before.Mode != after.Mode)
+            diffs.Add("device mode changed");
+
         foreach (var b in before.Rows)
         {
             var a = after.Rows.FirstOrDefault(r => r.Slot == b.Slot);
@@ -463,7 +503,10 @@ internal static class ProfileProbeCommand
                 var x = b.Actions[p - 1]; var y = a.Actions[p - 1];
                 bool same = (x is null && y is null) ||
                     (x is { } xa && y is { } ya && xa.Category == ya.Category && xa.Data.SequenceEqual(ya.Data));
-                if (!same) diffs.Add($"slot {b.Slot} pos {p} changed");
+                if (same) continue;
+                diffs.Add(x is not null && y is null
+                    ? $"slot {b.Slot} pos {p} unreadable after (inconclusive)"
+                    : $"slot {b.Slot} pos {p} changed");
             }
         }
         return diffs;
@@ -483,7 +526,7 @@ internal static class ProfileProbeCommand
         public ProfileCapture(int pid, byte tid, int delayMs)
         {
             StampedPath = Path.Combine(Dir, $"probe-profile-{DateTime.Now:yyyyMMdd-HHmmss}.md");
-            string ver = typeof(ProfileProbeCommand).Assembly.GetName().Version?.ToString() ?? "?";
+            string ver = (Attribute.GetCustomAttribute(typeof(ProfileProbeCommand).Assembly, typeof(System.Reflection.AssemblyInformationalVersionAttribute)) as System.Reflection.AssemblyInformationalVersionAttribute)?.InformationalVersion ?? typeof(ProfileProbeCommand).Assembly.GetName().Version?.ToString() ?? "?";
             _blocks.Add(
                 "# --probe-profile capture\n\n" +
                 $"- date: {DateTime.Now:yyyy-MM-dd HH:mm}\n" +
