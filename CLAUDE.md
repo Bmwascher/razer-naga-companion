@@ -222,6 +222,11 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
   Settings window: instant-apply button remap chips with undo, DPI presets, a Profile liveness card,
   and a tray battery-level ring (shipped 2026-07-11); see
   `docs/superpowers/specs/2026-07-11-naga-gui-redesign-design.md`.
+- [ ] Profile probing — read-only `--probe-profile` spike (next after the GUI branch merges).
+- [ ] DPI stages + polling rate — program the onboard 5-stage DPI table (+ stage up/down) and
+  polling-rate get/set; both openrazer-validated commands, write-on-action only (ordered 2026-07-17).
+- [ ] Lighting (last) — thumb-grid / scroll-wheel zone effects + brightness, theme-sync candidate;
+  openrazer class 0x03/0x0F matrix commands.
 
 ## Conventions
 TDD, DRY, YAGNI, surgical changes, conventional-commit messages, frequent commits. Read the FULL
