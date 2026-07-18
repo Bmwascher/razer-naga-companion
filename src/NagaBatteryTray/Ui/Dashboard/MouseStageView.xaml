@@ -14,7 +14,7 @@
          "press a key…" swaps in while capturing, and a failed write turns the key-box red
          with the failure message as its tooltip. -->
     <DataTemplate x:Key="ChipTemplate">
-      <Border Margin="0,2" MinWidth="150" Padding="8,4"
+      <Border Margin="0,2" MinWidth="150" Padding="8,5"
               RenderTransformOrigin="0.5,0.5"
               MouseEnter="OnChipEnter" MouseLeave="OnChipLeave" Cursor="Hand"
               Focusable="True" KeyboardNavigation.IsTabStop="True"
@@ -34,12 +34,20 @@
               <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
               </DataTrigger>
+              <!-- engaged row expands (capture / undo window / keyboard focus) so its
+                   contents read at full size; hover deliberately does NOT expand - browsing
+                   the list shouldn't make rows jump -->
               <DataTrigger Binding="{Binding IsCapturing}" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
                 <Setter Property="Background" Value="{DynamicResource App.AccentSoft}"/>
+                <Setter Property="Padding" Value="10,9"/>
+              </DataTrigger>
+              <DataTrigger Binding="{Binding CanUndo}" Value="True">
+                <Setter Property="Padding" Value="10,9"/>
               </DataTrigger>
               <Trigger Property="IsKeyboardFocusWithin" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+                <Setter Property="Padding" Value="10,9"/>
               </Trigger>
             </Style.Triggers>
           </Style>
@@ -50,10 +58,10 @@
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Style="{DynamicResource LabelText}" FontSize="11"
+          <TextBlock Grid.Column="0" Style="{DynamicResource LabelText}" FontSize="12"
                      Text="{Binding Label}" VerticalAlignment="Center"/>
           <Grid Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center">
-            <Border BorderThickness="1,1,1,2" CornerRadius="4" Padding="6,1"
+            <Border BorderThickness="1,1,1,2" CornerRadius="4" Padding="7,2"
                     Background="{DynamicResource App.ChipFill}">
               <Border.Style>
                 <Style TargetType="Border">
@@ -72,9 +80,18 @@
                 <TextBlock.Style>
                   <Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
                     <Setter Property="Text" Value="{Binding BindingText}"/>
+                    <Setter Property="FontSize" Value="13"/>
                     <Style.Triggers>
                       <DataTrigger Binding="{Binding IsCapturing}" Value="True">
                         <Setter Property="Text" Value="press a key…"/>
+                        <Setter Property="FontSize" Value="15"/>
+                      </DataTrigger>
+                      <DataTrigger Binding="{Binding CanUndo}" Value="True">
+                        <Setter Property="FontSize" Value="15"/>
+                      </DataTrigger>
+                      <!-- AncestorLevel=2: level 1 is this key-box's own Border, level 2 the row -->
+                      <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=Border, AncestorLevel=2}}" Value="True">
+                        <Setter Property="FontSize" Value="15"/>
                       </DataTrigger>
                     </Style.Triggers>
                   </Style>
@@ -108,8 +125,13 @@
           </Grid>
           <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
             <StackPanel.Style>
+              <!-- Collapsed, not Hidden: Hidden reserved the cluster's width in every row and
+                   squeezed the key-box into trimming. The key-box is left-anchored, so the
+                   icons appearing in the empty right space shifts nothing. Last trigger wins:
+                   while capturing the cluster stays collapsed - actions are noise mid-capture
+                   and "press a key…" needs the width. -->
               <Style TargetType="StackPanel">
-                <Setter Property="Visibility" Value="Hidden"/>
+                <Setter Property="Visibility" Value="Collapsed"/>
                 <Style.Triggers>
                   <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Border}}" Value="True">
                     <Setter Property="Visibility" Value="Visible"/>
@@ -120,10 +142,13 @@
                   <DataTrigger Binding="{Binding CanUndo}" Value="True">
                     <Setter Property="Visibility" Value="Visible"/>
                   </DataTrigger>
+                  <DataTrigger Binding="{Binding IsCapturing}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                  </DataTrigger>
                 </Style.Triggers>
               </Style>
             </StackPanel.Style>
-            <Button Content="↶" ToolTip="Undo" Click="OnUndo" FontSize="12" Padding="5,0"
+            <Button Content="↶" ToolTip="Undo" Click="OnUndo" FontSize="13" Padding="0,1" Width="28"
                     Visibility="{Binding CanUndo, Converter={StaticResource BoolToVis}}">
               <Button.Style>
                 <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
@@ -145,8 +170,30 @@
                 </Style>
               </Button.Style>
             </Button>
-            <Button Content="⊘" ToolTip="Disable" Click="OnDisable" FontSize="12" Padding="5,0" Margin="3,0,0,0"/>
-            <Button Content="⟲" ToolTip="Default" Click="OnDefault" FontSize="12" Padding="5,0" Margin="3,0,0,0"/>
+            <!-- during the undo window only ↶ shows - undo is the salient act, and the
+                 expanded 15px binding text needs the width; both return after the 5s window -->
+            <Button Content="⊘" ToolTip="Disable" Click="OnDisable" FontSize="13" Padding="0,1" Width="28" Margin="3,0,0,0">
+              <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding CanUndo}" Value="True">
+                      <Setter Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Button.Style>
+            </Button>
+            <Button Content="⟲" ToolTip="Default" Click="OnDefault" FontSize="13" Padding="0,1" Width="28" Margin="3,0,0,0">
+              <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding CanUndo}" Value="True">
+                      <Setter Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Button.Style>
+            </Button>
           </StackPanel>
         </Grid>
       </Border>
@@ -155,9 +202,9 @@
 
   <Grid>
     <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="180"/>
+      <ColumnDefinition Width="200"/>
       <ColumnDefinition Width="*"/>
-      <ColumnDefinition Width="180"/>
+      <ColumnDefinition Width="200"/>
       <ColumnDefinition Width="230"/>
     </Grid.ColumnDefinitions>
 
