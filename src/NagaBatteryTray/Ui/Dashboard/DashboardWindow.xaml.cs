@@ -40,13 +40,26 @@ public partial class DashboardWindow : FluentWindow
         { if (e.PropertyName == nameof(vm.StatusDotBrushKey)) UpdateDot(); };
         UpdateDot();
         // click-away cancels a live capture (spec §4.3); fires before a chip's MouseLeftButtonUp,
-        // so clicking another chip cancels this capture first, then starts its own
-        PreviewMouseDown += (_, _) =>
+        // so clicking another chip cancels this capture first, then starts its own. Clicks
+        // INSIDE the capturing row are exempt: its capture card carries full-size
+        // Disable/Default buttons, and cancelling on preview-down would collapse the card
+        // before the button's own Click could fire.
+        PreviewMouseDown += (_, e) =>
         {
-            if (_capturing is { } c && c.IsCapturing) c.CancelCapture();
+            if (_capturing is not { } c || !c.IsCapturing) { _capturing = null; return; }
+            for (var d = e.OriginalSource as DependencyObject; d is not null; d = ParentOf(d))
+                if (d is FrameworkElement { DataContext: CalloutViewModel dc } && ReferenceEquals(dc, c))
+                    return;
+            c.CancelCapture();
             _capturing = null;
         };
     }
+
+    /// <summary>Visual-tree parent that survives content elements (e.g. a Run inside a button).</summary>
+    private static DependencyObject? ParentOf(DependencyObject d) =>
+        d is Visual or System.Windows.Media.Media3D.Visual3D
+            ? VisualTreeHelper.GetParent(d)
+            : (d as FrameworkContentElement)?.Parent;
 
     private void UpdateDot() =>
         StatusDot.Fill = (Brush)FindResource(_vm.StatusDotBrushKey);

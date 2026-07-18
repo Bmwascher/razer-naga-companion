@@ -118,8 +118,12 @@ public partial class MouseStageView : UserControl
     }
 
     private void OnUndo(object s, RoutedEventArgs e) => _ = Vm(s).UndoAsync();
-    private void OnDisable(object s, RoutedEventArgs e) => _ = Vm(s).DisableAsync();
-    private void OnDefault(object s, RoutedEventArgs e) => _ = Vm(s).DefaultAsync();
+    // Disable/Default are also offered inside the capture card - resolve the capture first
+    // so the row doesn't stay armed after the write
+    private void OnDisable(object s, RoutedEventArgs e)
+    { var vm = Vm(s); vm.CancelCapture(); _ = vm.DisableAsync(); }
+    private void OnDefault(object s, RoutedEventArgs e)
+    { var vm = Vm(s); vm.CancelCapture(); _ = vm.DefaultAsync(); }
 
     private void OnDpiDragCompleted(object s, System.Windows.Controls.Primitives.DragCompletedEventArgs e) =>
         ApplyDpiRequested?.Invoke(((DashboardViewModel)DataContext).Dpi);

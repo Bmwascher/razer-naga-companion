@@ -58,6 +58,10 @@
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
           <TextBlock Grid.Column="0" Style="{DynamicResource LabelText}" FontSize="12"
                      Text="{Binding Label}" VerticalAlignment="Center"/>
           <Grid Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center">
@@ -194,6 +198,15 @@
                 </Style>
               </Button.Style>
             </Button>
+          </StackPanel>
+          <!-- capture card: while capturing the row grows into a card - "press a key…" up
+               top, and the alternative actions as full-size text buttons below (this is
+               the one moment you're choosing between key / Disable / Default) -->
+          <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"
+                      Margin="0,8,0,0"
+                      Visibility="{Binding IsCapturing, Converter={StaticResource BoolToVis}}">
+            <Button Content="Disable" Click="OnDisable" FontSize="12" Padding="10,3"/>
+            <Button Content="Default" Click="OnDefault" FontSize="12" Padding="10,3" Margin="6,0,0,0"/>
           </StackPanel>
         </Grid>
       </Border>
