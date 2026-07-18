@@ -212,4 +212,30 @@ public class ProfileProbeCommandTests
         Assert.DoesNotContain(changed, s => s.Contains("slot"));
         Assert.DoesNotContain(inconclusive, s => s.Contains("slot"));
     }
+
+    [Fact]
+    public void Both_unreadable_list_and_mode_produce_neither_classification()
+    {
+        var before = Snap(listOk: false, capacity: 0, slots: Array.Empty<byte>(), modeOk: false, mode: 0xff, rows: new List<SlotActions>());
+        var after = Snap(listOk: false, capacity: 0, slots: Array.Empty<byte>(), modeOk: false, mode: 0xff, rows: new List<SlotActions>());
+
+        var (changed, inconclusive) = ProfileProbeCommand.CompareInventories(before, after);
+
+        Assert.Empty(changed);
+        Assert.Empty(inconclusive);
+    }
+
+    [Fact]
+    public void Button_null_in_both_inventories_produces_neither_classification()
+    {
+        var before = Snap(listOk: true, capacity: 5, slots: OneSlot, modeOk: true, mode: 0x00,
+            rows: new List<SlotActions> { new(1, Row((3, null))) });
+        var after = Snap(listOk: true, capacity: 5, slots: OneSlot, modeOk: true, mode: 0x00,
+            rows: new List<SlotActions> { new(1, Row((3, null))) });
+
+        var (changed, inconclusive) = ProfileProbeCommand.CompareInventories(before, after);
+
+        Assert.Empty(changed);
+        Assert.Empty(inconclusive);
+    }
 }

@@ -1124,7 +1124,7 @@ files, not this document, for the shipped behavior:
    2-byte encodings bijective only as a pair); CRC-gated analyzability (a sample must be full-length,
    status-success, *and* CRC-valid to enter analysis); `CompareInventories` returns a
    `(Changed, Inconclusive)` pair instead of a flat diff list.
-3. **This wave** — symmetric readability classification in `CompareInventories` (a "changed" verdict
+3. **ceb4f13** — symmetric readability classification in `CompareInventories` (a "changed" verdict
    now requires both readings to have succeeded and differ; a one-sided readability flip in either
    direction is Inconclusive, never Changed — closing the gap where an unreadable-before →
    readable-after transition could masquerade as a proven change); the CRC-gated analyzability
