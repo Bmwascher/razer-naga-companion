@@ -46,7 +46,60 @@ internal static class ProfileProbeCommand
             ? "  fingerprint: none (slots not uniquely distinguishable) - LED-identified states only"
             : $"  fingerprint positions: [{string.Join(", ", fingerprint)}]\n");
 
-        Console.WriteLine("[2/2] Active-slot hunt: implemented in the next task (plan task 5).");
+        if (inv.Slots.Length < 2)
+        {
+            string why = $"only {inv.Slots.Length} existing slot(s): diff-across-states cannot discriminate (spec §5.1) - inventory-only run";
+            Console.WriteLine($"  {why}");
+            capture.Add($"- {why}\n\n## Verdict\nINVENTORY ONLY - create a second onboard slot (e.g. via the dashboard) and re-run to hunt.");
+            return 0;
+        }
+
+        Console.WriteLine("[2/3] Pass 1 - sourced shortlist");
+        var corpus1 = Shortlist();
+        capture.Add(RenderCorpus(s, corpus1, "pass 1 (sourced shortlist)"));
+        var visits1 = RunTour(s, capture, inv, fingerprint, corpus1, "pass 1");
+        var hits = visits1 is null
+            ? new List<(ProbeCandidate Cand, OffsetFinding Hit)>()
+            : AnalyzeAndRecord(capture, corpus1, visits1, "pass 1");
+
+        if (hits.Count == 0 && visits1 is not null)
+        {
+            Console.WriteLine("\nPass 1 found no active-slot read. Pass 2 blind-sweeps class-0x05 get ids 0x80..0x9f");
+            Console.WriteLine("(ds 0x06, zero args). RESIDUAL RISK (spec §4.4): reads are proven side-effect-free only");
+            Console.WriteLine("for verified ids; an undocumented id is probably inert but UNPROVEN on this firmware.");
+            Console.Write("Run pass 2? [y/N] ");
+            bool sweep = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
+            Console.WriteLine();
+            if (sweep)
+            {
+                var corpus2 = SweepCorpus(corpus1);
+                capture.Add(RenderCorpus(s, corpus2, "pass 2 (blind sweep, opt-in)"));
+                var visits2 = RunTour(s, capture, inv, fingerprint, corpus2, "pass 2");
+                if (visits2 is not null) hits = AnalyzeAndRecord(capture, corpus2, visits2, "pass 2");
+            }
+            else capture.Add("- pass 2: declined by user (recorded)");
+        }
+
+        Console.WriteLine("\n[3/3] Integrity re-check (spec §4.5)");
+        var after = ReadInventory(s);
+        var diffs = CompareInventories(inv, after);
+        capture.Add(RenderInventory(after, "Inventory (after)"));
+        capture.Add(diffs.Count == 0
+            ? "## Integrity re-check\nUNCHANGED - every observable profile surface byte-identical to the pre-run inventory."
+            : "## Integrity re-check\n**CHANGED:** " + string.Join("; ", diffs));
+        Console.WriteLine(diffs.Count == 0 ? "  UNCHANGED - all profile surfaces byte-identical." : $"  **CHANGED:** {string.Join("; ", diffs)}");
+
+        InputFeelPrompt(capture, "final");
+
+        string verdict = hits.Count > 0
+            ? "## Verdict\n**HIT:** " + string.Join("; ", hits.Select(h =>
+                  $"{h.Cand.Key} report[{h.Hit.ReportOffset}] ({string.Join(", ", h.Hit.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->0x{kv.Value:x2}"))})"))
+              + "\nFollow-up: teach RazerDevice/BatteryMonitor the read; event-driven only (no polling)."
+            : "## Verdict\nNO HIT in the enumerated corpus (see corpus tables above for the exact shapes tried). " +
+              "The Profile card keeps the effective-action inference.";
+        capture.Add(verdict);
+        Console.WriteLine($"\n{verdict.Replace("## Verdict\n", "Verdict: ")}");
+        Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");
         return 0;
     }
 
@@ -181,6 +234,239 @@ internal static class ProfileProbeCommand
             int readable = row.Actions.Count(a => a is not null);
             Console.WriteLine($"  slot {row.Slot}: {readable}/12 buttons read");
         }
+    }
+
+    // ---- hunt: candidates, state tour, analysis ----
+
+    /// <summary>A fully specified probe request (spec §5.3): shape + provenance. Status is
+    /// hardware-verified | documented | speculative.</summary>
+    private sealed record ProbeCandidate(string Key, byte CommandId, byte DataSize, byte[] Args, string Source, string Status);
+
+    /// <summary>Pass-1 corpus. 0x05/0x81 rides as the hardware-verified control — it must answer in
+    /// every state and must NOT track the slot (the existing-slot set doesn't change when the active
+    /// slot does). Candidates below the control were added by the plan's research step, each with a
+    /// readable source; if research found none, the control stands alone and pass 2 carries discovery.
+    /// Research (spec §5.3): openrazer/openrazer driver/razerchromacommon.c has ZERO class-0x05
+    /// (profile) commands of any kind (grepped every get_razer_report(0x05, ...) call site — none
+    /// exist; the file only builds classes 0x00/0x02/0x03/0x04/0x07/0x0E/0x0F), so that source
+    /// contributes nothing beyond the existing control. geezmolycos/razerqdhid documents three more
+    /// class-0x05 GETs: docs/cmd_profile-en.md plus the byte-exact reference implementation in
+    /// public/py/qdrazer/device.py + protocol.py (Report.new mirrors our own BuildReport/ComputeCrc
+    /// field-for-field: transaction id, data_size, command_class, command_id, XOR CRC over [2..87]).</summary>
+    private static List<ProbeCandidate> Shortlist() => new()
+    {
+        new("0x05/0x81 ds06 (control)", 0x81, 0x06, new byte[6], "Phase B spike 2026-07-11 (hardware)", "hardware-verified"),
+        new("0x05/0x80 ds01 (available-count control)", 0x80, 0x01, new byte[1],
+            "geezmolycos/razerqdhid public/py/qdrazer/device.py get_profile_available_count -> " +
+            "sr_with(0x0580, '>B') [class 0x05, id 0x80, data_size 1]; protocol.py Report.new", "documented"),
+        new("0x05/0x8a ds01 (total-count)", 0x8a, 0x01, new byte[1],
+            "geezmolycos/razerqdhid public/py/qdrazer/device.py get_profile_total_count -> " +
+            "sr_with(0x058a, '>B') [class 0x05, id 0x8a, data_size 1]; protocol.py Report.new", "documented"),
+        new("0x05/0x88 ds45 (profile-info: profile=0 direct, start=0)", 0x88, 0x45, new byte[] { 0x00, 0x00, 0x00 },
+            "geezmolycos/razerqdhid public/py/qdrazer/device.py get_profile_info -> " +
+            "sr_with(0x0588, '>BHH64s', profile.value, len(data)) [class 0x05, id 0x88, " +
+            "data_size = calcsize('>BHH64s') = 69 = 0x45; args[0]=profile, args[1..2]=start offset " +
+            "(big-endian u16), rest reply-shaped padding]; protocol.py Report.new", "documented"),
+    };
+
+    /// <summary>Pass-2 corpus (opt-in): class-0x05 ids 0x80..0x9f not already tried in this shape.
+    /// One declared shape — ds 0x06, six zero args, mirroring the verified class-0x05 get — so a
+    /// miss claims only "no hit for the zero-argument ds-0x06 form" (spec §5.3).</summary>
+    private static List<ProbeCandidate> SweepCorpus(IReadOnlyList<ProbeCandidate> tried)
+    {
+        var seen = tried.Select(c => (c.CommandId, c.DataSize)).ToHashSet();
+        var list = new List<ProbeCandidate>();
+        for (byte id = 0x80; id <= 0x9f; id++)
+            if (!seen.Contains((id, (byte)0x06)))
+                list.Add(new ProbeCandidate($"0x05/0x{id:x2} ds06", id, 0x06, new byte[6], "blind sweep (opt-in)", "speculative"));
+        return list;
+    }
+
+    private static string ColourFor(byte slot) => slot switch
+    {
+        1 => "white", 2 => "red", 3 => "green", 4 => "blue", 5 => "cyan", _ => "?" };
+
+    private sealed record VisitRecord(byte AskedSlot, byte TypedSlot, byte? OracleSlot,
+        Dictionary<string, List<byte[]>> Replies)
+    {
+        /// <summary>Slot identity for analysis: the fingerprint oracle when it resolved, else the
+        /// user's typed LED colour (spec §4.3 — LED-identified when no oracle exists).</summary>
+        public byte EffectiveSlot => OracleSlot ?? TypedSlot;
+    }
+
+    /// <summary>One full tour: every existing slot once, then a revisit of the first (spec §5.1);
+    /// 2 samples per candidate per state; battery sentinel before each candidate; capture
+    /// checkpointed after every completed state. Null = aborted (partial evidence already saved).</summary>
+    private static List<VisitRecord>? RunTour(ProfileSession s, ProfileCapture capture, InventorySnapshot inv,
+        int[]? fingerprint, IReadOnlyList<ProbeCandidate> corpus, string passName)
+    {
+        var order = inv.Slots.Concat(new[] { inv.Slots[0] }).ToArray();
+        var visits = new List<VisitRecord>();
+        for (int i = 0; i < order.Length; i++)
+        {
+            byte asked = order[i];
+            bool revisit = i == order.Length - 1;
+            Console.WriteLine($"\n[{passName}] Visit {i + 1}/{order.Length}{(revisit ? " (revisit)" : "")}: use the BOTTOM");
+            Console.WriteLine($"  button until the profile LED shows slot {asked} ({ColourFor(asked)}), then press Enter.");
+            Console.ReadLine();
+
+            byte typed = ReadTypedSlot();
+            if (typed != asked)
+            {
+                Console.WriteLine($"  typed {typed} but slot {asked} was requested - cycle again and retype.");
+                typed = ReadTypedSlot();
+            }
+            byte? oracle = fingerprint is null ? null : OracleRead(s, inv.Rows, fingerprint);
+            if (oracle is byte o && o != typed)
+                Console.WriteLine($"  WARNING: fingerprint says slot {o}, LED typed {typed} - recording both; analysis uses {o}.");
+
+            var byCandidate = new Dictionary<string, List<byte[]>>();
+            foreach (var cand in corpus)
+            {
+                if (!s.Alive())
+                {
+                    capture.Add($"- **ABORT** during {passName} visit {i + 1} ({cand.Key}): battery sentinel went silent (spec §6). Partial evidence above stands.");
+                    Console.WriteLine("  DEVICE STOPPED ANSWERING - aborting this pass (capture is checkpointed).");
+                    return null;
+                }
+                var samples = new List<byte[]>();
+                for (int rep = 0; rep < 2; rep++)
+                    samples.Add(s.Exchange(RazerProtocol.BuildProfileGetProbeBuffer(s.Tid, cand.CommandId, cand.DataSize, cand.Args))
+                                ?? Array.Empty<byte>());
+                byCandidate[cand.Key] = samples;
+            }
+
+            var visit = new VisitRecord(asked, typed, oracle, byCandidate);
+            visits.Add(visit);
+            capture.Add(RenderVisit(passName, i + 1, visit, corpus));
+            if (i == order.Length / 2) InputFeelPrompt(capture, $"mid {passName}");
+        }
+        return visits;
+    }
+
+    private static byte ReadTypedSlot()
+    {
+        Console.Write("  Which colour does the LED show? (1=white 2=red 3=green 4=blue 5=cyan): ");
+        while (true)
+        {
+            var k = Console.ReadKey(intercept: true);
+            if (k.KeyChar is >= '1' and <= '5') { Console.WriteLine(k.KeyChar); return (byte)(k.KeyChar - '0'); }
+        }
+    }
+
+    /// <summary>Effective-action read of the fingerprint positions via profile 0 — the
+    /// LED-independent oracle (spec §4.3).</summary>
+    private static byte? OracleRead(ProfileSession s, IReadOnlyList<SlotActions> inventory, int[] fingerprint)
+    {
+        var observed = new RawButtonAction?[NagaV2ProButtons.Count];
+        foreach (int pos in fingerprint)
+        {
+            byte id = NagaV2ProButtons.IdForPosition(pos);
+            var rep = s.Exchange(RazerProtocol.BuildGetButtonBuffer(s.Tid, RazerProtocol.ButtonProfileDirect, id, 0x00));
+            if (rep is not null && RazerProtocol.ParseButtonReply(rep, RazerProtocol.ButtonProfileDirect, id, 0x00,
+                    out byte catg, out byte[] data) == ReplyResult.Success)
+                observed[pos - 1] = new RawButtonAction(catg, data);
+        }
+        return ProfileProbeAnalysis.MatchFingerprint(inventory, fingerprint, observed);
+    }
+
+    private static string RenderVisit(string passName, int n, VisitRecord v, IReadOnlyList<ProbeCandidate> corpus)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"### {passName} visit {n}: asked slot {v.AskedSlot}, LED typed {v.TypedSlot}, " +
+                      $"oracle {(v.OracleSlot is byte o ? $"slot {o}" : "n/a")} -> analysis slot {v.EffectiveSlot}");
+        foreach (var cand in corpus)
+            for (int i = 0; i < v.Replies[cand.Key].Count; i++)
+            {
+                var r = v.Replies[cand.Key][i];
+                sb.AppendLine(r.Length == 0
+                    ? $"- {cand.Key} sample {i + 1}: NO REPLY (transport)"
+                    : $"- {cand.Key} sample {i + 1}: status=0x{r[1]:x2} [{ProbeCommand.Hex(r, 91)}]");
+            }
+        return sb.ToString();
+    }
+
+    private static void InputFeelPrompt(ProfileCapture capture, string when)
+    {
+        Console.Write($"\n  INPUT-FEEL CHECK ({when}, hard gate): move the mouse around now - any stutter/lag? [y/N] ");
+        bool lag = Console.ReadKey(intercept: true).Key == ConsoleKey.Y;
+        Console.WriteLine();
+        capture.Add($"- input-feel ({when}): {(lag ? "**LAG REPORTED**" : "clean")}");
+    }
+
+    private static string RenderCorpus(ProfileSession s, IReadOnlyList<ProbeCandidate> corpus, string title)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"## Corpus: {title}");
+        sb.AppendLine("| key | data_size | args | request (91-byte hex, first 16) | source | status |");
+        sb.AppendLine("|---|---|---|---|---|---|");
+        foreach (var c in corpus)
+        {
+            var req = RazerProtocol.BuildProfileGetProbeBuffer(s.Tid, c.CommandId, c.DataSize, c.Args);
+            sb.AppendLine($"| {c.Key} | 0x{c.DataSize:x2} | {ProbeCommand.Hex2(c.Args)} | {ProbeCommand.Hex(req, 16)} | {c.Source} | {c.Status} |");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>Runs the pure analyzer per candidate and records the outcome. Only candidates whose
+    /// every sample answered status 0x02 are analyzable (a failure reply's body is typically the
+    /// echoed request — diffing it would manufacture noise).</summary>
+    private static List<(ProbeCandidate Cand, OffsetFinding Hit)> AnalyzeAndRecord(
+        ProfileCapture capture, IReadOnlyList<ProbeCandidate> corpus, List<VisitRecord> visits, string passName)
+    {
+        var hits = new List<(ProbeCandidate, OffsetFinding)>();
+        var sb = new StringBuilder($"## Analysis: {passName}\n");
+        foreach (var cand in corpus)
+        {
+            var states = new List<StateSamples>();
+            bool complete = true;
+            foreach (var v in visits)
+            {
+                var samples = v.Replies[cand.Key];
+                if (samples.Any(r => r.Length != RazerProtocol.BufferLength || r[1] != 0x02)) { complete = false; break; }
+                states.Add(new StateSamples(v.EffectiveSlot, samples));
+            }
+            if (!complete) { sb.AppendLine($"- {cand.Key}: not analyzable (missing/non-success replies — see visit tables)"); continue; }
+
+            var findings = ProfileProbeAnalysis.AnalyzeCandidate(states);
+            if (findings.Count == 0) sb.AppendLine($"- {cand.Key}: all reply bytes constant across states");
+            foreach (var f in findings)
+            {
+                string map = string.Join(", ", f.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->0x{kv.Value:x2}"));
+                sb.AppendLine($"- {cand.Key} report[{f.ReportOffset}]: **{f.Class}** ({map})");
+                if (f.Class == OffsetClass.Hit)
+                {
+                    if (cand.Status == "hardware-verified" && cand.CommandId == RazerProtocol.CommandIdGetProfileList)
+                        sb.AppendLine("  - **WARNING: the control tracked the slot — treat this run as suspect.**");
+                    else hits.Add((cand, f));
+                }
+            }
+        }
+        capture.Add(sb.ToString());
+        return hits;
+    }
+
+    /// <summary>Spec §4.5: byte-compare the observable profile surfaces before vs after. The
+    /// profile-0 read-through view is deliberately excluded — it legitimately follows the active slot.</summary>
+    private static List<string> CompareInventories(InventorySnapshot before, InventorySnapshot after)
+    {
+        var diffs = new List<string>();
+        if (before.ListOk != after.ListOk || before.Capacity != after.Capacity || !before.Slots.SequenceEqual(after.Slots))
+            diffs.Add("profile list changed");
+        if (before.ModeOk != after.ModeOk || before.Mode != after.Mode) diffs.Add("device mode changed");
+        foreach (var b in before.Rows)
+        {
+            var a = after.Rows.FirstOrDefault(r => r.Slot == b.Slot);
+            if (a.Actions is null) { diffs.Add($"slot {b.Slot} missing after"); continue; }
+            for (int p = 1; p <= NagaV2ProButtons.Count; p++)
+            {
+                var x = b.Actions[p - 1]; var y = a.Actions[p - 1];
+                bool same = (x is null && y is null) ||
+                    (x is { } xa && y is { } ya && xa.Category == ya.Category && xa.Data.SequenceEqual(ya.Data));
+                if (!same) diffs.Add($"slot {b.Slot} pos {p} changed");
+            }
+        }
+        return diffs;
     }
 
     // ---- capture ----
