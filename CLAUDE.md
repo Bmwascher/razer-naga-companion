@@ -43,7 +43,8 @@ The SDK is at `%LOCALAPPDATA%\Microsoft\dotnet` (not on PATH; `DOTNET_ROOT` set 
   `.\scripts\uninstall.ps1` reverses it (leaves `%APPDATA%\NagaBatteryTray\settings.json`).
 - HID diagnostics: `NagaBatteryTray.exe --probe` (battery), `--probe-dpi` (raw DPI reply offsets),
   `--probe-buttons` (remap spike: acceptance/grid-discovery/persistence; `--reset` restores recorded
-  actions, `--slot-test` re-runs the scratch-slot persistence test).
+  actions, `--slot-test` re-runs the scratch-slot persistence test), `--probe-profile` (read-only
+  profile inventory + active-slot read hunt; capture to `%APPDATA%\NagaBatteryTray\probe-profile-*.md`).
 - Solution is `NagaBatteryTray.slnx` (XML format, not `.sln`). No `global.json` (SDK unpinned),
   no CI, no `.editorconfig` — verification is local `dotnet test` only.
 

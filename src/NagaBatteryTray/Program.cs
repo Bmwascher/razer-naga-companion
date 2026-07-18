@@ -39,6 +39,12 @@ internal static class Program
                 : Diagnostics.ProbeCommand.RunButtons();
         }
 
+        if (args.Length > 0 && args[0] == "--probe-profile")
+        {
+            AllocConsoleIfNeeded();
+            return Diagnostics.ProfileProbeCommand.Run();
+        }
+
         // Headless run-at-login registration (used by install.ps1). Registers a
         // delayed logon scheduled task pointing at this exe, then exits.
         if (args.Length > 0 && args[0] == "--enable-startup")

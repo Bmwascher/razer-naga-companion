@@ -561,13 +561,15 @@ public static class ProbeCommand
         return null;
     }
 
-    /// <summary>SET -> wait -> GET with busy retry (same pacing as DockOneShot). Null on transport failure.</summary>
-    private static byte[]? Exchange(SafeFileHandle h, byte[] request)
+    /// <summary>SET -> wait -> GET with busy retry (same pacing as DockOneShot). Null on transport
+    /// failure. firstDelayMs defaults to the historical 400 ms; --probe-profile passes the
+    /// configured SetReadDelayMs (spec 2026-07-18 §4.1).</summary>
+    internal static byte[]? Exchange(SafeFileHandle h, byte[] request, int firstDelayMs = 400)
     {
         if (!HidD_SetFeature(h, request, request.Length)) return null;
         for (int tries = 0; tries < 10; tries++)
         {
-            Thread.Sleep(tries == 0 ? 400 : 200);
+            Thread.Sleep(tries == 0 ? firstDelayMs : 200);
             var reply = new byte[RazerProtocol.BufferLength];
             if (!HidD_GetFeature(h, reply, reply.Length)) return null;
             if (reply[1] != 0x01) return reply; // not busy
@@ -575,8 +577,8 @@ public static class ProbeCommand
         return null;
     }
 
-    private static string Hex(byte[] buf, int n) => string.Join(" ", buf.Take(n).Select(b => b.ToString("x2")));
-    private static string Hex2(byte[] data) => string.Join(" ", data.Select(b => b.ToString("x2")));
+    internal static string Hex(byte[] buf, int n) => string.Join(" ", buf.Take(n).Select(b => b.ToString("x2")));
+    internal static string Hex2(byte[] data) => string.Join(" ", data.Select(b => b.ToString("x2")));
 
     private sealed class MouseSession : IDisposable
     {
@@ -700,7 +702,7 @@ public static class ProbeCommand
     }
 
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+    internal static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
 
     [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.U1)]
