@@ -214,10 +214,14 @@ internal static class ProfileProbeCommand
             // status on ds01.
             if (transportNull1)
             {
+                string recovery = $"the mouse may now be on slot {b} ({ColourFor(b)}) — press the BOTTOM button until the LED shows slot {activeSlotA}'s colour ({ColourFor(activeSlotA)})";
+                Console.WriteLine($"  {recovery}");
+                capture.Add($"- {recovery}");
+
                 IntegrityRecheck(session, capture, before, "Integrity re-check (spec §4.5)");
                 InputFeelPrompt(capture, "final");
 
-                string transportVerdict = "## Verdict\n**INDETERMINATE** — transport failure during the set attempt; no conclusion about 0x05/0x04; re-run.";
+                string transportVerdict = "## Verdict\n**INDETERMINATE** — transport failure during the set attempt; no conclusion about 0x05/0x04; re-run. The write may have landed — check the LED and recover via the bottom button if needed.";
                 capture.Add(transportVerdict);
                 Console.WriteLine($"\n{transportVerdict.Replace("## Verdict\n", "Verdict: ")}");
                 Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");
@@ -245,6 +249,10 @@ internal static class ProfileProbeCommand
 
                 if (!ok2)
                 {
+                    string recovery = $"the mouse may now be on slot {b} ({ColourFor(b)}) — press the BOTTOM button until the LED shows slot {activeSlotA}'s colour ({ColourFor(activeSlotA)})";
+                    Console.WriteLine($"  {recovery}");
+                    capture.Add($"- {recovery}");
+
                     IntegrityRecheck(session, capture, before, "Integrity re-check (spec §4.5)");
                     InputFeelPrompt(capture, "final");
 
@@ -252,7 +260,7 @@ internal static class ProfileProbeCommand
                     // fallback is ever sent), so a transport failure at this stage can only be ds06's.
                     string abortVerdict = transportNull2
                         ? "## Verdict\n**INDETERMINATE** — transport failure, no conclusion about 0x05/0x04; re-run " +
-                          $"(ds01 status=0x{status1:x2}, ds06 NO REPLY (transport))."
+                          $"(ds01 status=0x{status1:x2}, ds06 NO REPLY (transport)). The write may have landed — check the LED and recover via the bottom button if needed."
                         : $"## Verdict\n**SET NOT ACCEPTED** — not accepted in these shapes on this run " +
                           $"(ds01 status=0x{status1:x2}, ds06 status=0x{status2:x2}).";
                     capture.Add(abortVerdict);
