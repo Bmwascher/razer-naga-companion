@@ -355,4 +355,28 @@ public class RazerProtocolTests
         Assert.Equal(0x03, del[8]);    // id (delete)
         Assert.Equal(0x01, del[9]);    // slot
     }
+
+    [Fact]
+    public void ProfileGetProbe_places_class_id_size_args_and_crc()
+    {
+        var buf = RazerProtocol.BuildProfileGetProbeBuffer(0x1f, 0x84, 0x06, new byte[] { 0x01, 0x02 });
+        Assert.Equal(91, buf.Length);
+        Assert.Equal(0x00, buf[0]); // report id
+        Assert.Equal(0x1f, buf[2]); // tid at report[1]
+        Assert.Equal(0x06, buf[6]); // data_size at report[5]
+        Assert.Equal(0x05, buf[7]); // class at report[6]
+        Assert.Equal(0x84, buf[8]); // command id at report[7]
+        Assert.Equal(0x01, buf[9]); // args at report[8..]
+        Assert.Equal(0x02, buf[10]);
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i]; // XOR over report[2..87]
+        Assert.Equal(crc, buf[89]);
+    }
+
+    [Fact]
+    public void ProfileGetProbe_throws_on_set_half_command_ids()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            RazerProtocol.BuildProfileGetProbeBuffer(0x1f, 0x02, 0x01, new byte[] { 0x01 }));
+    }
 }

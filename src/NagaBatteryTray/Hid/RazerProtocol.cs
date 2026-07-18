@@ -204,6 +204,17 @@ public static class RazerProtocol
         return BuildReport(transactionId, DataSizeProfileEdit, CommandClassProfile, CommandIdDeleteProfile, args);
     }
 
+    /// <summary>Read-only class-0x05 probe GET (--probe-profile, spec 2026-07-18 §5.3/§7). Throws
+    /// unless commandId has the get bit (>= 0x80) — the profile probe must be UNABLE to compose a
+    /// write. dataSize/args are caller-specified because candidates carry their own documented shapes.</summary>
+    public static byte[] BuildProfileGetProbeBuffer(byte transactionId, byte commandId, byte dataSize, ReadOnlySpan<byte> args)
+    {
+        if (commandId < 0x80)
+            throw new ArgumentOutOfRangeException(nameof(commandId), "get-half ids only (>= 0x80): the profile probe is read-only by construction");
+        if (args.Length > 80) throw new ArgumentOutOfRangeException(nameof(args));
+        return BuildReport(transactionId, dataSize, CommandClassProfile, commandId, args);
+    }
+
     /// <summary>Validates a 91-byte reply: status byte then XOR CRC over buffer[3..88] vs buffer[89].</summary>
     private static ReplyResult ValidateReply(byte[] buffer91)
     {
