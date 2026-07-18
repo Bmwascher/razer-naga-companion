@@ -199,3 +199,23 @@ all offsets are 90-byte *report* offsets (the 91-byte HID buffer prepends the re
   enumerated corpus so the question isn't reopened casually.
 - Either way the inventory + integrity evidence stands alone as documentation of the user's
   Synapse-era slots.
+
+## 11. Result — hardware run 2026-07-18 (capture `probe-profile-20260718-104514.md`)
+
+**HIT: `0x05/0x84`, data_size `0x06`, zero args → active slot number at report arg[0]** (literal
+1..5). Evidence: status `0x02` + CRC-valid in every state; values 0x01/0x02/0x03 tracking slots
+1/2/3 bijectively, stable across both samples per state, reproduced on the revisit. Found by the
+**opt-in pass-2 sweep** — the sourced shortlist all missed (`0x80` available-count constant 0x03,
+`0x8a` total-count constant 0x05, `0x88` ds45 rejected status `0x03`; the `0x81` control answered
+everywhere and tracked nothing, as required). Conditions: wireless (PID `0x00A8`), tid `0x1f`,
+3 existing slots [01 02 03], **no fingerprint available** (all three slots hold identical factory
+bindings — states were LED-identified, consistent with the read-through view matching throughout).
+Integrity re-check: **UNCHANGED** — every observable profile surface byte-identical. Input-feel:
+clean at all three recorded checks (hard gate upheld).
+
+Corollary: `0x84 = 0x80 | 0x04` — by the protocol's get/set symmetry (DPI `0x85`/`0x05`, device
+mode `0x84`/`0x04`), `0x05/0x04` is the likely SET-active-profile. **Unprobed** (a write — outside
+this spike's zero-writes scope); a future opt-in spike could test it and retire the bottom-button
+step entirely.
+
+Follow-up ordered: the §10 Hit path — Profile card direct read, event-driven only.

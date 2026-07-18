@@ -75,7 +75,9 @@ does, so launch it `-WindowStyle Hidden`.
   Buttons (class 0x02, set 0x0c / get 0x8c, args `[profile,buttonId,hypershift,category,len,d0..d4]`;
   `ParseButtonReply` guards via the **echo check** — the reply must echo the request's
   profile/buttonId/hypershift), profile lifecycle (class 0x05: list 0x81 / create 0x02 / delete 0x03),
-  device mode (0x00/0x84 get, 0x00/0x04 set) — all hardware-verified 2026-07-11 (spike, spec §6).
+  device mode (0x00/0x84 get, 0x00/0x04 set) — all hardware-verified 2026-07-11 (spike, spec §6);
+  **active-slot get 0x05/0x84** (ds 0x06, slot number at reply arg[0]) hardware-verified 2026-07-18
+  (`--probe-profile` sweep — not in any reference repo; probe-only for now, no production caller yet).
   `Hid/ButtonBinding.cs` holds the button model: `ButtonBinding` (+`ToWire`; Default throws — never
   written), `RawButtonAction`, `ProfileList`, and `NagaV2ProButtons` (grid ids `0x40..0x4b` physical
   order; `FactoryBindingForPosition` = the digits row `1..9 0 - =` — a **freshly created onboard slot
@@ -223,7 +225,16 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
   Settings window: instant-apply button remap chips with undo, DPI presets, a Profile liveness card,
   and a tray battery-level ring (shipped 2026-07-11); see
   `docs/superpowers/specs/2026-07-11-naga-gui-redesign-design.md`.
-- [ ] Profile probing — read-only `--probe-profile` spike (next after the GUI branch merges).
+- [x] Profile probing — read-only `--probe-profile` spike (hardware run 2026-07-18): **HIT — the
+  active onboard slot IS readable**: class `0x05` get `0x84` (data_size `0x06`, zero args) returns
+  the active slot number at report arg[0] (literal 1..5; verified bijective/stable/reproduced across
+  slots 1–3 + revisit; integrity re-check byte-identical, input-feel clean). Found by the opt-in
+  blind sweep — the sourced shortlist (razerqdhid `0x80`/`0x8a`/`0x88`) all missed. Get/set symmetry
+  suggests `0x05/0x04` = SET-active-profile (**unprobed** — a write, out of the spike's scope; a
+  future opt-in spike could remove the bottom-button UX cost). Follow-up ordered: Profile card
+  direct read (event-driven only — the no-polling rule stands). Capture:
+  `%APPDATA%\NagaBatteryTray\probe-profile-*.md`; see
+  `docs/superpowers/specs/2026-07-18-naga-profile-probe-design.md` §10.
 - [ ] DPI stages + polling rate — program the onboard 5-stage DPI table (+ stage up/down) and
   polling-rate get/set; both openrazer-validated commands, write-on-action only (ordered 2026-07-17).
   Includes the deferred **DPI card rework** (user, 2026-07-17): the app-side preset list likely
