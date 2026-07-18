@@ -133,6 +133,31 @@ public class CalloutViewModelTests
     }
 
     [Fact]
+    public async Task Failed_flag_sets_on_write_failure_and_clears_on_the_next_attempt()
+    {
+        var (vm, rec, _) = NewVm();
+        rec.Result = false;
+        await vm.DisableAsync();
+        Assert.True(vm.Failed);
+
+        rec.Result = true;
+        await vm.DisableAsync();
+        Assert.False(vm.Failed);
+    }
+
+    [Fact]
+    public async Task BeginCapture_clears_a_stale_Failed_flag()
+    {
+        var (vm, rec, _) = NewVm();
+        rec.Result = false;
+        await vm.DisableAsync();
+        Assert.True(vm.Failed);
+
+        vm.BeginCapture();
+        Assert.False(vm.Failed);
+    }
+
+    [Fact]
     public void CancelCapture_returns_to_idle()
     {
         var (vm, rec, _) = NewVm();

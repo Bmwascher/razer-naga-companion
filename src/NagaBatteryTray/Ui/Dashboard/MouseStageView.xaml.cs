@@ -135,8 +135,8 @@ public partial class MouseStageView : UserControl
     }
     private void OnRemovePreset(object s, RoutedEventArgs e) =>
         ((DashboardViewModel)DataContext).RemovePreset((DpiPresetItem)((FrameworkElement)s).DataContext);
-    private void OnAddPreset(object s, RoutedEventArgs e)
-    { if (NewPresetBox.Value is { } v) ((DashboardViewModel)DataContext).AddPreset((int)v); }
+    private void OnSavePreset(object s, RoutedEventArgs e)
+    { var vm = (DashboardViewModel)DataContext; vm.AddPreset(vm.Dpi); }
 
     private void OnRefreshLiveness(object s, RoutedEventArgs e) => LivenessRefreshRequested?.Invoke();
 }

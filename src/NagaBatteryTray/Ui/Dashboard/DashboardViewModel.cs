@@ -97,9 +97,8 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     {
         DeviceOnline = s.Status == DeviceStatus.Online;
         StatusDotBrushKey = DeviceOnline ? "Status.Positive" : "Status.Critical";
-        string link = !DeviceOnline ? "offline" : s.Wired ? "Wired" : "Wireless";
-        string slot = _slot is { } n ? $" · Profile {n} · {SlotColour(n)}" : "";
-        HeaderSubtitle = $"{link}{slot}";
+        // link state only - slot identity lives solely in the Profile card (it was shown twice)
+        HeaderSubtitle = !DeviceOnline ? "offline" : s.Wired ? "Wired" : "Wireless";
         BatteryChipText = DeviceOnline ? $"{s.Percent}%{(s.Charging ? " ⚡" : "")}" : "—";
     }
 
@@ -149,11 +148,19 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public void RemovePreset(DpiPresetItem item)
     {
         Presets.Remove(item);
+        RefreshActive(); // removing the current value's preset re-enables "save"
     }
+
+    /// <summary>Enables the "+ Save N" button: the current DPI is real and not already a preset.</summary>
+    public bool CanSavePreset { get => _canSavePreset; private set => Set(ref _canSavePreset, value); }
+    private bool _canSavePreset;
 
     private static DpiPresetItem NewItem(int v) => new(v);
     private void RefreshActive()
-    { foreach (var p in Presets) p.IsActive = DevicePresent && p.Value == Dpi; }
+    {
+        foreach (var p in Presets) p.IsActive = DevicePresent && p.Value == Dpi;
+        CanSavePreset = DevicePresent && !Presets.Any(p => p.Value == Dpi);
+    }
 
     // ---- profile card ----
     public string ProfileTitle { get => _profileTitle; private set => Set(ref _profileTitle, value); }

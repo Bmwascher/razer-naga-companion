@@ -7,8 +7,14 @@
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     <local:GridKeyMarginConverter x:Key="GridKeyMargin"/>
+    <!-- compact callout row: number + binding key-box + hover-revealed icon actions, one
+         ~30px line per button (the old card reserved label/status/action rows and read as
+         mostly empty space). Actions are Hidden, not Collapsed, so revealing them never
+         shifts layout; persistent status text is gone - the accent flash confirms an apply,
+         "press a key…" swaps in while capturing, and a failed write turns the key-box red
+         with the failure message as its tooltip. -->
     <DataTemplate x:Key="ChipTemplate">
-      <Border Margin="0,3" MinWidth="150"
+      <Border Margin="0,2" MinWidth="150" Padding="8,4"
               RenderTransformOrigin="0.5,0.5"
               MouseEnter="OnChipEnter" MouseLeave="OnChipLeave" Cursor="Hand"
               Focusable="True" KeyboardNavigation.IsTabStop="True"
@@ -38,12 +44,30 @@
             </Style.Triggers>
           </Style>
         </Border.Style>
-        <StackPanel>
-          <TextBlock Style="{DynamicResource LabelText}" Text="{Binding Label, StringFormat=Button {0}}"/>
-          <Grid HorizontalAlignment="Left">
-            <Border Background="{DynamicResource App.ChipFill}" BorderBrush="{DynamicResource App.ChipStroke}"
-                    BorderThickness="1,1,1,2" CornerRadius="4" Padding="6,1">
-              <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding BindingText}"
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="20"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Style="{DynamicResource LabelText}" FontSize="11"
+                     Text="{Binding Label}" VerticalAlignment="Center"/>
+          <Grid Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center">
+            <Border BorderThickness="1,1,1,2" CornerRadius="4" Padding="6,1"
+                    Background="{DynamicResource App.ChipFill}">
+              <Border.Style>
+                <Style TargetType="Border">
+                  <Setter Property="BorderBrush" Value="{DynamicResource App.ChipStroke}"/>
+                  <Setter Property="ToolTip" Value="{Binding BindingText}"/>
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding Failed}" Value="True">
+                      <Setter Property="BorderBrush" Value="{DynamicResource Status.Critical}"/>
+                      <Setter Property="ToolTip" Value="{Binding Status}"/>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Border.Style>
+              <TextBlock TextTrimming="CharacterEllipsis"
                          FontWeight="SemiBold" Foreground="{DynamicResource App.TextPrimary}">
                 <TextBlock.Style>
                   <Style TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
@@ -82,8 +106,7 @@
               </Border.Style>
             </Border>
           </Grid>
-          <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding Status}" FontSize="10"/>
-          <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
             <StackPanel.Style>
               <Style TargetType="StackPanel">
                 <Setter Property="Visibility" Value="Hidden"/>
@@ -100,12 +123,12 @@
                 </Style.Triggers>
               </Style>
             </StackPanel.Style>
-            <Button Content="Undo" Click="OnUndo" FontSize="10" Padding="6,1"
+            <Button Content="↶" ToolTip="Undo" Click="OnUndo" FontSize="12" Padding="5,0"
                     Visibility="{Binding CanUndo, Converter={StaticResource BoolToVis}}">
               <Button.Style>
-                <Style TargetType="Button">
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                   <Style.Triggers>
-                    <!-- appearance-only fade: the action row itself stays instant on hover/focus
+                    <!-- appearance-only fade: the action cluster itself stays instant on hover/focus
                          (frequency rule - no motion on a frequently hovered element), so only the
                          Undo button's own CanUndo-triggered reveal gets the 150ms fade-in -->
                     <DataTrigger Binding="{Binding CanUndo}" Value="True">
@@ -122,10 +145,10 @@
                 </Style>
               </Button.Style>
             </Button>
-            <Button Content="Disable" Click="OnDisable" FontSize="10" Padding="6,1" Margin="4,0,0,0"/>
-            <Button Content="Default" Click="OnDefault" FontSize="10" Padding="6,1" Margin="4,0,0,0"/>
+            <Button Content="⊘" ToolTip="Disable" Click="OnDisable" FontSize="12" Padding="5,0" Margin="3,0,0,0"/>
+            <Button Content="⟲" ToolTip="Default" Click="OnDefault" FontSize="12" Padding="5,0" Margin="3,0,0,0"/>
           </StackPanel>
-        </StackPanel>
+        </Grid>
       </Border>
     </DataTemplate>
   </UserControl.Resources>
@@ -324,7 +347,19 @@
               <DataTemplate>
                 <DockPanel Margin="0,2">
                   <Button DockPanel.Dock="Right" Content="✕" FontSize="9" Padding="4,0"
-                          Click="OnRemovePreset" Opacity="0.5"/>
+                          Click="OnRemovePreset">
+                    <Button.Style>
+                      <!-- remove is a rare act - keep the list quiet and reveal ✕ on row hover -->
+                      <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                        <Setter Property="Opacity" Value="0"/>
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=DockPanel}}" Value="True">
+                            <Setter Property="Opacity" Value="0.6"/>
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Button.Style>
+                  </Button>
                   <Button Click="OnApplyPreset" Background="Transparent" BorderThickness="0"
                           HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                           IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}">
@@ -352,11 +387,26 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-          <DockPanel Margin="0,6,0,0">
-            <Button DockPanel.Dock="Right" Content="+" Click="OnAddPreset" Padding="8,2" Margin="6,0,0,0"/>
-            <ui:NumberBox x:Name="NewPresetBox" Minimum="100" Maximum="30000" SmallChange="50"
-                          MaxDecimalPlaces="0" PlaceholderText="add"/>
-          </DockPanel>
+          <!-- the slider already selects any value, so typing was redundant: dial it in,
+               then save. Disabled while the current DPI is already a preset. -->
+          <Button Margin="0,6,0,0" HorizontalAlignment="Left" Padding="8,2"
+                  Click="OnSavePreset" IsEnabled="{Binding CanSavePreset}"
+                  ToolTip="Save the current DPI as a preset">
+            <!-- TextBlock child, not Content+ContentStringFormat: the themed button template
+                 drops ContentStringFormat, but Text is string-typed so StringFormat applies.
+                 A child element also misses the template's disabled dimming - mirror it. -->
+            <TextBlock Text="{Binding Dpi, StringFormat=+ Save {0}}">
+              <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType=Button}}" Value="False">
+                      <Setter Property="Opacity" Value="0.45"/>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
+          </Button>
         </StackPanel>
       </Border>
       <Border Style="{DynamicResource CardBorder}">

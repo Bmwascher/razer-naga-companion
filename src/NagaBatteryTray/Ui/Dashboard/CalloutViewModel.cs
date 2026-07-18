@@ -19,7 +19,7 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
     private byte _mods, _usage;
     private (ButtonActionKind Kind, byte Mods, byte Usage) _prev;
     private int _undoVersion;
-    private bool _isCapturing, _isBusy, _canUndo, _isHighlighted;
+    private bool _isCapturing, _isBusy, _canUndo, _isHighlighted, _failed;
     private string _status = "";
 
     public CalloutViewModel(int position, WriteBinding write, Func<Task>? undoWindow = null)
@@ -43,6 +43,9 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
 
     public bool IsCapturing { get => _isCapturing; private set { if (Set(ref _isCapturing, value)) Notify(nameof(BindingText)); } }
     public bool IsBusy { get => _isBusy; private set => Set(ref _isBusy, value); }
+    /// <summary>Last write failed — the compact row has no status line, so this drives the
+    /// key-box's red border (with Status as its tooltip) until the next attempt.</summary>
+    public bool Failed { get => _failed; private set => Set(ref _failed, value); }
     public bool CanUndo { get => _canUndo; private set => Set(ref _canUndo, value); }
     public bool IsHighlighted { get => _isHighlighted; set => Set(ref _isHighlighted, value); }
     public string Status { get => _status; set => Set(ref _status, value); }
@@ -54,7 +57,7 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
         Notify(nameof(BindingText));
     }
 
-    public void BeginCapture() { Status = ""; IsCapturing = true; }
+    public void BeginCapture() { Status = ""; Failed = false; IsCapturing = true; }
     public void CancelCapture() => IsCapturing = false;
 
     public Task CaptureAsync(byte modifiers, byte usage)
@@ -78,10 +81,11 @@ public sealed class CalloutViewModel : INotifyPropertyChanged
     {
         if (IsBusy) return;
         IsBusy = true;
+        Failed = false;
         Status = "Writing…";
         bool ok = await _write(Position, kind, modifiers, usage);
         IsBusy = false;
-        if (!ok) { Status = "Not applied — wiggle the mouse and retry"; return; }
+        if (!ok) { Status = "Not applied — wiggle the mouse and retry"; Failed = true; return; }
 
         _prev = (_kind, _mods, _usage);
         SetApplied(kind, modifiers, usage);

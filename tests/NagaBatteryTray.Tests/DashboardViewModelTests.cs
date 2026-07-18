@@ -53,6 +53,25 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public void CanSavePreset_tracks_current_dpi_against_the_preset_list()
+    {
+        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        Assert.False(vm.CanSavePreset);            // no device yet
+
+        vm.SetCurrentDpi(new DpiSetting(1600, 1600));
+        Assert.False(vm.CanSavePreset);            // 1600 is already a preset
+
+        vm.Dpi = 1000;
+        Assert.True(vm.CanSavePreset);
+
+        vm.AddPreset(1000);
+        Assert.False(vm.CanSavePreset);
+
+        vm.RemovePreset(vm.Presets.Single(p => p.Value == 1000));
+        Assert.True(vm.CanSavePreset);
+    }
+
+    [Fact]
     public void AddPreset_sorts_dedupes_and_RemovePreset_removes()
     {
         var vm = new DashboardViewModel(Seeded(), false, NoWrite);
@@ -97,6 +116,18 @@ public class DashboardViewModelTests
         Assert.Contains("87", vm.BatteryChipText);
         vm.ApplyState(DeviceState.Unknown);
         Assert.False(vm.DeviceOnline);
+    }
+
+    [Fact]
+    public void Header_subtitle_is_link_state_only_the_profile_card_owns_slot_identity()
+    {
+        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        vm.ApplyState(DeviceState.Online(87, false, false));
+        Assert.Equal("Wireless", vm.HeaderSubtitle);
+        vm.ApplyState(DeviceState.Online(87, false, true));
+        Assert.Equal("Wired", vm.HeaderSubtitle);
+        vm.ApplyState(DeviceState.Unknown);
+        Assert.Equal("offline", vm.HeaderSubtitle);
     }
 
     [Fact]
