@@ -5,6 +5,13 @@
   <SolidColorBrush x:Key="Status.Warning" Color="#E6A23C"/>
   <SolidColorBrush x:Key="Status.Critical" Color="#E5484D"/>
   <SolidColorBrush x:Key="App.Scrim" Color="#A0000000"/>
+  <!-- onboard-slot LED identities (bottom-button colour per slot) — hardware truth like Status.*,
+       deliberately theme-independent -->
+  <SolidColorBrush x:Key="Slot.White" Color="#F2F2F2"/>
+  <SolidColorBrush x:Key="Slot.Red"   Color="#E5484D"/>
+  <SolidColorBrush x:Key="Slot.Green" Color="#43D675"/>
+  <SolidColorBrush x:Key="Slot.Blue"  Color="#3E7BFA"/>
+  <SolidColorBrush x:Key="Slot.Cyan"  Color="#29C8DE"/>
 
   <Style x:Key="CardBorder" TargetType="Border">
     <Setter Property="Background" Value="{DynamicResource App.CardFill}"/>
@@ -25,6 +32,15 @@
     <Setter Property="FontWeight" Value="SemiBold"/>
     <Setter Property="Foreground" Value="{DynamicResource App.TextSecondary}"/>
     <Setter Property="Typography.Capitals" Value="AllSmallCaps"/>
+  </Style>
+  <!-- card/section headers (dashboard-polish §3). SmallCaps, not AllSmallCaps: mixed-case input
+       keeps a full-height leading capital ("Profile"), while all-caps input ("DPI") passes through
+       at full 12px — LabelText's 10px all-small-caps rendered header text at ~7px glyph height. -->
+  <Style x:Key="CardTitle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Foreground" Value="{DynamicResource App.TextSecondary}"/>
+    <Setter Property="Typography.Capitals" Value="SmallCaps"/>
   </Style>
   <Style x:Key="NumeralText" TargetType="TextBlock">
     <Setter Property="FontSize" Value="34"/>

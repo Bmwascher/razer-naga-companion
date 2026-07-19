@@ -148,4 +148,30 @@ public partial class MouseStageView : UserControl
     { var vm = (DashboardViewModel)DataContext; vm.AddPreset(vm.Dpi); }
 
     private void OnRefreshProfile(object s, RoutedEventArgs e) => ProfileRefreshRequested?.Invoke();
+
+    // ---- profile rename (dashboard-polish §5.4): the box swaps in via IsRenamingProfile;
+    // Enter commits, Esc cancels, click-away commits (CommitRename no-ops when not renaming,
+    // so the Esc→collapse→LostFocus chain can't double-fire) ----
+    private void OnRenameProfile(object s, RoutedEventArgs e)
+    {
+        var vm = (DashboardViewModel)DataContext;
+        vm.BeginRename();
+        if (!vm.IsRenamingProfile) return; // nothing selected
+        // focus after the visibility trigger has applied and layout ran, else Focus() is a no-op
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        {
+            ProfileNameBox.Focus();
+            ProfileNameBox.SelectAll();
+        }));
+    }
+
+    private void OnProfileNameKeyDown(object s, System.Windows.Input.KeyEventArgs e)
+    {
+        var vm = (DashboardViewModel)DataContext;
+        if (e.Key == System.Windows.Input.Key.Enter) { vm.CommitRename(); e.Handled = true; }
+        else if (e.Key == System.Windows.Input.Key.Escape) { vm.CancelRename(); e.Handled = true; }
+    }
+
+    private void OnProfileNameLostFocus(object s, RoutedEventArgs e) =>
+        ((DashboardViewModel)DataContext).CommitRename();
 }

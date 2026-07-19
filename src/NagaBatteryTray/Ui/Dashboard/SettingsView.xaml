@@ -27,15 +27,15 @@
           <ui:Button DockPanel.Dock="Right" HorizontalAlignment="Right" Content="✕" Click="OnClose" Padding="8,3"/>
         </DockPanel>
 
-        <TextBlock Style="{DynamicResource LabelText}" Text="THEME"/>
+        <TextBlock Style="{DynamicResource CardTitle}" Text="Theme"/>
         <ListBox x:Name="ThemeList" ItemsSource="{Binding ThemeNames}" SelectedItem="{Binding Theme, Mode=TwoWay}"
                  SelectionChanged="OnThemeChanged" Margin="0,4,0,12" BorderThickness="0" Background="Transparent"/>
 
-        <TextBlock Style="{DynamicResource LabelText}" Text="TRAY ICON"/>
+        <TextBlock Style="{DynamicResource CardTitle}" Text="Tray icon"/>
         <ListBox x:Name="TrayIconStyleList" SelectionChanged="OnTrayIconStyleChanged"
                  Margin="0,4,0,12" BorderThickness="0" Background="Transparent"/>
 
-        <TextBlock Style="{DynamicResource LabelText}" Text="GENERAL"/>
+        <TextBlock Style="{DynamicResource CardTitle}" Text="General"/>
         <DockPanel Margin="0,6">
           <TextBlock Style="{DynamicResource BodyText}" Text="Run at startup" VerticalAlignment="Center"/>
           <ui:ToggleSwitch DockPanel.Dock="Right" HorizontalAlignment="Right"
@@ -54,7 +54,7 @@
                            IsChecked="{Binding LowBatteryNotify, Mode=TwoWay}"/>
         </DockPanel>
 
-        <TextBlock Style="{DynamicResource LabelText}" Text="BATTERY POLLING (SECONDS)" Margin="0,8,0,0"/>
+        <TextBlock Style="{DynamicResource CardTitle}" Text="Battery polling (seconds)" Margin="0,8,0,0"/>
         <DockPanel Margin="0,6">
           <TextBlock Style="{DynamicResource BodyText}" Text="On battery" VerticalAlignment="Center"/>
           <ui:NumberBox DockPanel.Dock="Right" HorizontalAlignment="Right" MinWidth="110"
@@ -68,7 +68,7 @@
                         Minimum="15" Maximum="3600" SmallChange="15" MaxDecimalPlaces="0"/>
         </DockPanel>
 
-        <TextBlock Style="{DynamicResource LabelText}" Text="BUTTONS" Margin="0,8,0,0"/>
+        <TextBlock Style="{DynamicResource CardTitle}" Text="Buttons" Margin="0,8,0,0"/>
         <ui:Button x:Name="ResetAllButton" Content="Reset all to factory" Click="OnResetAll" Margin="0,6,0,0"/>
         <TextBlock x:Name="ResetNote" Style="{DynamicResource SubtleText}" Text="" TextWrapping="Wrap"/>
 

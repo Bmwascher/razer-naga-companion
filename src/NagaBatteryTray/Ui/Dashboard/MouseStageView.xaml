@@ -6,6 +6,33 @@
     xmlns:local="clr-namespace:NagaBatteryTray.Ui.Dashboard">
   <UserControl.Resources>
     <local:GridKeyMarginConverter x:Key="GridKeyMargin"/>
+    <!-- onboard-slot LED dot (dashboard-polish §5.3): fill = the slot's bottom-button LED colour
+         (theme-independent Slot.* keys); the ChipStroke ring keeps the white dot visible on light
+         cards. Binds Number, so it works wherever the DataContext is a ProfileSlotItem. -->
+    <Style x:Key="SlotDot" TargetType="Ellipse">
+      <Setter Property="Width" Value="8"/>
+      <Setter Property="Height" Value="8"/>
+      <Setter Property="Stroke" Value="{DynamicResource App.ChipStroke}"/>
+      <Setter Property="StrokeThickness" Value="1"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Number}" Value="1">
+          <Setter Property="Fill" Value="{StaticResource Slot.White}"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Number}" Value="2">
+          <Setter Property="Fill" Value="{StaticResource Slot.Red}"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Number}" Value="3">
+          <Setter Property="Fill" Value="{StaticResource Slot.Green}"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Number}" Value="4">
+          <Setter Property="Fill" Value="{StaticResource Slot.Blue}"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Number}" Value="5">
+          <Setter Property="Fill" Value="{StaticResource Slot.Cyan}"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
     <!-- during the undo window only ↶ shows - undo is the salient act and the expanded 15px
          binding text needs the width; Disable/Default return after the 5s window -->
     <Style x:Key="HideDuringUndoButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
@@ -376,13 +403,18 @@
     <ItemsControl Grid.Column="2" x:Name="RightChips" VerticalAlignment="Center"
                   ItemTemplate="{StaticResource ChipTemplate}"/>
 
-    <!-- right rail -->
-    <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="8,0,0,0">
+    <!-- right rail. The wrapper grid pins the rail's top edge to the chip columns' top edge
+         (dashboard-polish §6): its height mirrors LeftChips' rendered height and both center,
+         so the cards share the chips' datum instead of floating on their own midline; any
+         excess rail height hangs below (Grid doesn't clip). -->
+    <Grid Grid.Column="3" VerticalAlignment="Center" Margin="8,0,0,0"
+          Height="{Binding ActualHeight, ElementName=LeftChips}">
+    <StackPanel VerticalAlignment="Top">
       <Border Style="{DynamicResource CardBorder}" Margin="0,0,0,10">
         <StackPanel>
           <StackPanel Orientation="Horizontal">
             <TextBlock Style="{DynamicResource NumeralText}" Text="{Binding DpiText}"/>
-            <TextBlock Style="{DynamicResource LabelText}" Text="DPI" VerticalAlignment="Bottom" Margin="4,0,0,4"/>
+            <TextBlock Style="{DynamicResource CardTitle}" Text="DPI" VerticalAlignment="Bottom" Margin="4,0,0,5"/>
           </StackPanel>
           <!-- SmallChange: WPF's 0.1 default on a 0..1 log slider makes one arrow press jump DPI
                ~77% — 0.02 keeps keyboard steps near the old 100-DPI granularity at typical values.
@@ -393,94 +425,180 @@
                   IsMoveToPointEnabled="True"
                   Value="{Binding DpiSliderPos, Mode=TwoWay}" IsEnabled="{Binding DevicePresent}"
                   PreviewMouseUp="OnDpiPointerUp" KeyUp="OnDpiSliderKeyUp"/>
+          <!-- content-sized pill segments (dashboard-polish §4.1) replacing full-width rows whose
+               themed hover background read as a text-input box (recorded gripe). Each pill owns
+               its template so hover paints the pill, not the row; the active pill's fill IS the
+               indicator (the old dot + ✓ retire). ✕ rides inside the pill with reserved width
+               (Hidden, not Collapsed) so pills never resize under the pointer. -->
           <ItemsControl ItemsSource="{Binding Presets}" Margin="0,8,0,0">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <DockPanel Margin="0,2">
-                  <Button DockPanel.Dock="Right" Content="✕" FontSize="9" Padding="4,0"
-                          Click="OnRemovePreset">
-                    <Button.Style>
-                      <!-- remove is a rare act - keep the list quiet and reveal ✕ on row hover -->
-                      <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                        <Setter Property="Opacity" Value="0"/>
-                        <Style.Triggers>
-                          <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=DockPanel}}" Value="True">
-                            <Setter Property="Opacity" Value="0.6"/>
-                          </DataTrigger>
-                        </Style.Triggers>
-                      </Style>
-                    </Button.Style>
-                  </Button>
-                  <Button Click="OnApplyPreset" Background="Transparent" BorderThickness="0"
-                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                    <StackPanel Orientation="Horizontal">
-                      <Ellipse Width="7" Height="7" VerticalAlignment="Center">
-                        <Ellipse.Style>
-                          <Style TargetType="Ellipse">
-                            <!-- base Fill lives in the style: a local Fill on the element would
-                                 outrank the IsActive trigger and the dot could never turn accent -->
-                            <Setter Property="Fill" Value="{DynamicResource App.TextSecondary}"/>
-                            <Style.Triggers>
-                              <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                <Setter Property="Fill" Value="{DynamicResource App.Accent}"/>
-                              </DataTrigger>
-                            </Style.Triggers>
-                          </Style>
-                        </Ellipse.Style>
-                      </Ellipse>
-                      <TextBlock Style="{DynamicResource BodyText}" Text="{Binding Value}" Margin="7,0,0,0"/>
-                      <TextBlock Style="{DynamicResource BodyText}" Text=" ✓" Foreground="{DynamicResource App.Accent}"
-                                 Visibility="{Binding IsActive, Converter={StaticResource BoolToVis}}"/>
-                    </StackPanel>
-                  </Button>
-                </DockPanel>
+                <Button Click="OnApplyPreset" Margin="0,0,6,6" Cursor="Hand"
+                        IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                        ToolTip="{Binding Value, StringFormat=Apply {0} DPI}">
+                  <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                      <Border x:Name="PillRoot" CornerRadius="8" Padding="8,3" BorderThickness="1"
+                              Background="{DynamicResource App.ChipFill}"
+                              BorderBrush="{DynamicResource App.ChipStroke}">
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Style="{DynamicResource BodyText}" Text="{Binding Value}"
+                                     VerticalAlignment="Center"/>
+                          <Button x:Name="RemovePill" Content="✕" FontSize="9" Width="14" Padding="0"
+                                  Margin="4,0,0,0" Opacity="0.6" Visibility="Hidden"
+                                  Background="Transparent" BorderThickness="0"
+                                  Click="OnRemovePreset" ToolTip="Remove preset"/>
+                        </StackPanel>
+                      </Border>
+                      <ControlTemplate.Triggers>
+                        <!-- hover/focus = border only (hoverable, not selected); active = filled -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                          <Setter TargetName="PillRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+                          <Setter TargetName="RemovePill" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                          <Setter TargetName="PillRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+                        </Trigger>
+                        <DataTrigger Binding="{Binding IsActive}" Value="True">
+                          <Setter TargetName="PillRoot" Property="Background" Value="{DynamicResource App.AccentSoft}"/>
+                          <Setter TargetName="PillRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+                        </DataTrigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                          <Setter TargetName="PillRoot" Property="Opacity" Value="0.45"/>
+                        </Trigger>
+                      </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                  </Button.Template>
+                </Button>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-          <!-- the slider already selects any value, so typing was redundant: dial it in,
-               then save. Disabled while the current DPI is already a preset. -->
-          <Button Margin="0,6,0,0" HorizontalAlignment="Left" Padding="8,2"
-                  Click="OnSavePreset" IsEnabled="{Binding CanSavePreset}"
-                  ToolTip="Save the current DPI as a preset">
-            <!-- TextBlock child, not Content+ContentStringFormat: the themed button template
-                 drops ContentStringFormat, but Text is string-typed so StringFormat applies.
-                 A child element also misses the template's disabled dimming - mirror it. -->
-            <TextBlock Text="{Binding Dpi, StringFormat=+ Save {0}}">
-              <TextBlock.Style>
-                <Style TargetType="TextBlock">
-                  <Style.Triggers>
-                    <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType=Button}}" Value="False">
-                      <Setter Property="Opacity" Value="0.45"/>
-                    </DataTrigger>
-                  </Style.Triggers>
-                </Style>
-              </TextBlock.Style>
-            </TextBlock>
+          <!-- the slider already selects any value, so typing was redundant: dial it in, then
+               save. A ghost pill (transparent fill) so saving reads as part of the preset set;
+               disabled while the current DPI is already a preset. -->
+          <Button HorizontalAlignment="Left" Click="OnSavePreset" Cursor="Hand"
+                  IsEnabled="{Binding CanSavePreset}" ToolTip="Save the current DPI as a preset">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border x:Name="PillRoot" CornerRadius="8" Padding="8,3" BorderThickness="1"
+                        Background="Transparent" BorderBrush="{DynamicResource App.ChipStroke}">
+                  <TextBlock FontSize="12" Foreground="{DynamicResource App.TextSecondary}"
+                             Text="{Binding Dpi, StringFormat=+ Save {0}}"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="PillRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+                  </Trigger>
+                  <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter TargetName="PillRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+                  </Trigger>
+                  <Trigger Property="IsEnabled" Value="False">
+                    <Setter TargetName="PillRoot" Property="Opacity" Value="0.45"/>
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Button.Template>
           </Button>
+          <!-- failure surface (dashboard-polish §4.2) - a failed apply used to be silent -->
+          <TextBlock Text="{Binding DpiStatus}" TextWrapping="Wrap" Margin="0,6,0,0"
+                     Foreground="{StaticResource Status.Warning}">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock" BasedOn="{StaticResource SubtleText}">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding DpiStatus}" Value="">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
         </StackPanel>
       </Border>
       <Border Style="{DynamicResource CardBorder}">
         <StackPanel>
           <DockPanel LastChildFill="False">
-            <TextBlock Style="{DynamicResource LabelText}" Text="PROFILE"/>
+            <TextBlock Style="{DynamicResource CardTitle}" Text="Profile"/>
             <ui:Button DockPanel.Dock="Right" Content="↻" Padding="6,2"
-                       Click="OnRefreshProfile" Opacity="0.6"/>
+                       Click="OnRefreshProfile" Opacity="0.6"
+                       ToolTip="Re-read the mouse (a bottom-button switch sends no event)"/>
+            <ui:Button DockPanel.Dock="Right" Content="✎" Padding="6,2" Margin="0,0,4,0"
+                       Click="OnRenameProfile" Opacity="0.6"
+                       IsEnabled="{Binding DeviceOnline}"
+                       ToolTip="Rename this slot (a label in this app — the mouse only knows numbers)"/>
           </DockPanel>
           <!-- slot dropdown (spec §13.1): one entry per existing onboard slot, the selection
                mirrors the mouse's actual active slot; picking another entry switches the mouse
                (0x05/0x04, safe to offer freely - persists across power-cycles, spec §12) and the
                grid re-reads the newly active slot's 12 buttons. Programmatic selection sync is
-               guarded in the VM, so only a user pick raises the switch. -->
+               guarded in the VM, so only a user pick raises the switch. Rows carry the slot's
+               LED dot + app-side name (dashboard-polish §5.3); while renaming, the box swaps
+               for the TextBox below. -->
           <ComboBox Margin="0,6,0,0" HorizontalAlignment="Stretch"
                     ItemsSource="{Binding ProfileSlots}"
                     SelectedItem="{Binding SelectedProfileSlot, Mode=TwoWay}"
-                    DisplayMemberPath="Label"
-                    IsEnabled="{Binding DeviceOnline}"/>
-          <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding ProfileDetail}"
-                     TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    IsEnabled="{Binding DeviceOnline}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Orientation="Horizontal">
+                  <Ellipse Style="{StaticResource SlotDot}"/>
+                  <TextBlock Text="{Binding Name}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+            <ComboBox.Style>
+              <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsRenamingProfile}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </ComboBox.Style>
+          </ComboBox>
+          <ui:TextBox x:Name="ProfileNameBox" Margin="0,6,0,0" MaxLength="24"
+                      Text="{Binding ProfileNameDraft, UpdateSourceTrigger=PropertyChanged}"
+                      KeyDown="OnProfileNameKeyDown" LostFocus="OnProfileNameLostFocus">
+            <ui:TextBox.Style>
+              <Style TargetType="ui:TextBox" BasedOn="{StaticResource {x:Type ui:TextBox}}">
+                <Setter Property="Visibility" Value="Collapsed"/>
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsRenamingProfile}" Value="True">
+                    <Setter Property="Visibility" Value="Visible"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </ui:TextBox.Style>
+          </ui:TextBox>
+          <!-- steady state: the active slot's LED colour, spelled out (dashboard-polish §5.5) -
+               the dot in the box shows it, this row explains it -->
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0"
+                      DataContext="{Binding SelectedProfileSlot}"
+                      Visibility="{Binding DataContext.ShowLedCaption,
+                                   RelativeSource={RelativeSource AncestorType=UserControl},
+                                   Converter={StaticResource BoolToVis}}">
+            <Ellipse Style="{StaticResource SlotDot}"/>
+            <TextBlock Style="{DynamicResource SubtleText}" Margin="6,0,0,0" VerticalAlignment="Center"
+                       Text="{Binding Colour, StringFormat={}{0} — LED on the mouse}"/>
+          </StackPanel>
+          <!-- transient note (Switching…/failure/unreachable); collapsed when empty so the
+               caption row above doesn't ride on a blank line -->
+          <TextBlock Text="{Binding ProfileDetail}" TextWrapping="Wrap" Margin="0,6,0,0">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock" BasedOn="{StaticResource SubtleText}">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding ProfileDetail}" Value="">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
         </StackPanel>
       </Border>
     </StackPanel>
+    </Grid>
   </Grid>
 </UserControl>
