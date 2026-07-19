@@ -108,23 +108,26 @@ does, so launch it `-WindowStyle Hidden`.
   pass-throughs block). The poll itself does battery I/O only. `RefreshNowAsync`
   (manual button, wake, device-change) calls `_device.Reset()` first to re-select the active interface;
   the frequent background poll reuses the handle for efficiency.
-- **Button remapping (Phase B, shipped 2026-07-11)** — bindings are written **once** into an
-  **app-owned onboard profile slot** (created on first Apply via the first FREE slot number, seeded
-  with the factory map, recorded as `OnboardSlot` in settings; **the user's existing slots 01/02 are
-  never taken or written**). The firmware holds bindings through power-cycles — no re-apply, no
-  sentinel poll. The active slot is readable AND settable since 2026-07-18 (`0x05/0x84`/`0x05/0x04`
-  — the Profile card's ↻/dropdown); the mouse's bottom button (LED colour = slot: white/red/green/
-  blue/cyan) remains the hardware fallback.
-  Write path is `AppHost.WriteBindingAsync` (per-chip instant apply): ensure slot → write → read-back
-  verify → persist; "Default" writes the factory action (deterministic) and is always available on any
-  chip (the repair path). Since v2.2 the ensure step also **switches the mouse onto a slot it just
-  created** (adopt → seed → set-active, best-effort) — the grid displays the ACTIVE slot, so the
-  triggering write must land visibly; still never a content write to a user slot.
+- **Button remapping (Phase B 2026-07-11, reworked v2.3 2026-07-19)** — bindings live in the
+  mouse's **onboard slots**; the firmware holds them through power-cycles — no re-apply, no
+  sentinel poll. Since v2.3 **every slot is editable in place** (the user reversed the Phase B
+  never-write-user-slots rule once byte-for-byte reads shipped — see the spec §13.2): writes
+  target the **ACTIVE (displayed) slot**, and safety is **snapshot + raw undo** — before any
+  overwrite the chip snapshots the button's on-mouse raw action (from the grid sweep), and ↶
+  restores it verbatim via `AppHost.RestoreRawAsync`, which round-trips even Synapse
+  macros/mouse functions the app can't model. Never remove that snapshot/undo path. The active
+  slot is readable AND settable (`0x05/0x84`/`0x05/0x04` — the Profile card's ↻/dropdown); the
+  mouse's bottom button (LED colour = slot: white/red/green/blue/cyan) remains the hardware
+  fallback. Write path is `AppHost.WriteBindingAsync` → `WriteVerifiedAsync` (per-chip instant
+  apply): resolve active slot → write → read-back verify; "Default" writes the factory action
+  (deterministic, the repair path). Nothing is persisted app-side; the old adopt/seed machinery
+  and the settings `ButtonBindings` table are retired (properties kept for JSON back-compat).
 - `Settings/` — `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at
   `%APPDATA%\NagaBatteryTray\settings.json` (Roaming — **not** the install dir under `%LOCALAPPDATA%`);
-  holds cadences, low-battery threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), cached
-  transaction id, the sparse `ButtonBindings` table (grid position → key/disabled), and the adopted
-  `OnboardSlot`. Corrupt file → silently resets to defaults.
+  holds cadences, low-battery threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), and the
+  cached transaction id. `ButtonBindings`/`OnboardSlot` survive as properties for JSON back-compat
+  but are no longer read or written (v2.3 — the firmware holds bindings, the grid reads hardware).
+  Corrupt file → silently resets to defaults.
 - `Ui/` — `IconRenderer` (two switchable styles, `TrayIconStyle` setting, switchable live from the
   settings overlay: the default **coin gauge** — a filled dark disc (`Color.FromArgb(205, 16,
   18, 22)`) covers the canvas edge-to-edge, its **rim is the battery-level ring** (hairline 5.5% of
@@ -179,11 +182,10 @@ does, so launch it `-WindowStyle Hidden`.
   slot (v2.2)**: every inventory read that yields an active slot kicks `AppHost.ReadGridAsync` — a
   generation-guarded sequential sweep of the 12 buttons (`0x02/0x8c`) that fills chips
   progressively (`SetPending`/`SetFromDevice`; keyboard/disabled decode, other categories show
-  "Synapse action (0xNN)", raw never rewritten). Editing follows *you-edit-the-profile-you're-on*:
-  the app slot active → full editing; a foreign slot active while the app slot exists → view mode
-  (`IsGridEditable`/`GridHint` — hover/tooltips live, actions gone, user-slot contents never
-  written); no/lost app slot → editable, first write bootstraps (create+seed+switch).
-  `DashboardViewModel` is the window's VM (header/DPI/
+  "Synapse action (0xNN)"). Since v2.3 the sweep read doubles as the **undo snapshot source**
+  (`_currentRaw` → `_prevRaw` on write; `SetPending` clears it so a stale slot's raw can't become
+  another slot's undo target), every displayed slot is editable, and undo is offered only when a
+  snapshot exists. `DashboardViewModel` is the window's VM (header/DPI/
   profile state plus the `Callouts` list); the Profile card is a slot **dropdown**
   (`SelectedProfileSlot` mirrors the mouse's actual active slot from `0x05/0x84`; sync is guarded
   so only a USER pick raises `SwitchRequested` → `0x05/0x04`, and a failed switch snaps the
