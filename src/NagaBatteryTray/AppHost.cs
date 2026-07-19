@@ -115,6 +115,7 @@ public sealed class AppHost
         var win = new DashboardWindow(vm);
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
         win.LivenessRefreshRequested += () => _ = RefreshProfileAsync(vm);
+        win.ActivateProfileRequested += () => _ = ActivateProfileAsync(vm);
         win.SettingsOverlayRequested += () => ShowSettingsOverlay(win, vm);
         EventHandler<DeviceState> onState = (_, state) => Dispatch(() => vm.ApplyState(state));
         _monitor.StateChanged += onState;
@@ -149,6 +150,17 @@ public sealed class AppHost
     {
         var active = await Task.Run(() => _monitor.GetActiveProfileAsync());
         Dispatch(() => vm.SetActiveSlot(active));
+    }
+
+    /// <summary>Activate button: switch the mouse to the app's slot (0x05/0x04, write-on-action),
+    /// then re-read to confirm. Failure is visible on the card, never silent.</summary>
+    private async Task ActivateProfileAsync(DashboardViewModel vm)
+    {
+        if (_settings.Settings.OnboardSlot is not int slot) return;
+        Dispatch(() => vm.SetProfileNote("Switching…"));
+        bool ok = await Task.Run(() => _monitor.SetActiveProfileAsync((byte)slot));
+        if (!ok) { Dispatch(() => vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry")); return; }
+        await RefreshProfileAsync(vm);
     }
 
     private void ShowSettingsOverlay(DashboardWindow win, DashboardViewModel vm)

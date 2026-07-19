@@ -469,6 +469,9 @@
           </DockPanel>
           <TextBlock Style="{DynamicResource BodyText}" Text="{Binding ProfileTitle}" FontWeight="SemiBold"/>
           <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding ProfileDetail}" TextWrapping="Wrap"/>
+          <ui:Button Content="Activate" Margin="0,6,0,0" Padding="10,4"
+                     HorizontalAlignment="Left" Click="OnActivateProfile"
+                     Visibility="{Binding CanActivate, Converter={StaticResource BoolToVis}}"/>
         </StackPanel>
       </Border>
     </StackPanel>

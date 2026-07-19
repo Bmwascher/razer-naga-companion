@@ -19,6 +19,7 @@ public partial class DashboardWindow : FluentWindow
     public event Action? SettingsOverlayRequested;
     public event Action<int>? ApplyDpiRequested;
     public event Action? LivenessRefreshRequested;
+    public event Action? ActivateProfileRequested;
 
     /// <summary>Raised when the scrim is clicked (click-away dismiss). Deliberately an
     /// assignment-style single-subscriber delegate, NOT an event: AppHost re-wires it on every
@@ -36,6 +37,7 @@ public partial class DashboardWindow : FluentWindow
         Stage.CaptureRequested += BeginCapture;
         Stage.ApplyDpiRequested += dpi => ApplyDpiRequested?.Invoke(dpi);
         Stage.LivenessRefreshRequested += () => LivenessRefreshRequested?.Invoke();
+        Stage.ActivateProfileRequested += () => ActivateProfileRequested?.Invoke();
         vm.PropertyChanged += (_, e) =>
         { if (e.PropertyName == nameof(vm.StatusDotBrushKey)) UpdateDot(); };
         UpdateDot();

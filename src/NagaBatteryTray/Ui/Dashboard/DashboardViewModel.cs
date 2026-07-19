@@ -196,8 +196,8 @@ public sealed class DashboardViewModel : ObservableObject
         {
             ProfileLivenessState.NotAdopted => ("No app profile yet", "Remap any button to create one."),
             ProfileLivenessState.Live => (identity, "● live — active on the mouse"),
-            ProfileLivenessState.NotLive => (identity,
-                $"○ Mouse is on Slot {_activeSlot} · {SlotColour(_activeSlot!.Value)}"),
+            ProfileLivenessState.NotLive => (identity, _activeSlot is { } m
+                ? $"○ Mouse is on Slot {m} · {SlotColour(m)}" : "○ Mouse is on another profile"),
             ProfileLivenessState.Unknown => (identity, "state unknown — mouse unreachable"),
             _ => (identity, ""), // Unchecked: identity only, no claim
         };

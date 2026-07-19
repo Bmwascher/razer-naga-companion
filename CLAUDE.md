@@ -170,10 +170,10 @@ does, so launch it `-WindowStyle Hidden`.
   is the per-button state machine (Idle → Capturing → Writing → Confirmed | Failed) that replaces
   `ButtonRowViewModel`'s staged-op model — every action writes instantly through `AppHost`'s
   `WriteBindingAsync`, no stage-then-commit step. `DashboardViewModel` is the window's VM (header/DPI/
-  profile state plus the `Callouts` list); `ProfileLiveness` is a pure comparer — is the mouse currently
-  ON the app's onboard slot? (a profile-0 **effective-action** read, hardware-verified in the Phase B
-  spike, compared against the app slot's expected bytes) — driving the Profile card's live/not-live/
-  unknown text. WPF gotcha (fixed a first-click crash): a compiled template's plain
+  profile state plus the `Callouts` list); the Profile card reads the active slot directly
+  (`0x05/0x84`) on open/refresh and offers Activate (`0x05/0x04`, write-on-action) to switch the
+  mouse onto the app's slot — `ProfileLiveness`'s effective-action inference is deleted. WPF gotcha
+  (fixed a first-click crash): a compiled template's plain
   `<ScaleTransform/>` is shared + frozen across stamped elements — swap in a fresh per-element
   transform before animating (`MouseStageView.PressScale`).
 - `Ui/Themes/` — `DesignSystem.xaml` (theme-independent status colors — `Status.Positive/Warning/
@@ -255,7 +255,7 @@ file before editing. WPF-UI gotcha: `NumberBox.Value` commits on LostFocus/Enter
 `UpdateSourceTrigger=PropertyChanged` so a button Click reads the typed value, not the prior one.
 Tests cover logic layers only — `RazerProtocol`, `BatteryMonitor`, `DashboardViewModel`,
 `JsonSettingsStore`, `IconRenderer`, `StartupRegistration`, `ButtonBinding`/`NagaV2ProButtons`,
-`KeyToHidUsage`, `CalloutViewModel`, `ThemeManager`, `ProfileLiveness`, `PopupViewModel` — via
+`KeyToHidUsage`, `CalloutViewModel`, `ThemeManager`, `PopupViewModel` — via
 `Fakes/FakeRazerDevice` (the
 `IRazerDevice` seam); HID transport, WPF windows, and the tray are exercised by the installed build
 and `--probe`/`--probe-dpi`/`--probe-buttons`, not unit tests. Tests reach `internal` members through

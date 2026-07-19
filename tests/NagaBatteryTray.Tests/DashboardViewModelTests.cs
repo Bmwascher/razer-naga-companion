@@ -113,6 +113,13 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public void CanActivate_is_false_in_the_Unchecked_state()
+    {
+        var vm = NewVm(onboardSlot: 2); // adopted slot, before any SetActiveSlot call → Unchecked
+        Assert.False(vm.CanActivate);
+    }
+
+    [Fact]
     public void SetProfileNote_overwrites_detail_only()
     {
         var vm = NewVm(onboardSlot: 2);

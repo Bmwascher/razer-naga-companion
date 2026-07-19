@@ -47,7 +47,7 @@ public static class RazerProtocol
     public const byte CommandClassProfile = 0x05;
     public const byte CommandIdGetProfileList = 0x81;
     public const byte CommandIdGetActiveProfile = 0x84;  // hardware-verified 2026-07-18 (--probe-profile)
-    public const byte CommandIdSetActiveProfile = 0x04;  // undocumented; hardware-UNVERIFIED until --set-test passes
+    public const byte CommandIdSetActiveProfile = 0x04;  // undocumented; hardware-verified 2026-07-18 (--set-test: LED-confirmed, persists across power-cycle)
     public const byte CommandIdNewProfile = 0x02;
     public const byte CommandIdDeleteProfile = 0x03;
     public const byte DataSizeProfileList = 0x06;  // 1 capacity byte + up to 5 slot numbers
@@ -218,17 +218,19 @@ public static class RazerProtocol
     }
 
     /// <summary>SET the active profile to an EXISTING onboard slot (1..5). Undocumented command
-    /// (class 0x05, id 0x04) — hardware-UNVERIFIED until the --set-test spike passes; probe-only
-    /// caller for now. Mirrors BuildNewProfileBuffer/BuildDeleteProfileBuffer's single-arg shape
+    /// (class 0x05, id 0x04) — hardware-verified 2026-07-18 (--set-test: LED-confirmed, persists
+    /// across power-cycle); this ds-0x01 shape is the one RazerDevice.SetActiveProfileAsync uses.
+    /// Mirrors BuildNewProfileBuffer/BuildDeleteProfileBuffer's single-arg shape
     /// (data_size DataSizeProfileEdit).</summary>
     public static byte[] BuildSetActiveProfileBuffer(byte transactionId, byte slot) =>
         BuildSetActiveProfileBuffer(transactionId, slot, DataSizeProfileEdit);
 
     /// <summary>Overload taking an explicit data_size, for the --set-test spike's fallback shape
     /// (ds 0x06, mirroring BuildGetActiveProfileBuffer's frame) when the ds-0x01 shape is rejected.
-    /// Undocumented command — hardware-UNVERIFIED until the --set-test spike passes; probe-only
-    /// caller for now. Throws unless slot is 1..5 and dataSize is DataSizeProfileEdit (0x01) or
-    /// DataSizeProfileList (0x06).</summary>
+    /// Undocumented command — hardware-verified 2026-07-18 (--set-test: LED-confirmed, persists
+    /// across power-cycle) via the ds-0x01 shape; this ds-0x06 fallback remains probe-only (never
+    /// needed — the ds-0x01 shape was accepted). Throws unless slot is 1..5 and dataSize is
+    /// DataSizeProfileEdit (0x01) or DataSizeProfileList (0x06).</summary>
     public static byte[] BuildSetActiveProfileBuffer(byte transactionId, byte slot, byte dataSize)
     {
         if (slot < 1 || slot > 5) throw new ArgumentOutOfRangeException(nameof(slot));
