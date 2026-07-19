@@ -390,7 +390,7 @@ public class CalloutViewModelTests
     }
 
     [Fact]
-    public async Task Undo_failure_surfaces_visibly()
+    public async Task Failed_undo_surfaces_visibly_and_reopens_the_window_for_retry()
     {
         var (vm, rec, _) = NewVm(2);
         vm.SetFromDevice(Key(0x00, 0x3a));
@@ -401,5 +401,58 @@ public class CalloutViewModelTests
 
         Assert.True(vm.Failed);
         Assert.Contains("Not applied", vm.Status);
+        Assert.True(vm.CanUndo);            // snapshot not burned by one transient failure
+
+        rec.RawResult = true;
+        await vm.UndoAsync();               // retry succeeds
+        Assert.Equal("F1", vm.BindingText);
+        Assert.Equal(2, rec.RawWrites.Count);
+    }
+
+    [Fact]
+    public async Task SetPending_expires_an_open_undo_window()
+    {
+        var (vm, rec, _) = NewVm(1);
+        vm.SetFromDevice(Key(0x00, 0x1e));
+        await vm.CaptureAsync(0x00, 0x04);
+        Assert.True(vm.CanUndo);
+
+        vm.SetPending();                    // slot switch: a new sweep begins
+
+        Assert.False(vm.CanUndo);           // slot A's snapshot must never be written into slot B
+        await vm.UndoAsync();               // and a late click is inert
+        Assert.Empty(rec.RawWrites);
+    }
+
+    [Fact]
+    public async Task A_sweep_starting_mid_write_prevents_arming_undo_from_the_old_slot()
+    {
+        var writes = new List<TaskCompletionSource<bool>>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) =>
+        { var tcs = new TaskCompletionSource<bool>(); writes.Add(tcs); return tcs.Task; },
+        (_, _) => Task.FromResult(true), () => new TaskCompletionSource().Task);
+        vm.SetFromDevice(Key(0x00, 0x1e));       // old slot's raw known
+
+        var apply = vm.DisableAsync();           // write in flight
+        vm.SetPending();                         // slot switch mid-write (busy → display skip, undo expiry still applies)
+        writes[0].SetResult(true);
+        await apply;
+
+        Assert.False(vm.CanUndo);                // pre-switch snapshot must not arm undo
+    }
+
+    [Fact]
+    public async Task Chained_undo_snapshots_the_restored_value()
+    {
+        var (vm, rec, _) = NewVm(2);
+        vm.SetFromDevice(Key(0x00, 0x3a));      // on-mouse: F1
+        await vm.CaptureAsync(0x00, 0x04);      // A (snapshot = F1)
+        await vm.UndoAsync();                   // back to F1
+        await vm.CaptureAsync(0x00, 0x05);      // B (snapshot must be the restored F1)
+        await vm.UndoAsync();
+
+        Assert.Equal(2, rec.RawWrites.Count);
+        Assert.Equal(new byte[] { 0x00, 0x3a }, rec.RawWrites[^1].Raw.Data);
+        Assert.Equal("F1", vm.BindingText);
     }
 }

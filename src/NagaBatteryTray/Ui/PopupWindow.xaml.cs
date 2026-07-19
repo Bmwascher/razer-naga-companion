@@ -33,8 +33,6 @@ public partial class PopupWindow : Window
 
     public void ApplyState(DeviceState state) => _vm.Apply(state);
 
-    public void SetProfile(int? slot) => _vm.SetProfile(slot);
-
     /// <summary>Place the popup just above the taskbar on the monitor the user clicked, in physical pixels
     /// (avoids WPF per-monitor DIP confusion that put it off-screen across mixed-DPI displays).</summary>
     private void PositionNearCursor()

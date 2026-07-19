@@ -3,15 +3,16 @@ namespace NagaBatteryTray.Hid;
 public enum ButtonActionKind { Default, Disabled, Key }
 
 /// <summary>A grid button's raw onboard action as read from the device (category + data bytes).
-/// Round-trips categories the app doesn't model (mouse, DPI-stage, …) — Default-restore needs that.</summary>
+/// Round-trips categories the app doesn't model (mouse, macros, DPI-stage, …) — the sweep display
+/// and the snapshot-undo restore path (spec §13.2) both depend on that.</summary>
 public readonly record struct RawButtonAction(byte Category, byte[] Data);
 
 /// <summary>The mouse's onboard profile inventory (0x05/0x81): slot capacity + the occupied slot
-/// numbers. Used to adopt an app-owned slot without ever touching a user's existing slots.</summary>
+/// numbers. Feeds the Profile card's slot dropdown.</summary>
 public readonly record struct ProfileList(byte Capacity, byte[] Slots);
 
-/// <summary>One thumb-grid button binding. Kind=Default is a marker (absent from the remap table);
-/// it is never written to the device.</summary>
+/// <summary>One thumb-grid button binding the app can model. Kind=Default is a marker meaning
+/// "the factory action" — it is never written to the device as-is (the factory binding is).</summary>
 public readonly record struct ButtonBinding(byte ButtonId, ButtonActionKind Kind, byte Modifiers, byte HidUsage)
 {
     /// <summary>Wire form for the 0x02/0x0c SET (spec §5.1). Throws on Default — an untouched/default

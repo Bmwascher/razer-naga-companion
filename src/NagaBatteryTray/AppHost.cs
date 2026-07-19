@@ -26,7 +26,7 @@ public sealed class AppHost
     private TrayIconController _tray = null!;
     private PopupWindow? _popup;
     private DashboardWindow? _dashboard;
-    private DashboardViewModel? _dashboardVm; // live only while _dashboard is; adoption notifications
+    private DashboardViewModel? _dashboardVm; // live only while _dashboard is; write-triggered card refreshes
     private DeviceChangeWatcher? _deviceWatcher;
     private CancellationTokenSource? _deviceDebounce;
     private bool _activating;
@@ -149,8 +149,8 @@ public sealed class AppHost
     /// active-slot read (0x05/0x84), superseding the old effective-action inference. Both reads run
     /// inside one Task.Run — the sequential awaits still serialize on the monitor's lock either way.
     /// Only called on dashboard open / explicit refresh — never polled (also runs after a switch and
-    /// after slot adoption). A known active slot then kicks the grid sweep, fire-and-forget so a
-    /// switch in progress isn't blocked behind ~12 reads.</summary>
+    /// after a write that resolved the slot on demand). A known active slot then kicks the grid
+    /// sweep, fire-and-forget so a switch in progress isn't blocked behind ~12 reads.</summary>
     private async Task RefreshProfileAsync(DashboardViewModel vm)
     {
         var (list, active) = await Task.Run(async () =>
@@ -165,13 +165,13 @@ public sealed class AppHost
     }
 
     private int _gridSweep; // sweep generation: a new sweep or dashboard close supersedes any in flight
-    private byte? _lastActive; // last active-slot read result; null = unknown (see WriteBindingAsync)
+    private byte? _lastActive; // last active-slot read result; null = unknown (see ResolveWriteSlotAsync)
 
     /// <summary>Grid sweep (spec §13.1): read the ACTIVE profile's 12 grid buttons (0x02/0x8c,
     /// hardware-verified) sequentially in position order, updating each chip as its read lands —
     /// hardware truth for whatever slot the mouse is on, including Synapse-configured user slots.
-    /// ~0.5 s per button at the default SetReadDelayMs, so the fill is visibly progressive; each
-    /// read serializes on the monitor's lock like every other pass-through (the battery poll skips
+    /// ~50-100 ms per button via the transport's fast-read ladder (full sweep ≈ 1 s); each read
+    /// serializes on the monitor's lock like every other pass-through (the battery poll skips
     /// while busy). Event-driven only — runs solely off RefreshProfileAsync's triggers.</summary>
     private async Task ReadGridAsync(DashboardViewModel vm, byte slot)
     {
@@ -306,6 +306,7 @@ public sealed class AppHost
 
     private async Task<bool> WriteVerifiedAsync(byte buttonId, byte category, byte[] data)
     {
+        bool resolvedOnDemand = _lastActive is null;
         if (await ResolveWriteSlotAsync() is not { } slot) return false;
         bool ok = await Task.Run(() => _monitor.SetButtonAsync(slot, buttonId, category, data));
         if (ok)
@@ -313,6 +314,10 @@ public sealed class AppHost
             var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, buttonId));
             ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
         }
+        // the slot was only just learned (the card said "state unknown"): let the card + grid
+        // catch up so the other chips stop showing placeholders and gain undo snapshots
+        // (review find — heir of v2.2's unknown-active refresh; event-driven, no polling)
+        if (ok && resolvedOnDemand && _dashboardVm is { } dvm) _ = RefreshProfileAsync(dvm);
         return ok;
     }
 

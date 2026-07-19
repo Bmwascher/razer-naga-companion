@@ -9,11 +9,12 @@ public sealed class AppSettings
     public string? CachedTransactionId { get; set; } = null; // e.g. "0x1f"; null = unprobed
     public int SetReadDelayMs { get; set; } = 400;
 
-    /// <summary>Thumb-grid remaps keyed by grid position (1..12); sparse — only non-Default buttons.</summary>
+    /// <summary>Retired (v2.3): kept only so older settings.json files round-trip — no longer read
+    /// or written. The firmware holds every binding; the grid reads hardware truth.</summary>
     public Dictionary<int, ButtonBindingSetting> ButtonBindings { get; set; } = new();
 
-    /// <summary>The onboard profile slot this app created and owns (bindings are written there and
-    /// persist in the mouse's own memory). Null = not adopted yet. Never a user's pre-existing slot.</summary>
+    /// <summary>Retired (v2.3): the app-owned-slot model is gone — kept only for JSON back-compat,
+    /// no longer read or written.</summary>
     public int? OnboardSlot { get; set; } = null;
 
     /// <summary>Active theme preset name (Ui/Themes). Unknown value → Porcelain at apply time.</summary>

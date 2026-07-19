@@ -10,8 +10,9 @@ public interface IRazerDevice : IDisposable
     Task<bool> SetDpiAsync(int dpiX, int dpiY, CancellationToken ct);
 
     /// <summary>Write one raw button action (category + data) to a profile: 0x00 = volatile direct,
-    /// 0x01..0x05 = onboard slot. The app only ever writes its own adopted slot — a user's existing
-    /// slots must never be a target. True = the firmware acked the SET (status 0x02).</summary>
+    /// 0x01..0x05 = onboard slot. Since v2.3 any slot is a legitimate target (the ACTIVE one in
+    /// practice); safety is snapshot-before-overwrite + raw undo at the callout layer, never
+    /// removed (spec §13.2). True = the firmware acked the SET (status 0x02).</summary>
     Task<bool> SetButtonAsync(byte profile, byte buttonId, byte category, byte[] data, CancellationToken ct);
 
     /// <summary>Read a button's current action from a profile (0x00 direct / 0x01..0x05 onboard).
@@ -30,7 +31,7 @@ public interface IRazerDevice : IDisposable
 
     /// <summary>Switch the active onboard slot (0x05/0x04, hardware-verified 2026-07-18; persists
     /// across power-cycles — bottom-button parity). Targets slots from the device's own profile
-    /// list (the card's selector). True = firmware acked (status 0x02).</summary>
+    /// list (the card's dropdown). True = firmware acked (status 0x02).</summary>
     Task<bool> SetActiveProfileAsync(byte slot, CancellationToken ct);
 
     /// <summary>Drop any cached connection so the next call re-selects the active interface. Used after a

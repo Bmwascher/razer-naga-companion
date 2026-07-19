@@ -143,7 +143,7 @@ public sealed class RazerDevice : IRazerDevice
     /// completed-status + class/cmd echo check treats all three as "not ready, wait longer". Kept
     /// separate from ExchangeAsync so battery/DPI/writes and the transaction-id probe keep their
     /// proven timing semantics exactly.</summary>
-    private async Task<byte[]?> FastReadAsync(byte[] request, CancellationToken ct)
+    private async Task<byte[]?> FastReadAsync(byte[] request, CancellationToken ct, int echoArgBytes = 0)
     {
         if (_handle is null || _handle.IsInvalid) return null;
         if (!HidD_SetFeature(_handle, request, request.Length)) { CloseHandle(); return null; }
@@ -156,9 +156,17 @@ public sealed class RazerDevice : IRazerDevice
             reply[0] = 0x00;
             if (!HidD_GetFeature(_handle, reply, reply.Length)) { CloseHandle(); return null; }
             // ready = a completed status AND the reply echoes OUR class+cmd (buffer[7]/[8] =
-            // report class/cmd — every Razer reply echoes them; the parses already rely on it)
+            // report class/cmd — every Razer reply echoes them; the parses already rely on it).
+            // echoArgBytes extends the check over the request's leading arg bytes (buffer[9..]):
+            // the grid sweep issues 12 same-class/cmd requests back-to-back, so a stale finished
+            // reply from the PREVIOUS button would otherwise pass and read as a hard failure at
+            // the parse layer instead of "wait longer" (review find). Only usable when the
+            // request args are echoed rather than replaced by reply data (button reads echo
+            // profile/buttonId/hypershift; list/active reads carry data there — pass 0).
             bool pending = reply[1] is 0x00 or 0x01
                 || reply[7] != request[7] || reply[8] != request[8];
+            for (int i = 0; !pending && i < echoArgBytes; i++)
+                if (reply[9 + i] != request[9 + i]) pending = true;
             if (!pending) return reply;
             delay = Math.Min(delay * 2, 400);
         }
@@ -236,7 +244,7 @@ public sealed class RazerDevice : IRazerDevice
             byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return null;
             var reply = await FastReadAsync(RazerProtocol.BuildGetButtonBuffer(
-                tid, profile, buttonId, 0x00), ct);
+                tid, profile, buttonId, 0x00), ct, echoArgBytes: 3); // profile/buttonId/hypershift echo
             if (reply is null) return null;
             if (RazerProtocol.ParseButtonReply(reply, profile, buttonId, 0x00,
                     out byte category, out byte[] data) != ReplyResult.Success)

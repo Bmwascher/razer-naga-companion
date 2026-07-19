@@ -149,7 +149,7 @@ does, so launch it `-WindowStyle Hidden`.
   wrapped by `TrayIconController` (tray menu item is **"Dashboard"**, renamed from "Settings"); `PopupWindow`
   (+`PopupViewModel`; cached singleton that **re-parks off-screen before every show** and positions in
   **physical px** to dodge mixed-DPI bugs and a reposition flash; restyled to the `App.*` DynamicResource
-  theme keys, shows a "Profile N · colour" line once an onboard slot is adopted, and its second button
+  theme keys — the old app-profile line is gone since v2.3 — and its second button
   opens the dashboard); `DeviceChangeWatcher` (hidden top-level window; `WM_DEVICECHANGE`/
   `DBT_DEVNODES_CHANGED` → debounced refresh); `Notifications` (low-battery toast), `DoubleIntConverter`.
   `AppHost.cs` lifecycle (owns the monitor, tray, and device-change hook) / `Program.cs` single-instance

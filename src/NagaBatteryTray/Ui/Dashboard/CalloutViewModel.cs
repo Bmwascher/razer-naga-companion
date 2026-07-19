@@ -25,6 +25,7 @@ public sealed class CalloutViewModel : ObservableObject
     private string? _deviceText; // non-null overrides BindingText: sweep pending "…", failed read "—", or a foreign-category label
     private RawButtonAction? _currentRaw; // best-known on-mouse action for the DISPLAYED slot (null = unknown)
     private RawButtonAction? _prevRaw;    // snapshot taken before the last verified write — what ↶ restores
+    private int _snapshotGen; // bumped when the displayed slot may have changed (sweep start) — a stale snapshot must never arm undo
     private int _undoVersion;
     private bool _isCapturing, _isBusy, _canUndo, _isHighlighted, _failed;
     private string _status = "";
@@ -84,16 +85,26 @@ public sealed class CalloutViewModel : ObservableObject
     }
 
     /// <summary>Grid-sweep start (spec §13.1): show the pending marker until this button's read
-    /// lands. The raw snapshot is cleared too — after a slot switch the old slot's raw must not
-    /// masquerade as this slot's undo target (a write during the pending window simply has no
-    /// known prior, so no undo opens). Skipped while the chip is mid-edit — the sweep must never
-    /// clobber a live edit.</summary>
+    /// lands. The raw snapshot AND any open undo window are invalidated first — after a slot
+    /// switch the old slot's raw must not masquerade as this slot's undo target, and ↶ armed
+    /// from it would write one slot's action into another (review find). Undo expiry applies
+    /// even to a busy/capturing chip (its in-flight write checks the generation on completion);
+    /// only the DISPLAY update is skipped mid-edit — the sweep must never clobber a live edit.</summary>
     public void SetPending()
     {
+        ExpireUndo();
         if (IsBusy || IsCapturing) return;
         _currentRaw = null;
         _deviceText = PendingText;
         NotifyBinding();
+    }
+
+    private void ExpireUndo()
+    {
+        _snapshotGen++;
+        _undoVersion++;
+        _prevRaw = null;
+        CanUndo = false;
     }
 
     /// <summary>A grid-sweep read landed: display hardware truth for this button and remember the
@@ -151,7 +162,16 @@ public sealed class CalloutViewModel : ObservableObject
         Status = "Writing…";
         bool ok = await _writeRaw(Position, prev);
         IsBusy = false;
-        if (!ok) { Status = "Not applied — wiggle the mouse and retry"; Failed = true; return; }
+        if (!ok)
+        {
+            Status = "Not applied — wiggle the mouse and retry";
+            Failed = true;
+            // reopen rather than burn: the snapshot may be the only copy of an unmodelable
+            // Synapse action, and it's still valid — the mouse still holds the new binding
+            // (review find). One transient failure must not lose the restore forever.
+            _ = OpenUndoWindowAsync();
+            return;
+        }
         _currentRaw = prev;
         DisplayRaw(prev);
         Status = "Applied";
@@ -173,6 +193,7 @@ public sealed class CalloutViewModel : ObservableObject
             && kind == _kind && modifiers == _mods && usage == _usage)
         { Status = "Applied"; return true; }
         var snapshot = _currentRaw; // what's on the mouse right now; null = not yet known
+        int gen = _snapshotGen;     // if a new sweep starts mid-write, this snapshot is void
         IsBusy = true;
         Failed = false;
         Status = "Writing…";
@@ -180,13 +201,20 @@ public sealed class CalloutViewModel : ObservableObject
         IsBusy = false;
         if (!ok) { Status = "Not applied — wiggle the mouse and retry"; Failed = true; return false; }
 
-        _prevRaw = snapshot;
-        _currentRaw = WireOf(kind, modifiers, usage);
+        if (gen == _snapshotGen)
+        {
+            _prevRaw = snapshot;
+            _currentRaw = WireOf(kind, modifiers, usage);
+        }
+        else
+        {
+            _currentRaw = null; // the write's slot may not be the one now displayed/swept
+        }
         SetApplied(kind, modifiers, usage);
         Status = "Applied";
-        // no snapshot (write landed before this chip's first sweep read) → no undo window:
-        // ↶ must never write a guess (spec §13.2)
-        if (offerUndo && snapshot is not null) _ = OpenUndoWindowAsync();
+        // no snapshot (write landed before this chip's first sweep read) or a superseded one
+        // (sweep/slot change mid-write) → no undo window: ↶ must never write a guess (§13.2)
+        if (offerUndo && snapshot is not null && gen == _snapshotGen) _ = OpenUndoWindowAsync();
         return true;
     }
 

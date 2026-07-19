@@ -3,9 +3,8 @@ using NagaBatteryTray.Hid;
 
 namespace NagaBatteryTray.Settings;
 
-/// <summary>One remapped grid button as persisted in settings.json (keyed by grid position 1..12 in
-/// <see cref="AppSettings.ButtonBindings"/>; a button absent from the table holds its factory action
-/// — "Default" rewrites it from the baked-in factory map, no snapshot needed).</summary>
+/// <summary>Retired (v2.3): the shape of one entry in the legacy <see cref="AppSettings.ButtonBindings"/>
+/// table — kept only so older settings.json files round-trip; no longer read or written.</summary>
 public sealed class ButtonBindingSetting
 {
     [JsonConverter(typeof(JsonStringEnumConverter<ButtonActionKind>))]

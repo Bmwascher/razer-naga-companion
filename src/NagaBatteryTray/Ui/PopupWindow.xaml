@@ -34,9 +34,6 @@
         <Border CornerRadius="3" Background="{Binding Accent}" HorizontalAlignment="Left"
                 Width="{Binding BarPixelWidth}"/>
       </Border>
-      <TextBlock Text="{Binding ProfileText}" FontSize="10" Margin="0,8,0,0"
-                 Foreground="{DynamicResource App.TextSecondary}"
-                 Visibility="{Binding HasProfile, Converter={StaticResource BoolToVis}}"/>
       <Grid Margin="0,12,0,0">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*"/>
