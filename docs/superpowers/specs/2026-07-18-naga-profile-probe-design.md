@@ -244,7 +244,14 @@ UNCHANGED (byte-identical); input-feel clean at baseline/post-set/final. The ds 
 shape was never needed. Both directions of the active-slot protocol are now hardware-verified:
 get `0x05/0x84`, set `0x05/0x04`.
 
-## 13. Profile card v2 — the consumer (approved 2026-07-18)
+## 13. Profile card v2 — the consumer (approved 2026-07-18; **v2.1 selector, user 2026-07-19**)
+
+> **v2.1 revision (user acceptance feedback):** the single app-slot "Activate" button is replaced
+> by a **slot selector**: the card lists every existing onboard slot (profile list `0x05/0x81`,
+> read on the same open/↻ triggers), highlights the active one (`0x05/0x84`), and any other slot
+> is click-to-switch (`0x05/0x04`, verified for arbitrary existing slots by the §12 spike). The
+> app's adopted slot carries a marker (it holds the remaps). All other rules below stand
+> (event-driven reads, write-on-click only, visible failure, no polling).
 
 `IRazerDevice`/`RazerDevice` gain `GetActiveProfileAsync` (echo-checked `0x84` read → `byte?`) and
 `SetActiveProfileAsync(slot)` (`0x04` ds `0x01`), tid-gated like every command; `BatteryMonitor`
