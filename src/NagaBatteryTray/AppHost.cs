@@ -101,7 +101,7 @@ public sealed class AppHost
     private PopupWindow CreatePopup()
     {
         var p = new PopupWindow();
-        p.SetProfile(_settings.Settings.OnboardSlot);
+        // no profile line: v2.3 retired the app-owned-slot concept the line advertised (§13.2)
         p.RefreshRequested += () => _ = _monitor.RefreshNowAsync();
         p.SettingsRequested += OpenDashboard;
         _monitor.StateChanged += (_, state) => p.ApplyState(state); // live-update the popup while it's open
@@ -112,7 +112,7 @@ public sealed class AppHost
     {
         if (_dashboard is { IsVisible: true }) { _dashboard.Activate(); return; }
 
-        var vm = new DashboardViewModel(_settings.Settings, _startup.IsEnabled(), WriteBindingAsync);
+        var vm = new DashboardViewModel(_settings.Settings, _startup.IsEnabled(), WriteBindingAsync, RestoreRawAsync);
         var win = new DashboardWindow(vm);
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
         win.ProfileRefreshRequested += () => _ = RefreshProfileAsync(vm);
@@ -179,7 +179,6 @@ public sealed class AppHost
         // not burn the token a just-reopened dashboard's live sweep is running under (review find)
         if (!ReferenceEquals(_dashboardVm, vm)) return;
         int gen = Interlocked.Increment(ref _gridSweep);
-        bool appSlot = _settings.Settings.OnboardSlot is { } os && os == slot;
         Dispatch(() =>
         {
             for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++) vm.Callout(pos).SetPending();
@@ -190,7 +189,7 @@ public sealed class AppHost
             int p = pos;
             var raw = await Task.Run(() => _monitor.GetButtonAsync(slot, NagaV2ProButtons.IdForPosition(p)));
             if (gen != Volatile.Read(ref _gridSweep) || !ReferenceEquals(_dashboardVm, vm)) return;
-            Dispatch(() => vm.Callout(p).SetFromDevice(raw, appSlot));
+            Dispatch(() => vm.Callout(p).SetFromDevice(raw));
         }
     }
 
@@ -247,10 +246,6 @@ public sealed class AppHost
         { _settings.Settings.TrayIconStyle = style; _settings.Save(); _tray.SetGaugeStyle(style != "Text"); };
         view.ResetAllRequested += () =>
         {
-            // view mode (spec §13.1): the grid is displaying a FOREIGN slot's hardware truth —
-            // a reset would write the app slot while the chips repaint with its factory values,
-            // desyncing the display from the mouse (review find). Same rule as the chips.
-            if (!vm.IsGridEditable) { view.SetResetNote("switch to the app profile to reset"); return; }
             view.SetResetNote("Resetting…");
             _ = RunResetAllAsync(view, vm);
         };
@@ -281,77 +276,44 @@ public sealed class AppHost
         }
     }
 
-    /// <summary>Returns the app-owned onboard slot (plus whether this call created it), adopting one
-    /// on first use: re-creates the recorded slot if the mouse lost it (e.g. factory reset), else
-    /// creates the first FREE slot — a user's existing slots are never taken or written. Every
-    /// created slot is seeded with the factory map and then SWITCHED TO (spec §13.1: the grid shows
-    /// the ACTIVE profile, so without the switch the write that triggered adoption would land
-    /// invisibly; best-effort — a slot switch only, bottom-button parity, never a content write).
-    /// Null = mouse unreachable, create refused, or no free slot.</summary>
-    private async Task<(byte Slot, bool Created)?> EnsureOnboardSlotAsync()
+    /// <summary>The write target (spec §13.2): the ACTIVE slot — the one the grid displays. Uses
+    /// the last active-slot read, or reads it on demand when unknown (dashboard just opened /
+    /// prior reads failed). Null = can't establish where the mouse is → the write fails visibly.</summary>
+    private async Task<byte?> ResolveWriteSlotAsync()
     {
-        if (await Task.Run(() => _monitor.GetProfileListAsync()) is not { } list) return null;
-
-        if (_settings.Settings.OnboardSlot is { } recorded)
-        {
-            byte r = (byte)recorded;
-            if (Array.IndexOf(list.Slots, r) >= 0) return (r, false);
-            if (!await Task.Run(() => _monitor.CreateProfileAsync(r))) return null;
-            await SeedFactoryMapAsync(r);
-            await Task.Run(() => _monitor.SetActiveProfileAsync(r));
-            return (r, true);
-        }
-
-        byte free = 0;
-        for (byte n = 1; n <= list.Capacity; n++)
-            if (Array.IndexOf(list.Slots, n) < 0) { free = n; break; }
-        if (free == 0) return null; // every slot holds someone else's profile — never overwrite
-        if (!await Task.Run(() => _monitor.CreateProfileAsync(free))) return null;
-        await SeedFactoryMapAsync(free);
-        await Task.Run(() => _monitor.SetActiveProfileAsync(free));
-        _settings.Settings.OnboardSlot = free;
-        _settings.Save();
-        return (free, true);
+        if (_lastActive is { } a) return a;
+        if (await Task.Run(() => _monitor.GetActiveProfileAsync()) is { } read) _lastActive = read;
+        return _lastActive;
     }
 
-    /// <summary>The dashboard's instant-apply write: one binding into the app-owned slot
-    /// (ensure slot → write → read-back verify → persist). Kind=Default writes the factory action
-    /// and drops the table entry. Returns false on any failure (nothing persisted). When the ensure
-    /// step just created (and switched to) the slot, the card + grid refresh runs AFTER the write —
-    /// queuing it first would park this write behind the sweep's ~14 serialized reads.</summary>
+    /// <summary>The dashboard's instant-apply write: one modeled binding into the ACTIVE slot
+    /// (resolve slot → write → read-back verify). Kind=Default writes the factory action. The
+    /// firmware holds every binding — nothing is persisted app-side (spec §13.2). Returns false
+    /// on any failure.</summary>
     private async Task<bool> WriteBindingAsync(int position, ButtonActionKind kind, byte modifiers, byte usage)
     {
-        if (await EnsureOnboardSlotAsync() is not { } ensured) return false;
-        var (slot, created) = ensured;
-        if (created)
-            Dispatch(() => _dashboardVm?.SetAdoptedSlot(slot)); // the open VM was built before the slot existed
-
         var binding = kind == ButtonActionKind.Default
             ? NagaV2ProButtons.FactoryBindingForPosition(position)
             : new ButtonBinding(NagaV2ProButtons.IdForPosition(position), kind, modifiers, usage);
         var (category, data) = binding.ToWire();
+        return await WriteVerifiedAsync(binding.ButtonId, category, data);
+    }
 
-        bool ok = await Task.Run(() => _monitor.SetButtonAsync(slot, binding.ButtonId, category, data));
+    /// <summary>The undo path (spec §13.2): restore a pre-overwrite snapshot byte-for-byte —
+    /// including Synapse actions the app can't model. Same verified pipeline as any write.</summary>
+    private Task<bool> RestoreRawAsync(int position, RawButtonAction raw) =>
+        WriteVerifiedAsync(NagaV2ProButtons.IdForPosition(position), raw.Category, raw.Data);
+
+    private async Task<bool> WriteVerifiedAsync(byte buttonId, byte category, byte[] data)
+    {
+        if (await ResolveWriteSlotAsync() is not { } slot) return false;
+        bool ok = await Task.Run(() => _monitor.SetButtonAsync(slot, buttonId, category, data));
         if (ok)
         {
-            var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, binding.ButtonId));
+            var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, buttonId));
             ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
         }
-        // let the card + grid catch up (event-driven, no polling) when adoption happened
-        // mid-write, or when the active slot is UNKNOWN — a write that verified against an
-        // existing app slot while the card says "state unknown" may have landed on an inactive
-        // slot; the refresh shows where the mouse really is and view mode engages if it's
-        // foreign (review find)
-        if ((created || (ok && _lastActive is null)) && _dashboardVm is { } dvm)
-            _ = RefreshProfileAsync(dvm);
-        if (!ok) return false;
-
-        if (kind == ButtonActionKind.Default) _settings.Settings.ButtonBindings.Remove(position);
-        else _settings.Settings.ButtonBindings[position] = new ButtonBindingSetting
-             { Kind = kind, Modifiers = modifiers, HidUsage = usage };
-        _settings.Save();
-        Dispatch(() => _popup?.SetProfile(_settings.Settings.OnboardSlot));
-        return true;
+        return ok;
     }
 
     /// <summary>Settings-overlay "Reset all to factory": runs the counted reset (each chip shows its
@@ -361,21 +323,6 @@ public sealed class AppHost
     {
         var (ok, failed) = await vm.ResetAllAsync();
         view.SetResetNote(failed == 0 ? $"All {ok} buttons reset" : $"{failed} failed — retry from the chips");
-    }
-
-    /// <summary>A just-created slot starts EMPTY — its grid buttons read back as no action (this
-    /// surfaced in acceptance: "Default" restored nothingness). Seed the factory digits row once at
-    /// creation so the app's profile behaves like a factory mouse before any user binding lands.
-    /// Best-effort: a failed write here shows up later as that button doing nothing, and an explicit
-    /// per-row Default rewrites it.</summary>
-    private async Task SeedFactoryMapAsync(byte slot)
-    {
-        for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
-        {
-            var factory = NagaV2ProButtons.FactoryBindingForPosition(pos);
-            var (category, data) = factory.ToWire();
-            await Task.Run(() => _monitor.SetButtonAsync(slot, factory.ButtonId, category, data));
-        }
     }
 
     private void SetStartup(bool enable)

@@ -7,30 +7,27 @@ using Xunit;
 public class DashboardViewModelTests
 {
     private static Task<bool> NoWrite(int p, ButtonActionKind k, byte m, byte u) => Task.FromResult(true);
+    private static Task<bool> NoRawWrite(int p, RawButtonAction r) => Task.FromResult(true);
 
-    private static AppSettings Seeded()
-    {
-        var s = new AppSettings { OnboardSlot = 3 };
-        s.ButtonBindings[1] = new ButtonBindingSetting { Kind = ButtonActionKind.Key, Modifiers = 0x01, HidUsage = 0x06 };
-        return s;
-    }
+    private static DashboardViewModel NewVm(AppSettings? source = null) =>
+        new(source ?? new AppSettings(), runAtStartup: false, NoWrite, NoRawWrite);
 
-    private static DashboardViewModel NewVm(int? onboardSlot) =>
-        new DashboardViewModel(new AppSettings { OnboardSlot = onboardSlot }, runAtStartup: false, NoWrite);
+    private static DashboardViewModel NewVm(CalloutViewModel.WriteBinding write) =>
+        new(new AppSettings(), runAtStartup: false, write, NoRawWrite);
 
     [Fact]
-    public void Callouts_seed_from_the_table()
+    public void Callouts_start_on_the_factory_display()
     {
-        var vm = new DashboardViewModel(Seeded(), runAtStartup: false, NoWrite);
+        var vm = NewVm();
         Assert.Equal(12, vm.Callouts.Count);
-        Assert.Equal("Ctrl+C", vm.Callout(1).BindingText);
-        Assert.Equal("2", vm.Callout(2).BindingText); // untouched → factory digit
+        Assert.Equal("1", vm.Callout(1).BindingText); // factory digits until the first sweep lands
+        Assert.Equal("2", vm.Callout(2).BindingText);
     }
 
     [Fact]
     public void AnyCapturing_tracks_callout_capture_state()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         Assert.False(vm.AnyCapturing);
 
         vm.Callout(3).BeginCapture();
@@ -47,7 +44,7 @@ public class DashboardViewModelTests
     [Fact]
     public void Preset_checkmark_follows_current_dpi()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         vm.SetCurrentDpi(new DpiSetting(1600, 1600));
         Assert.True(vm.Presets.Single(p => p.Value == 1600).IsActive);
         Assert.False(vm.Presets.Single(p => p.Value == 800).IsActive);
@@ -58,7 +55,7 @@ public class DashboardViewModelTests
     [Fact]
     public void CanSavePreset_tracks_current_dpi_against_the_preset_list()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         Assert.False(vm.CanSavePreset);            // no device yet
 
         vm.SetCurrentDpi(new DpiSetting(1600, 1600));
@@ -77,7 +74,7 @@ public class DashboardViewModelTests
     [Fact]
     public void AddPreset_sorts_dedupes_and_RemovePreset_removes()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         vm.AddPreset(1200);
         vm.AddPreset(1200); // dupe ignored
         Assert.Equal(new[] { 800, 1200, 1600, 3200 }, vm.Presets.Select(p => p.Value));
@@ -85,71 +82,59 @@ public class DashboardViewModelTests
         Assert.Equal(new[] { 800, 1200, 1600 }, vm.Presets.Select(p => p.Value));
     }
 
+    // ---- profile card: dropdown inventory + selection (spec §13.1/13.2) ----
+
     [Fact]
-    public void SetProfileInventory_builds_pill_inventory_ascending_flagging_active_and_app()
+    public void SetProfileInventory_builds_the_inventory_ascending_and_selects_the_active_slot()
     {
-        var vm = NewVm(onboardSlot: 3);
+        var vm = NewVm();
         vm.SetProfileInventory(new byte[] { 3, 1, 2 }, active: 2);
 
         Assert.Equal(new byte[] { 1, 2, 3 }, vm.ProfileSlots.Select(p => p.Number));
         Assert.True(vm.ProfileSlots.Single(p => p.Number == 2).IsActive);
         Assert.False(vm.ProfileSlots.Single(p => p.Number == 1).IsActive);
-        Assert.False(vm.ProfileSlots.Single(p => p.Number == 3).IsActive);
-        Assert.True(vm.ProfileSlots.Single(p => p.Number == 3).IsApp);   // the adopted slot
-        Assert.False(vm.ProfileSlots.Single(p => p.Number == 1).IsApp);
+        Assert.Equal((byte)2, vm.SelectedProfileSlot?.Number);
+        Assert.Equal("", vm.ProfileDetail); // steady state: no status text (v2.3)
     }
 
     [Fact]
-    public void SetProfileInventory_active_equal_adopted_slot_shows_app_profile_active_detail()
+    public void ProfileSlotItem_label_names_slot_and_colour()
     {
-        var vm = NewVm(onboardSlot: 2);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
-
-        Assert.Contains("app profile active", vm.ProfileDetail);
+        Assert.Equal("Slot 2 · red", new ProfileSlotItem(2).Label);
+        Assert.Equal("Slot 3 · green", new ProfileSlotItem(3).Label);
     }
 
     [Fact]
-    public void SetProfileInventory_active_other_than_adopted_shows_remaps_live_detail()
+    public void SetProfileInventory_unknown_active_keeps_items_and_shows_unknown_detail()
     {
-        var vm = NewVm(onboardSlot: 2);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
-
-        Assert.Contains("remaps live on Slot 2", vm.ProfileDetail);  // detail names the app's own slot
-    }
-
-    [Fact]
-    public void SetProfileInventory_unknown_active_keeps_pills_and_shows_unknown_detail()
-    {
-        var vm = NewVm(onboardSlot: 2);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2); // establish pills first
+        var vm = NewVm();
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2); // establish items first
         vm.SetProfileInventory(null, active: null);                // mouse went unreachable
 
-        Assert.Equal(3, vm.ProfileSlots.Count);                    // last-known pills kept, not cleared
+        Assert.Equal(3, vm.ProfileSlots.Count);                    // last-known items kept, not cleared
         Assert.DoesNotContain(vm.ProfileSlots, p => p.IsActive);    // none active — state is unknown
         Assert.Null(vm.SelectedProfileSlot);                        // the dropdown doesn't guess either
         Assert.Contains("unknown", vm.ProfileDetail);
     }
 
     [Fact]
-    public void SetProfileInventory_list_read_fails_but_active_known_keeps_pills_and_marks_active()
+    public void SetProfileInventory_list_read_fails_but_active_known_keeps_items_and_marks_active()
     {
-        var vm = NewVm(onboardSlot: 2);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2); // establish pills first
+        var vm = NewVm();
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2); // establish items first
         vm.SetProfileInventory(null, active: 3);                  // list read failed, active read succeeded
 
-        Assert.Equal(3, vm.ProfileSlots.Count);                            // prior pills kept
+        Assert.Equal(3, vm.ProfileSlots.Count);                            // prior items kept
         Assert.True(vm.ProfileSlots.Single(p => p.Number == 3).IsActive);
         Assert.False(vm.ProfileSlots.Single(p => p.Number == 2).IsActive);
         Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number);             // selection follows the mouse
-        Assert.Contains("remaps live on Slot 2", vm.ProfileDetail);        // normal detail, not "unknown"
+        Assert.Equal("", vm.ProfileDetail);                                // normal state, not "unknown"
     }
-
-    // ---- v2.2 dropdown selection (spec §13.1) ----
 
     [Fact]
     public void Inventory_read_syncs_the_dropdown_selection_without_raising_SwitchRequested()
     {
-        var vm = NewVm(onboardSlot: 3);
+        var vm = NewVm();
         byte? requested = null;
         vm.SwitchRequested += s => requested = s;
 
@@ -162,7 +147,7 @@ public class DashboardViewModelTests
     [Fact]
     public void User_pick_of_another_slot_raises_SwitchRequested_once()
     {
-        var vm = NewVm(onboardSlot: 3);
+        var vm = NewVm();
         var requests = new List<byte>();
         vm.SwitchRequested += requests.Add;
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
@@ -175,7 +160,7 @@ public class DashboardViewModelTests
     [Fact]
     public void Picking_the_already_active_slot_is_a_noop()
     {
-        var vm = NewVm(onboardSlot: 3);
+        var vm = NewVm();
         var requests = new List<byte>();
         vm.SwitchRequested += requests.Add;
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
@@ -189,7 +174,7 @@ public class DashboardViewModelTests
     [Fact]
     public void ResyncSelection_snaps_the_dropdown_back_after_a_failed_switch()
     {
-        var vm = NewVm(onboardSlot: 3);
+        var vm = NewVm();
         var requests = new List<byte>();
         vm.SwitchRequested += requests.Add;
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
@@ -202,129 +187,22 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void SetAdoptedSlot_keeps_the_selection_valid_when_the_selected_pill_is_replaced()
-    {
-        var vm = NewVm(onboardSlot: null);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
-        Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number);
-
-        vm.SetAdoptedSlot(3); // RemarkApp replaces the slot-3 item instance
-
-        Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number);
-        Assert.True(vm.SelectedProfileSlot!.IsApp);               // and it's the NEW instance
-    }
-
-    // ---- v2.2 grid editability (spec §13.1: you edit the profile you're on) ----
-
-    [Fact]
-    public void Grid_is_editable_when_the_app_slot_is_active()
-    {
-        var vm = NewVm(onboardSlot: 2);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
-        Assert.True(vm.IsGridEditable);
-        Assert.Equal("", vm.GridHint);
-    }
-
-    [Fact]
-    public void Grid_is_view_only_on_a_foreign_slot_when_the_app_slot_exists()
-    {
-        var vm = NewVm(onboardSlot: 2);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
-        Assert.False(vm.IsGridEditable);
-        Assert.Contains("viewing Slot 3", vm.GridHint);
-        Assert.Contains("Slot 2 · red", vm.GridHint);
-    }
-
-    [Fact]
-    public void Grid_stays_editable_with_no_app_slot_adopted()
-    {
-        var vm = NewVm(onboardSlot: null);
-        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 1);
-        Assert.True(vm.IsGridEditable);                           // first write bootstraps the slot
-    }
-
-    [Fact]
-    public void Grid_stays_editable_when_the_recorded_slot_was_lost_from_the_mouse()
-    {
-        var vm = NewVm(onboardSlot: 3);
-        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 1);   // factory reset ate slot 3
-        Assert.True(vm.IsGridEditable);                           // write re-creates + switches
-    }
-
-    [Fact]
-    public void Grid_stays_editable_while_the_active_slot_is_unknown()
-    {
-        var vm = NewVm(onboardSlot: 2);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
-        vm.SetProfileInventory(null, active: null);               // went unreachable — offline handles the rest
-        Assert.True(vm.IsGridEditable);
-    }
-
-    [Fact]
-    public void Entering_view_mode_revokes_a_live_capture()
-    {
-        var vm = NewVm(onboardSlot: 2);
-        vm.Callout(4).BeginCapture();                             // capture starts before the first inventory read
-        Assert.True(vm.AnyCapturing);
-
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3); // read lands: foreign slot → view mode
-
-        Assert.False(vm.IsGridEditable);
-        Assert.False(vm.Callout(4).IsCapturing);                  // the capture didn't survive into view mode
-        Assert.False(vm.AnyCapturing);
-    }
-
-    [Fact]
-    public void An_editable_refresh_does_not_revoke_a_live_capture()
-    {
-        var vm = NewVm(onboardSlot: 2);
-        vm.Callout(4).BeginCapture();
-
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2); // read lands: app slot active
-
-        Assert.True(vm.IsGridEditable);
-        Assert.True(vm.Callout(4).IsCapturing);                   // an authorized capture rides through
-    }
-
-    [Fact]
-    public void SetProfileInventory_without_adopted_slot_still_lists_pills()
-    {
-        var vm = NewVm(onboardSlot: null);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
-
-        Assert.Equal(3, vm.ProfileSlots.Count);              // switching is useful even unadopted
-        Assert.DoesNotContain(vm.ProfileSlots, p => p.IsApp); // nothing adopted yet
-    }
-
-    [Fact]
-    public void SetAdoptedSlot_remarks_app_flag_on_existing_pills()
-    {
-        var vm = NewVm(onboardSlot: null);
-        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
-
-        vm.SetAdoptedSlot(3);
-
-        Assert.True(vm.ProfileSlots.Single(p => p.Number == 3).IsApp);
-        Assert.False(vm.ProfileSlots.Single(p => p.Number == 1).IsApp);
-        Assert.True(vm.ProfileSlots.Single(p => p.Number == 2).IsActive); // active flag survives the remark
-        Assert.Contains("remaps live on Slot 3", vm.ProfileDetail);       // detail recomputed for the new slot
-    }
-
-    [Fact]
     public void SetProfileNote_overwrites_the_detail_line()
     {
-        var vm = NewVm(onboardSlot: 2);
+        var vm = NewVm();
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
         vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry");
         Assert.Contains("wiggle", vm.ProfileDetail);
         Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number); // selection untouched by a note
     }
 
+    // ---- settings / state ----
+
     [Fact]
     public void ApplyTo_clamps_cadences_and_threshold()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite)
-        { PollSeconds = 3, PollChargingSeconds = 1, LowBatteryThreshold = 0 };
+        var vm = NewVm();
+        vm.PollSeconds = 3; vm.PollChargingSeconds = 1; vm.LowBatteryThreshold = 0;
         var target = new AppSettings();
         vm.ApplyTo(target);
         Assert.Equal(15, target.PollIntervalSeconds);
@@ -335,7 +213,7 @@ public class DashboardViewModelTests
     [Fact]
     public void ApplyState_maps_online_and_offline()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         vm.ApplyState(DeviceState.Online(87, true, false));
         Assert.True(vm.DeviceOnline);
         Assert.Contains("87", vm.BatteryChipText);
@@ -346,7 +224,7 @@ public class DashboardViewModelTests
     [Fact]
     public void Header_subtitle_is_link_state_only_the_profile_card_owns_slot_identity()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         vm.ApplyState(DeviceState.Online(87, false, false));
         Assert.Equal("Wireless", vm.HeaderSubtitle);
         vm.ApplyState(DeviceState.Online(87, false, true));
@@ -358,7 +236,7 @@ public class DashboardViewModelTests
     [Fact]
     public async Task ResetAllAsync_counts_all_12_as_ok_when_every_write_succeeds()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         var (ok, failed) = await vm.ResetAllAsync();
         Assert.Equal(12, ok);
         Assert.Equal(0, failed);
@@ -368,7 +246,7 @@ public class DashboardViewModelTests
     public async Task ResetAllAsync_counts_failures_for_positions_whose_write_fails()
     {
         Task<bool> FailTwo(int p, ButtonActionKind k, byte m, byte u) => Task.FromResult(p != 3 && p != 7);
-        var vm = new DashboardViewModel(Seeded(), false, FailTwo);
+        var vm = NewVm(FailTwo);
         var (ok, failed) = await vm.ResetAllAsync();
         Assert.Equal(10, ok);
         Assert.Equal(2, failed);
@@ -384,7 +262,7 @@ public class DashboardViewModelTests
             if (first) { first = false; return pending.Task; }
             return Task.FromResult(true);
         }
-        var vm = new DashboardViewModel(Seeded(), false, Write);
+        var vm = NewVm(Write);
         var inFlight = vm.Callout(3).DisableAsync(); // occupies chip 3
 
         var (ok, failed) = await vm.ResetAllAsync();
@@ -396,21 +274,10 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void SetAdoptedSlot_updates_the_profile_card_identity_mid_session()
-    {
-        var vm = new DashboardViewModel(new AppSettings(), false, NoWrite); // fresh install: no slot
-        Assert.Contains("No app profile yet", vm.ProfileDetail);
-
-        vm.SetAdoptedSlot(3);
-        Assert.DoesNotContain("No app profile yet", vm.ProfileDetail);
-        Assert.DoesNotContain("live", vm.ProfileDetail); // Unchecked: no active-slot claim yet
-    }
-
-    [Fact]
     public void ApplyTo_preserves_an_untouched_sub15_cadence_but_clamps_a_user_change()
     {
         var src = new AppSettings { PollIntervalSeconds = 10 }; // documented hand-edit bypass
-        var vm = new DashboardViewModel(src, false, NoWrite);
+        var vm = NewVm(src);
         var target = new AppSettings();
         vm.ApplyTo(target);
         Assert.Equal(10, target.PollIntervalSeconds);           // untouched → passes through
@@ -423,7 +290,7 @@ public class DashboardViewModelTests
     [Fact]
     public void DpiSliderPos_endpoints_map_to_dpi_range()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         vm.DpiSliderPos = 0.0;
         Assert.Equal(100, vm.Dpi);
         vm.DpiSliderPos = 1.0;
@@ -433,7 +300,8 @@ public class DashboardViewModelTests
     [Fact]
     public void DpiSliderPos_round_trips_through_dpi()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite) { Dpi = 1600 };
+        var vm = NewVm();
+        vm.Dpi = 1600;
         double pos = vm.DpiSliderPos;
         vm.DpiSliderPos = pos;
         Assert.Equal(1600, vm.Dpi);
@@ -442,7 +310,7 @@ public class DashboardViewModelTests
     [Fact]
     public void DpiSliderPos_midpoint_is_sqrt300_times_100_rounded_to_50()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         vm.DpiSliderPos = 0.5;
         Assert.Equal(1750, vm.Dpi);
     }
@@ -450,7 +318,7 @@ public class DashboardViewModelTests
     [Fact]
     public void DpiSliderPos_setter_always_snaps_dpi_to_a_multiple_of_50()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
+        var vm = NewVm();
         vm.DpiSliderPos = 0.37;
         Assert.Equal(0, vm.Dpi % 50);
     }

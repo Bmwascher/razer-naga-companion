@@ -91,14 +91,9 @@ public partial class MouseStageView : UserControl
     private void OnChipEnter(object s, RoutedEventArgs e) => Vm(s).IsHighlighted = true;
     private void OnChipLeave(object s, RoutedEventArgs e) { Vm(s).IsHighlighted = false; ReleasePress(s); }
 
-    // view mode (spec §13.1: a foreign slot's grid is read-only) blocks capture at the entry
-    // points; the action buttons are collapsed by the template, so this is the remaining path
-    private bool GridEditable => DataContext is DashboardViewModel { IsGridEditable: true };
-
-    private void OnChipClick(object s, RoutedEventArgs e)
-    { if (GridEditable) CaptureRequested?.Invoke(Vm(s)); }
+    private void OnChipClick(object s, RoutedEventArgs e) => CaptureRequested?.Invoke(Vm(s));
     private void OnChipKeyUp(object s, System.Windows.Input.KeyEventArgs e)
-    { if (GridEditable && e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
+    { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
         CaptureRequested?.Invoke(Vm(s)); }
 
     // Press feedback (spec: chips + grid keys scale to 0.97 on pointer-down, back to 1.0 on
@@ -123,13 +118,11 @@ public partial class MouseStageView : UserControl
 
     private void OnUndo(object s, RoutedEventArgs e) => _ = Vm(s).UndoAsync();
     // Disable/Default are also offered inside the capture card - resolve the capture first
-    // so the row doesn't stay armed after the write. GridEditable guards are defense-in-depth:
-    // the VM revokes captures on the view-mode transition, but these handlers are reachable
-    // from the capture card during the same dispatcher turn (review find)
+    // so the row doesn't stay armed after the write
     private void OnDisable(object s, RoutedEventArgs e)
-    { if (!GridEditable) return; var vm = Vm(s); vm.CancelCapture(); _ = vm.DisableAsync(); }
+    { var vm = Vm(s); vm.CancelCapture(); _ = vm.DisableAsync(); }
     private void OnDefault(object s, RoutedEventArgs e)
-    { if (!GridEditable) return; var vm = Vm(s); vm.CancelCapture(); _ = vm.DefaultAsync(); }
+    { var vm = Vm(s); vm.CancelCapture(); _ = vm.DefaultAsync(); }
 
     // every pointer interaction with the slider (thumb drag, track click, page-jump hold)
     // ends in a mouse-up — apply once there

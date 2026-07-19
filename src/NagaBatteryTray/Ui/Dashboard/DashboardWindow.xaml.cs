@@ -121,7 +121,6 @@ public partial class DashboardWindow : FluentWindow
 
     private void BeginCapture(CalloutViewModel target)
     {
-        if (!_vm.IsGridEditable) return; // defense-in-depth: the stage view already gates its entry points
         if (_capturing is { } prev) prev.CancelCapture();
         _capturing = target;
         target.BeginCapture();
@@ -130,11 +129,7 @@ public partial class DashboardWindow : FluentWindow
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
-        // a view-mode transition mid-capture revokes it (the VM cancels, IsCapturing goes false,
-        // and this bails to the base handler); the editability check is defense-in-depth for the
-        // submission itself (review find)
-        if (_capturing is not { } chip || !chip.IsCapturing || !_vm.IsGridEditable)
-        { base.OnPreviewKeyDown(e); return; }
+        if (_capturing is not { } chip || !chip.IsCapturing) { base.OnPreviewKeyDown(e); return; }
         e.Handled = true;
         var key = e.Key == Key.System ? e.SystemKey : e.Key; // Alt-chords arrive as Key.System
         if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift

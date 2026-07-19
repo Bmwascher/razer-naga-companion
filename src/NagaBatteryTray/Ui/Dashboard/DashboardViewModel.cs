@@ -13,24 +13,21 @@ public sealed class DpiPresetItem : ObservableObject
     public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
 }
 
-/// <summary>One entry in the Profile card's slot dropdown (spec §13.1 v2.2). IsApp is fixed at
-/// construction — re-marking it after an adopted-slot change means replacing the item, not
-/// mutating it (see DashboardViewModel.RemarkApp). IsActive is INPC-mutable: the same item instance
+/// <summary>One entry in the Profile card's slot dropdown (spec §13.2 v2.3 — no slot is special
+/// anymore, so an entry is just number + colour). IsActive is INPC-mutable: the same item instance
 /// gets re-flagged as the mouse moves between slots without rebuilding the whole list.</summary>
 public sealed class ProfileSlotItem : ObservableObject
 {
-    public ProfileSlotItem(byte number, bool isApp) { Number = number; IsApp = isApp; }
+    public ProfileSlotItem(byte number) { Number = number; }
     public byte Number { get; }
-    public bool IsApp { get; }
     public string Colour => DashboardViewModel.SlotColour(Number);
-    public string Label => IsApp ? $"Slot {Number} · {Colour} · app" : $"Slot {Number} · {Colour}";
+    public string Label => $"Slot {Number} · {Colour}";
     public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
     private bool _isActive;
 }
 
 public sealed class DashboardViewModel : ObservableObject
 {
-    private int? _slot; // mutable: a fresh install adopts its slot mid-session (SetAdoptedSlot)
     private readonly int _seededPollSeconds, _seededPollChargingSeconds;
     private int _dpi = RazerProtocol.DpiMin;
     private bool _devicePresent, _deviceOnline, _runAtStartup, _lowBatteryNotify;
@@ -38,9 +35,9 @@ public sealed class DashboardViewModel : ObservableObject
     private string _headerSubtitle = "", _batteryChipText = "—", _statusDotBrushKey = "Status.Critical";
     private string _profileDetail = "", _theme = "Porcelain";
 
-    public DashboardViewModel(AppSettings source, bool runAtStartup, CalloutViewModel.WriteBinding write)
+    public DashboardViewModel(AppSettings source, bool runAtStartup,
+        CalloutViewModel.WriteBinding write, CalloutViewModel.WriteRaw writeRaw)
     {
-        _slot = source.OnboardSlot;
         _runAtStartup = runAtStartup;
         _lowBatteryThreshold = source.LowBatteryThreshold;
         _lowBatteryNotify = source.LowBatteryNotify;
@@ -48,14 +45,11 @@ public sealed class DashboardViewModel : ObservableObject
         _pollChargingSeconds = _seededPollChargingSeconds = source.PollIntervalChargingSeconds;
         _theme = source.Theme;
 
+        // chips start on the factory display and adopt hardware truth when the first sweep
+        // lands (~1 s; spec §13.2 — the settings table no longer seeds or records bindings)
         var callouts = new List<CalloutViewModel>(NagaV2ProButtons.Count);
         for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
-        {
-            var c = new CalloutViewModel(pos, write);
-            if (source.ButtonBindings.TryGetValue(pos, out var b))
-                c.SetApplied(b.Kind, b.Modifiers, b.HidUsage);
-            callouts.Add(c);
-        }
+            callouts.Add(new CalloutViewModel(pos, write, writeRaw));
         Callouts = callouts;
         foreach (var c in callouts)
             c.PropertyChanged += (_, e) =>
@@ -168,22 +162,20 @@ public sealed class DashboardViewModel : ObservableObject
         CanSavePreset = DevicePresent && !Presets.Any(p => p.Value == Dpi);
     }
 
-    // ---- profile card: slot dropdown (spec §13.1 v2.2) ----
+    // ---- profile card: slot dropdown (spec §13.2 v2.3) ----
     private byte? _activeSlot; // last active-slot read (0x05/0x84); null = never known / currently unreachable
     private bool _profileChecked; // true once SetProfileInventory has run at least once
     private ProfileSlotItem? _selectedSlot;
     private bool _syncingSelection; // guards programmatic selection writes from raising SwitchRequested
-    private bool _gridEditable = true;
-    private string _gridHint = "";
     public string ProfileDetail { get => _profileDetail; private set => Set(ref _profileDetail, value); }
 
     /// <summary>User picked a slot in the dropdown — AppHost switches the mouse (0x05/0x04).</summary>
     public event Action<byte>? SwitchRequested;
 
     /// <summary>Every existing onboard slot (from the profile list, 0x05/0x81), ascending, each
-    /// flagging whether it's the currently active slot (0x05/0x84) and/or the app's adopted slot.
-    /// Any slot is pick-to-switch (0x05/0x04) — switching persists across power-cycles (spec §12),
-    /// so it's safe to offer freely, not just when we've confirmed the mouse is elsewhere.</summary>
+    /// flagging whether it's the currently active slot (0x05/0x84). Any slot is pick-to-switch
+    /// (0x05/0x04) — switching persists across power-cycles (spec §12) and every slot is equally
+    /// editable in place (spec §13.2), so nothing is special-cased.</summary>
     public ObservableCollection<ProfileSlotItem> ProfileSlots { get; } = new();
 
     /// <summary>Two-way ComboBox binding. The selection ALWAYS mirrors the mouse's actual active
@@ -201,30 +193,8 @@ public sealed class DashboardViewModel : ObservableObject
         }
     }
 
-    /// <summary>True while the grid's callouts accept edits — the app slot is active, or no app
-    /// slot exists on the mouse yet (a write then bootstraps one: create + seed + switch). False =
-    /// view mode: the active slot is someone else's and its contents are never written.</summary>
-    public bool IsGridEditable { get => _gridEditable; private set => Set(ref _gridEditable, value); }
-
-    /// <summary>Stage-footer hint shown in view mode ("viewing Slot 1 — switch to … to edit").</summary>
-    public string GridHint { get => _gridHint; private set => Set(ref _gridHint, value); }
-
-    /// <summary>First remap on a fresh install adopts a slot AFTER this VM was built — re-mark
-    /// which dropdown entry carries the "app" badge. Detail is recomputed from whatever active-slot
-    /// knowledge we already have: the mouse's actual active slot doesn't change just because the
-    /// app adopted a new one, so there's no need to discard it.</summary>
-    public void SetAdoptedSlot(int slot)
-    {
-        if (_slot == slot) return;
-        _slot = slot;
-        RemarkApp();
-        RefreshProfileDetail();
-        RefreshEditable();
-    }
-
     /// <summary>Feed the card a fresh profile-list (0x05/0x81) + active-slot (0x05/0x84) read (either
-    /// null = unreachable). Drives the whole card: the dropdown items, which one is selected, the
-    /// detail text, and whether the grid is editable.</summary>
+    /// null = unreachable). Drives the dropdown items, which one is selected, and the detail text.</summary>
     public void SetProfileInventory(byte[]? slots, byte? active)
     {
         _profileChecked = true;
@@ -248,7 +218,6 @@ public sealed class DashboardViewModel : ObservableObject
         }
         SyncSelection();
         RefreshProfileDetail();
-        RefreshEditable();
     }
 
     /// <summary>Transient card status ("Switching…", failure text) — detail line only.</summary>
@@ -269,58 +238,13 @@ public sealed class DashboardViewModel : ObservableObject
     {
         ProfileSlots.Clear();
         foreach (byte n in slots.OrderBy(n => n))
-            ProfileSlots.Add(new ProfileSlotItem(n, isApp: _slot == n) { IsActive = active == n });
+            ProfileSlots.Add(new ProfileSlotItem(n) { IsActive = active == n });
     }
 
-    /// <summary>IsApp is fixed at construction (see ProfileSlotItem), so re-marking after an adopted-
-    /// slot change means replacing the affected item instances rather than mutating them in place —
-    /// and re-syncing the selection, which may have pointed at a replaced instance.</summary>
-    private void RemarkApp()
-    {
-        for (int i = 0; i < ProfileSlots.Count; i++)
-        {
-            var old = ProfileSlots[i];
-            bool isApp = old.Number == _slot;
-            if (isApp != old.IsApp)
-                ProfileSlots[i] = new ProfileSlotItem(old.Number, isApp) { IsActive = old.IsActive };
-        }
-        SyncSelection();
-    }
-
-    /// <summary>The dropdown carries the active-slot identity (v2.2), so the detail line is the
-    /// card's one text surface: the app's relationship to the active slot, or why it's unknown.</summary>
-    private void RefreshProfileDetail()
-    {
-        if (_slot is not { } appSlot)
-        { ProfileDetail = "No app profile yet — remap any button to create one."; return; }
-        if (_activeSlot is not { } a)
-        { ProfileDetail = _profileChecked ? "state unknown — mouse unreachable" : ""; return; }
-        ProfileDetail = a == appSlot
-            ? "● app profile active"
-            : $"○ remaps live on Slot {appSlot} · {SlotColour(appSlot)}";
-    }
-
-    /// <summary>View mode only when we positively know the mouse sits on a foreign slot while the
-    /// app's recorded slot exists on the mouse. Every unknown state stays editable: offline already
-    /// disables the grid, and a write with no (or a lost) app slot bootstraps one — the v2.2
-    /// first-remap path (create + seed + switch).</summary>
-    private void RefreshEditable()
-    {
-        if (_slot is { } app && _activeSlot is { } a && a != app && ProfileSlots.Any(p => p.Number == app))
-        {
-            IsGridEditable = false;
-            GridHint = $"viewing Slot {a} — switch to Slot {app} · {SlotColour(app)} to edit";
-            // revoke any live capture: one can start before the first inventory read lands
-            // (IsGridEditable begins true), and its capture card / keyboard submission would
-            // otherwise survive into view mode (review find)
-            foreach (var c in Callouts) c.CancelCapture();
-        }
-        else
-        {
-            IsGridEditable = true;
-            GridHint = "";
-        }
-    }
+    /// <summary>The dropdown carries the active-slot identity and every slot is equal (v2.3), so
+    /// the detail line is purely transient status — steady state is empty.</summary>
+    private void RefreshProfileDetail() =>
+        ProfileDetail = _activeSlot is null && _profileChecked ? "state unknown — mouse unreachable" : "";
 
     // ---- settings (overlay) ----
     public bool RunAtStartup { get => _runAtStartup; set => Set(ref _runAtStartup, value); }

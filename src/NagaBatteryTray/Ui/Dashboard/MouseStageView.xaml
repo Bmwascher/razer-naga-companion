@@ -140,8 +140,7 @@
                    squeezed the key-box into trimming. The key-box is left-anchored, so the
                    icons appearing in the empty right space shifts nothing. Last trigger wins:
                    while capturing the cluster stays collapsed - actions are noise mid-capture
-                   and "press a key…" needs the width; in view mode (spec §13.1: a foreign
-                   slot's grid is read-only) it never shows at all. -->
+                   and "press a key…" needs the width. -->
               <Style TargetType="StackPanel">
                 <Setter Property="Visibility" Value="Collapsed"/>
                 <Style.Triggers>
@@ -155,9 +154,6 @@
                     <Setter Property="Visibility" Value="Visible"/>
                   </DataTrigger>
                   <DataTrigger Binding="{Binding IsCapturing}" Value="True">
-                    <Setter Property="Visibility" Value="Collapsed"/>
-                  </DataTrigger>
-                  <DataTrigger Binding="{Binding DataContext.IsGridEditable, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
                     <Setter Property="Visibility" Value="Collapsed"/>
                   </DataTrigger>
                 </Style.Triggers>
@@ -372,25 +368,6 @@
             <DataTrigger Binding="{Binding DeviceOnline}" Value="False">
               <Setter Property="Visibility" Value="Visible"/>
             </DataTrigger>
-          </Style.Triggers>
-        </Style>
-      </TextBlock.Style>
-    </TextBlock>
-    <!-- view-mode hint (spec §13.1): shares the offline text's footer slot - they can't collide,
-         offline shows when the device is gone, this only while it's online in view mode -->
-    <TextBlock Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
-               Text="{Binding GridHint}">
-      <TextBlock.Style>
-        <Style TargetType="TextBlock" BasedOn="{StaticResource SubtleText}">
-          <Setter Property="Visibility" Value="Collapsed"/>
-          <Style.Triggers>
-            <MultiDataTrigger>
-              <MultiDataTrigger.Conditions>
-                <Condition Binding="{Binding DeviceOnline}" Value="True"/>
-                <Condition Binding="{Binding IsGridEditable}" Value="False"/>
-              </MultiDataTrigger.Conditions>
-              <Setter Property="Visibility" Value="Visible"/>
-            </MultiDataTrigger>
           </Style.Triggers>
         </Style>
       </TextBlock.Style>

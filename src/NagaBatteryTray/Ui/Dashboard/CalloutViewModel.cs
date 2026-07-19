@@ -4,13 +4,17 @@ namespace NagaBatteryTray.Ui.Dashboard;
 
 /// <summary>One thumb-grid button chip: instant-apply state machine
 /// (Idle → Capturing → Writing → Confirmed | Failed) with a one-shot undo window after each
-/// verified write. The write delegate is AppHost's slot pipeline; Kind=Default means
-/// "write the factory action and drop the table entry".</summary>
+/// verified write. The write delegates are AppHost's active-slot pipeline; Kind=Default means
+/// "write the factory action". Undo is a RAW restore (spec §13.2): the chip snapshots the
+/// button's best-known on-mouse action before every overwrite, so ↶ puts back exactly what was
+/// there — including Synapse macros/mouse functions the app can't otherwise model.</summary>
 public sealed class CalloutViewModel : ObservableObject
 {
     public delegate Task<bool> WriteBinding(int position, ButtonActionKind kind, byte modifiers, byte usage);
+    public delegate Task<bool> WriteRaw(int position, RawButtonAction raw);
 
     private readonly WriteBinding _write;
+    private readonly WriteRaw _writeRaw;
     private readonly Func<Task> _undoWindow; // one-shot delay; injectable for tests (default 5 s)
 
     private const string PendingText = "…";
@@ -19,15 +23,17 @@ public sealed class CalloutViewModel : ObservableObject
     private ButtonActionKind _kind = ButtonActionKind.Default;
     private byte _mods, _usage;
     private string? _deviceText; // non-null overrides BindingText: sweep pending "…", failed read "—", or a foreign-category label
-    private (ButtonActionKind Kind, byte Mods, byte Usage) _prev;
+    private RawButtonAction? _currentRaw; // best-known on-mouse action for the DISPLAYED slot (null = unknown)
+    private RawButtonAction? _prevRaw;    // snapshot taken before the last verified write — what ↶ restores
     private int _undoVersion;
     private bool _isCapturing, _isBusy, _canUndo, _isHighlighted, _failed;
     private string _status = "";
 
-    public CalloutViewModel(int position, WriteBinding write, Func<Task>? undoWindow = null)
+    public CalloutViewModel(int position, WriteBinding write, WriteRaw writeRaw, Func<Task>? undoWindow = null)
     {
         Position = position;
         _write = write;
+        _writeRaw = writeRaw;
         _undoWindow = undoWindow ?? (() => Task.Delay(TimeSpan.FromSeconds(5)));
     }
 
@@ -68,8 +74,8 @@ public sealed class CalloutViewModel : ObservableObject
     public bool IsHighlighted { get => _isHighlighted; set => Set(ref _isHighlighted, value); }
     public string Status { get => _status; set => Set(ref _status, value); }
 
-    /// <summary>Seed from the persisted table (dashboard open) or a verified write/sweep decode.
-    /// Clears any device-display override — a concrete binding always supersedes it.</summary>
+    /// <summary>Adopt a verified modeled binding as the display + edit state. Clears any
+    /// device-display override — a concrete binding always supersedes it.</summary>
     public void SetApplied(ButtonActionKind kind, byte modifiers, byte usage)
     {
         _kind = kind; _mods = modifiers; _usage = usage;
@@ -78,33 +84,38 @@ public sealed class CalloutViewModel : ObservableObject
     }
 
     /// <summary>Grid-sweep start (spec §13.1): show the pending marker until this button's read
-    /// lands. Skipped while the chip is mid-edit — the sweep must never clobber a live edit.</summary>
+    /// lands. The raw snapshot is cleared too — after a slot switch the old slot's raw must not
+    /// masquerade as this slot's undo target (a write during the pending window simply has no
+    /// known prior, so no undo opens). Skipped while the chip is mid-edit — the sweep must never
+    /// clobber a live edit.</summary>
     public void SetPending()
     {
         if (IsBusy || IsCapturing) return;
+        _currentRaw = null;
         _deviceText = PendingText;
         NotifyBinding();
     }
 
-    /// <summary>A grid-sweep read landed: display hardware truth for this button (spec §13.1).
-    /// Only an APP-slot read may update the edit state (_kind/_mods/_usage) — no-op suppression
-    /// and undo reason about that state as "the app slot's on-mouse binding", so a foreign slot's
-    /// decode (view/bootstrap display) and any category the app doesn't model land as a
-    /// display-only override instead (review find: a foreign decode written into _kind let
-    /// suppression skip a real user action while flashing "Applied"). A fresh slot's EMPTY reads
-    /// as category 0x00 too; raw the app doesn't model is never rewritten; null = the read
-    /// failed. Busy/capturing chips are skipped, same as SetPending.</summary>
-    public void SetFromDevice(RawButtonAction? raw, bool appSlot)
+    /// <summary>A grid-sweep read landed: display hardware truth for this button and remember the
+    /// raw as the undo snapshot source (spec §13.2). Keyboard/disabled decode into the edit state
+    /// (a fresh slot's EMPTY reads as category 0x00 too); a category the app doesn't model shows
+    /// as a Synapse-action override, its raw preserved for byte-for-byte restore; null = the read
+    /// failed (snapshot unknown). Busy/capturing chips are skipped, same as SetPending.</summary>
+    public void SetFromDevice(RawButtonAction? raw)
     {
         if (IsBusy || IsCapturing) return;
-        if (raw is not { } r) { _deviceText = ReadFailedText; NotifyBinding(); return; }
-        bool keyboard = r.Category == RazerProtocol.FnKeyboard && r.Data.Length == 2;
-        bool disabled = r.Category == RazerProtocol.FnDisabled;
-        if (appSlot && keyboard) { SetApplied(ButtonActionKind.Key, r.Data[0], r.Data[1]); return; }
-        if (appSlot && disabled) { SetApplied(ButtonActionKind.Disabled, 0, 0); return; }
-        _deviceText = keyboard ? KeyToHidUsage.Describe(r.Data[0], r.Data[1])
-            : disabled ? "Disabled"
-            : $"Synapse action (0x{r.Category:x2})";
+        if (raw is not { } r) { _currentRaw = null; _deviceText = ReadFailedText; NotifyBinding(); return; }
+        _currentRaw = r;
+        DisplayRaw(r);
+    }
+
+    private void DisplayRaw(RawButtonAction r)
+    {
+        if (r.Category == RazerProtocol.FnKeyboard && r.Data.Length == 2)
+        { SetApplied(ButtonActionKind.Key, r.Data[0], r.Data[1]); return; }
+        if (r.Category == RazerProtocol.FnDisabled)
+        { SetApplied(ButtonActionKind.Disabled, 0, 0); return; }
+        _deviceText = $"Synapse action (0x{r.Category:x2})";
         NotifyBinding();
     }
 
@@ -127,14 +138,23 @@ public sealed class CalloutViewModel : ObservableObject
     public Task<bool> DisableAsync() => ApplyAsync(ButtonActionKind.Disabled, 0, 0, offerUndo: true);
     public Task<bool> DefaultAsync() => ApplyAsync(ButtonActionKind.Default, 0, 0, offerUndo: true);
 
-    public Task UndoAsync()
+    /// <summary>Raw restore (spec §13.2): write the pre-overwrite snapshot back verbatim —
+    /// works for actions the app can't model. One-shot; busy guard BEFORE consuming CanUndo:
+    /// clicking ↶ while another write is in flight must not burn the undo (review find).</summary>
+    public async Task UndoAsync()
     {
-        // busy guard BEFORE consuming CanUndo: clicking ↶ while another write is in flight
-        // used to burn the one-shot undo on ApplyAsync's silent IsBusy return (review find)
-        if (!CanUndo || IsBusy) return Task.CompletedTask;
+        if (!CanUndo || IsBusy) return;
         CanUndo = false;
-        var (k, m, u) = _prev;
-        return ApplyAsync(k, m, u, offerUndo: false);
+        if (_prevRaw is not { } prev) return; // the window only opens with a snapshot; defensive
+        IsBusy = true;
+        Failed = false;
+        Status = "Writing…";
+        bool ok = await _writeRaw(Position, prev);
+        IsBusy = false;
+        if (!ok) { Status = "Not applied — wiggle the mouse and retry"; Failed = true; return; }
+        _currentRaw = prev;
+        DisplayRaw(prev);
+        Status = "Applied";
     }
 
     /// <summary>True = the binding is verified on the mouse (written, or already identical).
@@ -144,17 +164,15 @@ public sealed class CalloutViewModel : ObservableObject
     {
         if (IsBusy) return false;
         // no-op suppression (ported from the staged model): re-applying the exact current
-        // binding skips the HID round-trip — no false "Not applied" when the mouse naps, no
-        // slot creation for a no-op. Default stays exempt: it's the always-available repair path.
-        // Requires a clean display (_deviceText null): under an override, _kind describes the app
-        // slot's RECORD while the chip shows something else, so "identical" would be a lie and
-        // the user's explicit action must reach the mouse (review find).
+        // binding skips the HID round-trip — no false "Not applied" when the mouse naps.
+        // Default stays exempt: it's the always-available repair path. Requires a clean display
+        // (_deviceText null): under an override, _kind describes a RECORD while the chip shows
+        // something else, so "identical" would be a lie and the user's explicit action must
+        // reach the mouse (review find).
         if (kind != ButtonActionKind.Default && _deviceText is null
             && kind == _kind && modifiers == _mods && usage == _usage)
         { Status = "Applied"; return true; }
-        // under an override the pre-write display wasn't the edit state, so ↶ would "restore" a
-        // value that was never on the chip — don't offer an undo that can't be honest (review find)
-        bool restorable = _deviceText is null;
+        var snapshot = _currentRaw; // what's on the mouse right now; null = not yet known
         IsBusy = true;
         Failed = false;
         Status = "Writing…";
@@ -162,11 +180,25 @@ public sealed class CalloutViewModel : ObservableObject
         IsBusy = false;
         if (!ok) { Status = "Not applied — wiggle the mouse and retry"; Failed = true; return false; }
 
-        _prev = (_kind, _mods, _usage);
+        _prevRaw = snapshot;
+        _currentRaw = WireOf(kind, modifiers, usage);
         SetApplied(kind, modifiers, usage);
         Status = "Applied";
-        if (offerUndo && restorable) _ = OpenUndoWindowAsync();
+        // no snapshot (write landed before this chip's first sweep read) → no undo window:
+        // ↶ must never write a guess (spec §13.2)
+        if (offerUndo && snapshot is not null) _ = OpenUndoWindowAsync();
         return true;
+    }
+
+    /// <summary>The wire form of a modeled action — what the mouse holds after a verified write
+    /// of it (Default = the baked-in factory action for this position).</summary>
+    private RawButtonAction WireOf(ButtonActionKind kind, byte modifiers, byte usage)
+    {
+        var binding = kind == ButtonActionKind.Default
+            ? NagaV2ProButtons.FactoryBindingForPosition(Position)
+            : new ButtonBinding(NagaV2ProButtons.IdForPosition(Position), kind, modifiers, usage);
+        var (category, data) = binding.ToWire();
+        return new RawButtonAction(category, data);
     }
 
     private async Task OpenUndoWindowAsync()
