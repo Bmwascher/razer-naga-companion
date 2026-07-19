@@ -243,3 +243,18 @@ full bottom-button parity; restore to slot 1 accepted + LED-confirmed; integrity
 UNCHANGED (byte-identical); input-feel clean at baseline/post-set/final. The ds `0x06` fallback
 shape was never needed. Both directions of the active-slot protocol are now hardware-verified:
 get `0x05/0x84`, set `0x05/0x04`.
+
+## 13. Profile card v2 — the consumer (approved 2026-07-18)
+
+`IRazerDevice`/`RazerDevice` gain `GetActiveProfileAsync` (echo-checked `0x84` read → `byte?`) and
+`SetActiveProfileAsync(slot)` (`0x04` ds `0x01`), tid-gated like every command; `BatteryMonitor`
+exposes both as `_readLock`-serialized pass-throughs. The card reads the active slot on the same
+event-driven triggers as today (dashboard open, its ↻ button, device-change path if wired later —
+**no polling, no new timers**) and renders fact: **Live** when active == adopted `OnboardSlot`,
+otherwise **NotLive** with "On Slot M · colour" plus an **Activate** button that writes set-active
+on click, re-reads to confirm, and surfaces failure visibly ("Couldn't switch — wiggle the mouse
+and retry"). Safe to offer freely: the write persists across power-cycles (§12) — no re-apply
+machinery. `ProfileLiveness` (the effective-action comparer) retires, superseded by the direct
+read; the state enum survives, driven by slot equality. The popup's profile line stays
+settings-based (no I/O on that path). Tests: VM state mapping + monitor pass-throughs via
+`FakeRazerDevice` (extended with active-slot fields).
