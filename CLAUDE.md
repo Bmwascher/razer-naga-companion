@@ -125,8 +125,10 @@ does, so launch it `-WindowStyle Hidden`.
   and the settings `ButtonBindings` table are retired (properties kept for JSON back-compat).
 - `Settings/` — `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at
   `%APPDATA%\NagaBatteryTray\settings.json` (Roaming — **not** the install dir under `%LOCALAPPDATA%`);
-  holds cadences, low-battery threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), and the
-  cached transaction id. `ButtonBindings`/`OnboardSlot` survive as properties for JSON back-compat
+  holds cadences, low-battery threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), the
+  cached transaction id, app-side DPI presets, and app-side profile-slot names (`ProfileNames`,
+  keyed by slot number — the firmware stores no names, so a rename is a dashboard label only).
+  `ButtonBindings`/`OnboardSlot` survive as properties for JSON back-compat
   but are no longer read or written (v2.3 — the firmware holds bindings, the grid reads hardware).
   Corrupt file → silently resets to defaults.
 - `Ui/` — `IconRenderer` (two switchable styles, `TrayIconStyle` setting, switchable live from the
@@ -175,7 +177,14 @@ does, so launch it `-WindowStyle Hidden`.
   instant-apply binding callout chips — click to capture a key, Disable, or Default, each with a
   5 s one-shot undo, actions revealed on hover/focus (reserved-height, so columns never shift);
   hovering a chip or its grid key highlights both (two-way hover-pairing) —
-  plus a DPI card with app-side presets and a Profile card, and, as a right-docked overlay,
+  plus a DPI card (log-scale slider + app-side preset **pills** — re-templated buttons so hover
+  paints the pill, not a full-width bar; in-pill hover-revealed ✕ with reserved width; active
+  pill filled accent-soft; a `Status.Warning` "Couldn't confirm — wiggle the mouse and retry"
+  line surfaces a failed apply via `DashboardViewModel.DpiStatus`) and a Profile card (slot
+  dropdown rows carry the slot's **LED colour dot** + app-side name; ✎ swaps the box for a
+  rename TextBox — Enter commits / Esc cancels / 24-char cap, stored in settings
+  `ProfileNames`; an LED caption row under the box spells the colour out and yields to
+  transient notes), and, as a right-docked overlay,
   `SettingsView` (theme picker, general toggles, battery polling, reset-all-buttons). `CalloutViewModel`
   is the per-button state machine (Idle → Capturing → Writing → Confirmed | Failed) that replaces
   `ButtonRowViewModel`'s staged-op model — every action writes instantly through `AppHost`'s
@@ -194,9 +203,12 @@ does, so launch it `-WindowStyle Hidden`.
   (fixed a first-click crash): a compiled template's plain
   `<ScaleTransform/>` is shared + frozen across stamped elements — swap in a fresh per-element
   transform before animating (`MouseStageView.PressScale`).
-- `Ui/Themes/` — `DesignSystem.xaml` (theme-independent status colors — `Status.Positive/Warning/
-  Critical` — plus shared styles `CardBorder`/`ChipBorder`/`LabelText`/`NumeralText`/`BodyText`/
-  `SubtleText`) and 5 preset theme dictionaries (Porcelain default, Razer, Ice, Ultraviolet, Ember),
+- `Ui/Themes/` — `DesignSystem.xaml` (theme-independent colors — `Status.Positive/Warning/Critical`
+  plus the slot-LED dot brushes `Slot.White/Red/Green/Blue/Cyan` — and shared styles `CardBorder`/
+  `ChipBorder`/`LabelText`/`CardTitle`/`NumeralText`/`BodyText`/`SubtleText`; `CardTitle` (12px
+  SemiBold SmallCaps) is the card/section **header** role — `LabelText`'s 10px all-small-caps
+  renders ~7px glyphs and is for chip-number tags, never headers) and 5 preset theme dictionaries
+  (Porcelain default, Razer, Ice, Ultraviolet, Ember),
   each defining the same 12 semantic `App.*` brush keys (canvas, card fill/stroke, chip fill/stroke,
   accent/accent-soft, text primary/secondary, numeral, glow, plus the `App.ThemeName` marker);
   `ThemeManager.Apply` swaps the marked dictionary in `Application.Resources.MergedDictionaries` at
@@ -257,14 +269,16 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
   Profile card direct read + Activate (event-driven / write-on-action only — no polling). Capture:
   `%APPDATA%\NagaBatteryTray\probe-profile-*.md`; see
   `docs/superpowers/specs/2026-07-18-naga-profile-probe-design.md` §10.
+- [x] Dashboard polish (2026-07-19) — post-v2.3 screenshot review pass: `CardTitle` header role
+  (cards/sections stop using 10px small-caps titles), DPI preset **pills** + couldn't-confirm
+  status line (closes all three recorded 2026-07-17 DPI-card gripes), profile slot **rename**
+  (app-side `ProfileNames`) + LED colour dots + caption, rail top aligned to the chip columns.
+  See `docs/superpowers/specs/2026-07-19-naga-dashboard-polish-design.md`.
 - [ ] DPI stages + polling rate — program the onboard 5-stage DPI table (+ stage up/down) and
   polling-rate get/set; both openrazer-validated commands, write-on-action only (ordered 2026-07-17).
-  Includes the deferred **DPI card rework** (user, 2026-07-17): the app-side preset list likely
-  becomes the onboard stage table; known gripes to fix then — a hovered preset row paints the
-  themed button hover background and reads as a text-input box, the hover-revealed ✕ floats
-  far right of the value, and (branch review, 2026-07-17) a failed DPI apply is silent — the old
-  Settings window said "Couldn't confirm — wiggle the mouse and retry", the card needs a status
-  surface for that again.
+  Includes the deferred **DPI card rework part 2** (user, 2026-07-17): the app-side preset list
+  likely becomes the onboard stage table (the hover/✕/silent-failure gripes recorded then were
+  already closed by the 2026-07-19 dashboard-polish pass).
 - [ ] Lighting (last) — thumb-grid / scroll-wheel zone effects + brightness, theme-sync candidate;
   openrazer class 0x03/0x0F matrix commands.
 
