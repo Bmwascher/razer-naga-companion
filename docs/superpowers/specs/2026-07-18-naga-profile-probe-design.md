@@ -235,3 +235,11 @@ confirmed, persistence clause appended) / NOT ACCEPTED (genuine non-success stat
 shapes, scoped to "this run") / INDETERMINATE (any transport null — never misrecorded as
 rejection) / DECLINED. A pass finalizes the Profile card design: direct active-slot read + an
 "Activate" write-on-action button, retiring the bottom-button step.
+
+**Result — hardware run 2026-07-18 (capture `probe-profile-20260718-220936.md`):
+SET-ACTIVE VERIFIED.** `0x05/0x04` ds `0x01` arg[0]=slot accepted first try (status `0x02`);
+echo-checked read-back slot 2; LED confirmed (white→red); **persisted across a power-cycle** —
+full bottom-button parity; restore to slot 1 accepted + LED-confirmed; integrity re-check
+UNCHANGED (byte-identical); input-feel clean at baseline/post-set/final. The ds `0x06` fallback
+shape was never needed. Both directions of the active-slot protocol are now hardware-verified:
+get `0x05/0x84`, set `0x05/0x04`.

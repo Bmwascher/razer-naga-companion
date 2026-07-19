@@ -76,8 +76,11 @@ does, so launch it `-WindowStyle Hidden`.
   `ParseButtonReply` guards via the **echo check** — the reply must echo the request's
   profile/buttonId/hypershift), profile lifecycle (class 0x05: list 0x81 / create 0x02 / delete 0x03),
   device mode (0x00/0x84 get, 0x00/0x04 set) — all hardware-verified 2026-07-11 (spike, spec §6);
-  **active-slot get 0x05/0x84** (ds 0x06, slot number at reply arg[0]) hardware-verified 2026-07-18
-  (`--probe-profile` sweep — not in any reference repo; probe-only for now, no production caller yet).
+  **active-slot get 0x05/0x84** (ds 0x06, slot number at reply arg[0]; echo-checked parse) and
+  **set 0x05/0x04** (ds 0x01, arg[0]=slot; **persists across power-cycle** — full bottom-button
+  parity) both hardware-verified 2026-07-18 (`--probe-profile` sweep + `--set-test`; in no
+  reference repo — our own discovery). Probe-only callers today; the Profile card direct
+  read/Activate is the ordered consumer (write-on-action only).
   `Hid/ButtonBinding.cs` holds the button model: `ButtonBinding` (+`ToWire`; Default throws — never
   written), `RawButtonAction`, `ProfileList`, and `NagaV2ProButtons` (grid ids `0x40..0x4b` physical
   order; `FactoryBindingForPosition` = the digits row `1..9 0 - =` — a **freshly created onboard slot
@@ -229,10 +232,10 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
   active onboard slot IS readable**: class `0x05` get `0x84` (data_size `0x06`, zero args) returns
   the active slot number at report arg[0] (literal 1..5; verified bijective/stable/reproduced across
   slots 1–3 + revisit; integrity re-check byte-identical, input-feel clean). Found by the opt-in
-  blind sweep — the sourced shortlist (razerqdhid `0x80`/`0x8a`/`0x88`) all missed. Get/set symmetry
-  suggests `0x05/0x04` = SET-active-profile (**unprobed** — a write, out of the spike's scope; a
-  future opt-in spike could remove the bottom-button UX cost). Follow-up ordered: Profile card
-  direct read (event-driven only — the no-polling rule stands). Capture:
+  blind sweep — the sourced shortlist (razerqdhid `0x80`/`0x8a`/`0x88`) all missed. The symmetric
+  **set `0x05/0x04` was then verified same-day** by the opt-in `--set-test` spike (ds `0x01`,
+  LED-confirmed, persists across power-cycle, integrity byte-identical). Follow-up ordered:
+  Profile card direct read + Activate (event-driven / write-on-action only — no polling). Capture:
   `%APPDATA%\NagaBatteryTray\probe-profile-*.md`; see
   `docs/superpowers/specs/2026-07-18-naga-profile-probe-design.md` §10.
 - [ ] DPI stages + polling rate — program the onboard 5-stage DPI table (+ stage up/down) and
