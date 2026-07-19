@@ -105,7 +105,6 @@ public class DashboardViewModelTests
         var vm = NewVm(onboardSlot: 2);
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
 
-        Assert.Contains("Slot 2", vm.ProfileTitle);
         Assert.Contains("app profile active", vm.ProfileDetail);
     }
 
@@ -115,7 +114,6 @@ public class DashboardViewModelTests
         var vm = NewVm(onboardSlot: 2);
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
 
-        Assert.Contains("Slot 3", vm.ProfileTitle);                  // title names where the mouse IS
         Assert.Contains("remaps live on Slot 2", vm.ProfileDetail);  // detail names the app's own slot
     }
 
@@ -128,6 +126,7 @@ public class DashboardViewModelTests
 
         Assert.Equal(3, vm.ProfileSlots.Count);                    // last-known pills kept, not cleared
         Assert.DoesNotContain(vm.ProfileSlots, p => p.IsActive);    // none active — state is unknown
+        Assert.Null(vm.SelectedProfileSlot);                        // the dropdown doesn't guess either
         Assert.Contains("unknown", vm.ProfileDetail);
     }
 
@@ -141,8 +140,124 @@ public class DashboardViewModelTests
         Assert.Equal(3, vm.ProfileSlots.Count);                            // prior pills kept
         Assert.True(vm.ProfileSlots.Single(p => p.Number == 3).IsActive);
         Assert.False(vm.ProfileSlots.Single(p => p.Number == 2).IsActive);
-        Assert.Contains("Slot 3", vm.ProfileTitle);                        // normal active-slot title
+        Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number);             // selection follows the mouse
         Assert.Contains("remaps live on Slot 2", vm.ProfileDetail);        // normal detail, not "unknown"
+    }
+
+    // ---- v2.2 dropdown selection (spec §13.1) ----
+
+    [Fact]
+    public void Inventory_read_syncs_the_dropdown_selection_without_raising_SwitchRequested()
+    {
+        var vm = NewVm(onboardSlot: 3);
+        byte? requested = null;
+        vm.SwitchRequested += s => requested = s;
+
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+
+        Assert.Equal((byte)2, vm.SelectedProfileSlot?.Number);
+        Assert.Null(requested);                                   // programmatic sync, not a user pick
+    }
+
+    [Fact]
+    public void User_pick_of_another_slot_raises_SwitchRequested_once()
+    {
+        var vm = NewVm(onboardSlot: 3);
+        var requests = new List<byte>();
+        vm.SwitchRequested += requests.Add;
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+
+        vm.SelectedProfileSlot = vm.ProfileSlots.Single(p => p.Number == 3); // user picks in the ComboBox
+
+        Assert.Equal(new byte[] { 3 }, requests);
+    }
+
+    [Fact]
+    public void Picking_the_already_active_slot_is_a_noop()
+    {
+        var vm = NewVm(onboardSlot: 3);
+        var requests = new List<byte>();
+        vm.SwitchRequested += requests.Add;
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+
+        vm.SelectedProfileSlot = null;                                       // e.g. transient ComboBox clear
+        vm.SelectedProfileSlot = vm.ProfileSlots.Single(p => p.Number == 2); // back to the active slot
+
+        Assert.Empty(requests);
+    }
+
+    [Fact]
+    public void ResyncSelection_snaps_the_dropdown_back_after_a_failed_switch()
+    {
+        var vm = NewVm(onboardSlot: 3);
+        var requests = new List<byte>();
+        vm.SwitchRequested += requests.Add;
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+        vm.SelectedProfileSlot = vm.ProfileSlots.Single(p => p.Number == 3); // pick fails downstream
+
+        vm.ResyncSelection();
+
+        Assert.Equal((byte)2, vm.SelectedProfileSlot?.Number);    // dropdown never lies about the mouse
+        Assert.Equal(new byte[] { 3 }, requests);                 // the resync raised nothing new
+    }
+
+    [Fact]
+    public void SetAdoptedSlot_keeps_the_selection_valid_when_the_selected_pill_is_replaced()
+    {
+        var vm = NewVm(onboardSlot: null);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
+        Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number);
+
+        vm.SetAdoptedSlot(3); // RemarkApp replaces the slot-3 item instance
+
+        Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number);
+        Assert.True(vm.SelectedProfileSlot!.IsApp);               // and it's the NEW instance
+    }
+
+    // ---- v2.2 grid editability (spec §13.1: you edit the profile you're on) ----
+
+    [Fact]
+    public void Grid_is_editable_when_the_app_slot_is_active()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+        Assert.True(vm.IsGridEditable);
+        Assert.Equal("", vm.GridHint);
+    }
+
+    [Fact]
+    public void Grid_is_view_only_on_a_foreign_slot_when_the_app_slot_exists()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
+        Assert.False(vm.IsGridEditable);
+        Assert.Contains("viewing Slot 3", vm.GridHint);
+        Assert.Contains("Slot 2 · red", vm.GridHint);
+    }
+
+    [Fact]
+    public void Grid_stays_editable_with_no_app_slot_adopted()
+    {
+        var vm = NewVm(onboardSlot: null);
+        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 1);
+        Assert.True(vm.IsGridEditable);                           // first write bootstraps the slot
+    }
+
+    [Fact]
+    public void Grid_stays_editable_when_the_recorded_slot_was_lost_from_the_mouse()
+    {
+        var vm = NewVm(onboardSlot: 3);
+        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 1);   // factory reset ate slot 3
+        Assert.True(vm.IsGridEditable);                           // write re-creates + switches
+    }
+
+    [Fact]
+    public void Grid_stays_editable_while_the_active_slot_is_unknown()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
+        vm.SetProfileInventory(null, active: null);               // went unreachable — offline handles the rest
+        Assert.True(vm.IsGridEditable);
     }
 
     [Fact]
@@ -170,13 +285,13 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void SetProfileNote_overwrites_detail_only()
+    public void SetProfileNote_overwrites_the_detail_line()
     {
         var vm = NewVm(onboardSlot: 2);
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
         vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry");
         Assert.Contains("wiggle", vm.ProfileDetail);
-        Assert.Contains("Slot 3", vm.ProfileTitle); // title untouched
+        Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number); // selection untouched by a note
     }
 
     [Fact]
@@ -258,11 +373,11 @@ public class DashboardViewModelTests
     public void SetAdoptedSlot_updates_the_profile_card_identity_mid_session()
     {
         var vm = new DashboardViewModel(new AppSettings(), false, NoWrite); // fresh install: no slot
-        Assert.Contains("No app profile yet", vm.ProfileTitle);
+        Assert.Contains("No app profile yet", vm.ProfileDetail);
 
         vm.SetAdoptedSlot(3);
-        Assert.Contains("Slot 3 · green", vm.ProfileTitle);
-        Assert.DoesNotContain("live", vm.ProfileDetail); // Unchecked: identity only, no claim
+        Assert.DoesNotContain("No app profile yet", vm.ProfileDetail);
+        Assert.DoesNotContain("live", vm.ProfileDetail); // Unchecked: no active-slot claim yet
     }
 
     [Fact]
