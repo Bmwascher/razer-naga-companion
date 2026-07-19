@@ -267,7 +267,12 @@ public sealed class AppHost
         DpiSetting? readBack = ok ? await Task.Run(() => _monitor.GetDpiAsync()) : null;
         if (readBack is { } v && v.X == dpi)
         {
-            Dispatch(() => vm.SetCurrentDpi(v));
+            Dispatch(() =>
+            {
+                vm.SetCurrentDpi(v);
+                vm.SetDpiStatus(""); // a verified success clears even a warning an interleaved
+                                     // earlier apply posted after this one's opening clear (review find)
+            });
         }
         else
         {

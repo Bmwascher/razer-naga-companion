@@ -437,8 +437,12 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Button Click="OnApplyPreset" Margin="0,0,6,6" Cursor="Hand"
-                        IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                        ToolTip="{Binding Value, StringFormat=Apply {0} DPI}">
+                        IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                  <!-- ToolTip is object-typed, so Binding.StringFormat is silently dropped there —
+                       a nested ToolTip with ContentStringFormat actually formats (review find) -->
+                  <Button.ToolTip>
+                    <ToolTip Content="{Binding Value}" ContentStringFormat="Apply {0} DPI"/>
+                  </Button.ToolTip>
                   <Button.Template>
                     <ControlTemplate TargetType="Button">
                       <Border x:Name="PillRoot" CornerRadius="8" Padding="8,3" BorderThickness="1"

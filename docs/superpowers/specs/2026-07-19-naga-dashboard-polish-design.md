@@ -83,7 +83,10 @@ hover background paints a giant bar behind ~50px of content, and the ✕ docks t
   margin `4,0,0,0`, Opacity 0.6). Remove is `Visibility=Hidden` at rest → `Visible` on pill
   `IsMouseOver` — **Hidden, not Collapsed**, so the width is reserved and pills never resize
   under the pointer (the app's reserved-space idiom). The nested button captures its own
-  click, so remove never also applies.
+  click, so remove never also applies. Deliberate consequence (branch review, accepted): the
+  nested ✕ inherits the pill's `!DevicePresent` disable, so presets can't be removed while the
+  mouse is offline — the old layout's offline removal was accidental, and whole-pill disable
+  matches how the rest of the dashboard treats an absent device.
 - Keyboard: pills are Buttons — Tab reaches them, Enter/Space applies; the focus state shows
   the accent border.
 - "+ Save 1600": restyled as a **ghost pill** on its own line under the preset row (margin
