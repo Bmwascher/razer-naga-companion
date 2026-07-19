@@ -133,6 +133,38 @@ public sealed class RazerDevice : IRazerDevice
         return null; // still busy after retries
     }
 
+    private const int FastReadInitialDelayMs = 50;
+
+    /// <summary>Fast SET->GET for idempotent onboard-memory READS (button/profile queries): poll early
+    /// on a doubling ladder (50→100→200→400 ms) instead of paying the battery-cadence SetReadDelayMs
+    /// per read — the grid sweep is 12 reads, so the flat 400 ms wait made it ~5 s (user find). Safe
+    /// because a premature GET is detectable and retryable: the device buffer still holds our request
+    /// echo (status 0x00), a busy marker (0x01), or the PREVIOUS command's finished reply — the
+    /// completed-status + class/cmd echo check treats all three as "not ready, wait longer". Kept
+    /// separate from ExchangeAsync so battery/DPI/writes and the transaction-id probe keep their
+    /// proven timing semantics exactly.</summary>
+    private async Task<byte[]?> FastReadAsync(byte[] request, CancellationToken ct)
+    {
+        if (_handle is null || _handle.IsInvalid) return null;
+        if (!HidD_SetFeature(_handle, request, request.Length)) { CloseHandle(); return null; }
+
+        int delay = FastReadInitialDelayMs;
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            await Task.Delay(delay, ct);
+            var reply = new byte[RazerProtocol.BufferLength];
+            reply[0] = 0x00;
+            if (!HidD_GetFeature(_handle, reply, reply.Length)) { CloseHandle(); return null; }
+            // ready = a completed status AND the reply echoes OUR class+cmd (buffer[7]/[8] =
+            // report class/cmd — every Razer reply echoes them; the parses already rely on it)
+            bool pending = reply[1] is 0x00 or 0x01
+                || reply[7] != request[7] || reply[8] != request[8];
+            if (!pending) return reply;
+            delay = Math.Min(delay * 2, 400);
+        }
+        return null; // never became ready — caller treats like any failed read
+    }
+
     /// <summary>SET->GET a power-class query and return the data byte, or null on failure.</summary>
     private async Task<byte?> QueryAsync(byte transactionId, byte commandId, CancellationToken ct)
     {
@@ -203,7 +235,7 @@ public sealed class RazerDevice : IRazerDevice
         {
             byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return null;
-            var reply = await ExchangeAsync(RazerProtocol.BuildGetButtonBuffer(
+            var reply = await FastReadAsync(RazerProtocol.BuildGetButtonBuffer(
                 tid, profile, buttonId, 0x00), ct);
             if (reply is null) return null;
             if (RazerProtocol.ParseButtonReply(reply, profile, buttonId, 0x00,
@@ -225,7 +257,7 @@ public sealed class RazerDevice : IRazerDevice
         {
             byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return null;
-            var reply = await ExchangeAsync(RazerProtocol.BuildGetProfileListBuffer(tid), ct);
+            var reply = await FastReadAsync(RazerProtocol.BuildGetProfileListBuffer(tid), ct);
             if (reply is null) return null;
             if (RazerProtocol.ParseProfileListReply(reply, out byte capacity, out byte[] slots) != ReplyResult.Success)
                 return null;
@@ -262,7 +294,7 @@ public sealed class RazerDevice : IRazerDevice
         {
             byte tid = await EnsureConnectedAsync(ct);
             if (tid == 0) return null;
-            var reply = await ExchangeAsync(RazerProtocol.BuildGetActiveProfileBuffer(tid), ct);
+            var reply = await FastReadAsync(RazerProtocol.BuildGetActiveProfileBuffer(tid), ct);
             if (reply is null) return null;
             if (RazerProtocol.ParseActiveProfileReply(reply, out byte slot) != ReplyResult.Success) return null;
             return slot;

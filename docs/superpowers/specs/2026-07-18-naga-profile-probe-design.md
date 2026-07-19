@@ -289,8 +289,11 @@ line remains the status surface ("● app profile active" / "○ remaps live on 
 an active slot (dashboard open, ↻, post-switch confirm, post-adopt refresh — the existing triggers,
 nothing new), AppHost sweeps the 12 grid buttons of that slot via the existing verified
 `GetButtonAsync(slot, buttonId)` (`0x02/0x8c`, hypershift 0), sequentially in position order,
-updating each callout chip as its read lands (~0.5 s/button at the default `SetReadDelayMs`; chips
-show "…" while pending, so the fill is visibly progressive, top-down). A generation counter
+updating each callout chip as its read lands (chips show "…" while pending, so the fill is visibly
+progressive, top-down). Onboard-memory reads use `RazerDevice.FastReadAsync` — an early-poll
+doubling ladder (50→100→200→400 ms) gated on completed-status + class/cmd echo, added after the
+flat per-read `SetReadDelayMs` wait made the sweep ~5 s (user acceptance find, 2026-07-19); a
+healthy read lands in ~50-100 ms, so the full sweep is around a second. A generation counter
 discards results from a superseded sweep (new switch/refresh mid-sweep) and the sweep stops when
 the dashboard has closed; a chip that is busy or capturing is skipped, never clobbered. Decode for
 display: `FnKeyboard` → the existing `KeyToHidUsage.Describe`; `FnDisabled`/empty → "Disabled";

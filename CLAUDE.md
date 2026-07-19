@@ -88,7 +88,9 @@ does, so launch it `-WindowStyle Hidden`.
   is EMPTY**, so "Default" writes the baked-in factory action and new slots are seeded with it).
 - `Hid/RazerDevice.cs` (implements `Hid/IRazerDevice.cs`) — zero-access `CreateFile` +
   `HidD_Set/GetFeature`; `ExchangeAsync` transport (SET→`SetReadDelayMs` wait→GET, busy-retry,
-  close-on-failure). `EnsureConnectedAsync` picks the **live** collection (the one whose
+  close-on-failure) for battery/DPI/writes + the tid probe, and `FastReadAsync` for idempotent
+  onboard-memory READS (button/profile queries): early-poll doubling ladder 50→400 ms, ready =
+  completed status + class/cmd echo — the grid sweep's 12 reads land in ~a second instead of ~5 s. `EnsureConnectedAsync` picks the **live** collection (the one whose
   `GetMaxFeatureReportLength()==91`, **not** usage page 0xFF00 — none exposed) by trying candidates
   **wired `0x00A7` first, then wireless `0x00A8`**, and **verifying each actually answers a battery
   query** before committing: the dock's wireless receiver stays enumerated when the mouse switches to
