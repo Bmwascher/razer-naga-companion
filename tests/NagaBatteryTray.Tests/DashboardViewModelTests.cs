@@ -86,47 +86,83 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void SetActiveSlot_maps_states_from_slot_equality()
+    public void SetProfileInventory_builds_pill_inventory_ascending_flagging_active_and_app()
+    {
+        var vm = NewVm(onboardSlot: 3);
+        vm.SetProfileInventory(new byte[] { 3, 1, 2 }, active: 2);
+
+        Assert.Equal(new byte[] { 1, 2, 3 }, vm.ProfileSlots.Select(p => p.Number));
+        Assert.True(vm.ProfileSlots.Single(p => p.Number == 2).IsActive);
+        Assert.False(vm.ProfileSlots.Single(p => p.Number == 1).IsActive);
+        Assert.False(vm.ProfileSlots.Single(p => p.Number == 3).IsActive);
+        Assert.True(vm.ProfileSlots.Single(p => p.Number == 3).IsApp);   // the adopted slot
+        Assert.False(vm.ProfileSlots.Single(p => p.Number == 1).IsApp);
+    }
+
+    [Fact]
+    public void SetProfileInventory_active_equal_adopted_slot_shows_app_profile_active_detail()
     {
         var vm = NewVm(onboardSlot: 2);
-        vm.SetActiveSlot(2);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+
         Assert.Contains("Slot 2", vm.ProfileTitle);
-        Assert.Contains("live", vm.ProfileDetail); // Live: "● active on the mouse"-style line contains "live"
-        Assert.False(vm.CanActivate);
-
-        vm.SetActiveSlot(3);
-        Assert.Contains("Slot 3", vm.ProfileDetail); // NotLive: names where the mouse actually is
-        Assert.True(vm.CanActivate);
-
-        vm.SetActiveSlot(null);                    // Unknown: unreachable
-        Assert.Contains("unknown", vm.ProfileDetail);
-        Assert.False(vm.CanActivate);
+        Assert.Contains("app profile active", vm.ProfileDetail);
     }
 
     [Fact]
-    public void SetActiveSlot_without_adopted_slot_stays_NotAdopted()
+    public void SetProfileInventory_active_other_than_adopted_shows_remaps_live_detail()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
+
+        Assert.Contains("Slot 3", vm.ProfileTitle);                  // title names where the mouse IS
+        Assert.Contains("remaps live on Slot 2", vm.ProfileDetail);  // detail names the app's own slot
+    }
+
+    [Fact]
+    public void SetProfileInventory_unknown_active_keeps_pills_and_shows_unknown_detail()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2); // establish pills first
+        vm.SetProfileInventory(null, active: null);                // mouse went unreachable
+
+        Assert.Equal(3, vm.ProfileSlots.Count);                    // last-known pills kept, not cleared
+        Assert.DoesNotContain(vm.ProfileSlots, p => p.IsActive);    // none active — state is unknown
+        Assert.Contains("unknown", vm.ProfileDetail);
+    }
+
+    [Fact]
+    public void SetProfileInventory_without_adopted_slot_still_lists_pills()
     {
         var vm = NewVm(onboardSlot: null);
-        vm.SetActiveSlot(1);
-        Assert.Contains("No app profile", vm.ProfileTitle);
-        Assert.False(vm.CanActivate);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+
+        Assert.Equal(3, vm.ProfileSlots.Count);              // switching is useful even unadopted
+        Assert.DoesNotContain(vm.ProfileSlots, p => p.IsApp); // nothing adopted yet
     }
 
     [Fact]
-    public void CanActivate_is_false_in_the_Unchecked_state()
+    public void SetAdoptedSlot_remarks_app_flag_on_existing_pills()
     {
-        var vm = NewVm(onboardSlot: 2); // adopted slot, before any SetActiveSlot call → Unchecked
-        Assert.False(vm.CanActivate);
+        var vm = NewVm(onboardSlot: null);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+
+        vm.SetAdoptedSlot(3);
+
+        Assert.True(vm.ProfileSlots.Single(p => p.Number == 3).IsApp);
+        Assert.False(vm.ProfileSlots.Single(p => p.Number == 1).IsApp);
+        Assert.True(vm.ProfileSlots.Single(p => p.Number == 2).IsActive); // active flag survives the remark
+        Assert.Contains("remaps live on Slot 3", vm.ProfileDetail);       // detail recomputed for the new slot
     }
 
     [Fact]
     public void SetProfileNote_overwrites_detail_only()
     {
         var vm = NewVm(onboardSlot: 2);
-        vm.SetActiveSlot(3);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3);
         vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry");
         Assert.Contains("wiggle", vm.ProfileDetail);
-        Assert.Contains("Slot 2", vm.ProfileTitle); // title untouched
+        Assert.Contains("Slot 3", vm.ProfileTitle); // title untouched
     }
 
     [Fact]

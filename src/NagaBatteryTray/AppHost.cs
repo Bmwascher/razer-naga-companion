@@ -116,7 +116,7 @@ public sealed class AppHost
         var win = new DashboardWindow(vm);
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
         win.LivenessRefreshRequested += () => _ = RefreshProfileAsync(vm);
-        win.ActivateProfileRequested += () => _ = ActivateProfileAsync(vm);
+        win.SwitchProfileRequested += slot => _ = SwitchProfileAsync(vm, slot);
         win.SettingsOverlayRequested += () => ShowSettingsOverlay(win, vm);
         EventHandler<DeviceState> onState = (_, state) => Dispatch(() => vm.ApplyState(state));
         _monitor.StateChanged += onState;
@@ -144,26 +144,32 @@ public sealed class AppHost
         await RefreshProfileAsync(vm);
     }
 
-    /// <summary>Profile card refresh (spec §13): one direct active-slot read (0x05/0x84), superseding
-    /// the old effective-action inference. Only called on dashboard open / explicit refresh — never
-    /// polled (Task 3 also drives this after Activate).</summary>
+    /// <summary>Profile card refresh (spec §13 v2.1): the full slot inventory (0x05/0x81) plus the
+    /// active-slot read (0x05/0x84), superseding the old effective-action inference. Both reads run
+    /// inside one Task.Run — the sequential awaits still serialize on the monitor's lock either way.
+    /// Only called on dashboard open / explicit refresh — never polled (also runs after a switch).</summary>
     private async Task RefreshProfileAsync(DashboardViewModel vm)
     {
-        var active = await Task.Run(() => _monitor.GetActiveProfileAsync());
-        Dispatch(() => vm.SetActiveSlot(active));
+        var (list, active) = await Task.Run(async () =>
+        {
+            var l = await _monitor.GetProfileListAsync();
+            var a = await _monitor.GetActiveProfileAsync();
+            return (l, a);
+        });
+        Dispatch(() => vm.SetProfileInventory(list?.Slots, active));
     }
 
-    /// <summary>Activate button: switch the mouse to the app's slot (0x05/0x04, write-on-action),
+    /// <summary>Slot selector click: switch the mouse to ANY listed onboard slot (0x05/0x04,
+    /// write-on-action) — no adopted-slot gate, since every pill comes from the device's own list —
     /// then re-read to confirm. Failure is visible on the card, never silent.</summary>
-    private async Task ActivateProfileAsync(DashboardViewModel vm)
+    private async Task SwitchProfileAsync(DashboardViewModel vm, byte slot)
     {
         if (_activating) return;
         _activating = true;
         try
         {
-            if (_settings.Settings.OnboardSlot is not int slot) return;
             Dispatch(() => vm.SetProfileNote("Switching…"));
-            bool ok = await Task.Run(() => _monitor.SetActiveProfileAsync((byte)slot));
+            bool ok = await Task.Run(() => _monitor.SetActiveProfileAsync(slot));
             if (!ok) { Dispatch(() => vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry")); return; }
             await RefreshProfileAsync(vm);
         }

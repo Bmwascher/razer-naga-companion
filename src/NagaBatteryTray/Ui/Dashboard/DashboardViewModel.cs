@@ -5,14 +5,27 @@ using NagaBatteryTray.Settings;
 
 namespace NagaBatteryTray.Ui.Dashboard;
 
-public enum ProfileLivenessState { NotAdopted, Unchecked, Unknown, Live, NotLive }
-
 public sealed class DpiPresetItem : ObservableObject
 {
     private bool _isActive;
     public DpiPresetItem(int value) { Value = value; }
     public int Value { get; }
     public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
+}
+
+/// <summary>One pill in the Profile card's slot selector (spec §13 v2.1). IsApp is fixed at
+/// construction — re-marking it after an adopted-slot change means replacing the item, not
+/// mutating it (see DashboardViewModel.RemarkApp). IsActive is INPC-mutable: the same pill instance
+/// gets re-flagged as the mouse moves between slots without rebuilding the whole list.</summary>
+public sealed class ProfileSlotItem : ObservableObject
+{
+    public ProfileSlotItem(byte number, bool isApp) { Number = number; IsApp = isApp; }
+    public byte Number { get; }
+    public bool IsApp { get; }
+    public string Colour => DashboardViewModel.SlotColour(Number);
+    public string Label => IsApp ? $"{Number} · {Colour} ·app" : $"{Number} · {Colour}";
+    public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
+    private bool _isActive;
 }
 
 public sealed class DashboardViewModel : ObservableObject
@@ -53,7 +66,7 @@ public sealed class DashboardViewModel : ObservableObject
 
         Presets = new ObservableCollection<DpiPresetItem>();
         foreach (int v in source.DpiPresets.Distinct().OrderBy(v => v)) Presets.Add(new DpiPresetItem(v));
-        ApplyProfileState(_slot is null ? ProfileLivenessState.NotAdopted : ProfileLivenessState.Unchecked);
+        RefreshProfileText();
     }
 
     // ---- callouts ----
@@ -155,53 +168,90 @@ public sealed class DashboardViewModel : ObservableObject
         CanSavePreset = DevicePresent && !Presets.Any(p => p.Value == Dpi);
     }
 
-    // ---- profile card (direct active-slot read, spec §13) ----
-    private byte? _activeSlot;
+    // ---- profile card: slot selector (spec §13 v2.1) ----
+    private byte? _activeSlot; // last active-slot read (0x05/0x84); null = never known / currently unreachable
+    private bool _profileChecked; // true once SetProfileInventory has run at least once
     public string ProfileTitle { get => _profileTitle; private set => Set(ref _profileTitle, value); }
     public string ProfileDetail { get => _profileDetail; private set => Set(ref _profileDetail, value); }
 
-    /// <summary>Activate is offered only when we KNOW the mouse is on another slot — adopted slot
-    /// present, active slot read successfully, and they differ.</summary>
-    public bool CanActivate { get => _canActivate; private set => Set(ref _canActivate, value); }
-    private bool _canActivate;
+    /// <summary>Every existing onboard slot (from the profile list, 0x05/0x81), ascending, each
+    /// flagging whether it's the currently active slot (0x05/0x84) and/or the app's adopted slot.
+    /// Any pill is click-to-switch (0x05/0x04) — switching persists across power-cycles (spec §12),
+    /// so it's safe to offer freely, not just when we've confirmed the mouse is elsewhere.</summary>
+    public ObservableCollection<ProfileSlotItem> ProfileSlots { get; } = new();
 
     /// <summary>First remap on a fresh install adopts a slot AFTER this VM was built — update the
-    /// identity the Profile card renders. Liveness deliberately resets to Unchecked (identity only,
-    /// no claim): the mouse isn't necessarily ON the new slot until the user selects it.</summary>
+    /// identity the Profile card renders and re-mark which pill carries the "app" badge. Detail is
+    /// recomputed from whatever active-slot knowledge we already have: the mouse's actual active
+    /// slot doesn't change just because the app adopted a new one, so there's no need to discard it.</summary>
     public void SetAdoptedSlot(int slot)
     {
         if (_slot == slot) return;
         _slot = slot;
-        ApplyProfileState(ProfileLivenessState.Unchecked);
+        RemarkApp();
+        RefreshProfileText();
     }
 
-    /// <summary>Feed the card a fresh 0x05/0x84 read (null = unreachable). Drives the whole
-    /// state machine — Live/NotLive are slot equality now, not byte inference.</summary>
-    public void SetActiveSlot(byte? active)
+    /// <summary>Feed the card a fresh profile-list (0x05/0x81) + active-slot (0x05/0x84) read (either
+    /// null = unreachable). Drives the whole card: the pill list, which pill is active, and the
+    /// title/detail text.</summary>
+    public void SetProfileInventory(byte[]? slots, byte? active)
     {
-        _activeSlot = active;
-        ApplyProfileState(_slot is null ? ProfileLivenessState.NotAdopted
-            : active is null ? ProfileLivenessState.Unknown
-            : active == _slot ? ProfileLivenessState.Live
-            : ProfileLivenessState.NotLive);
+        _profileChecked = true;
+        if (slots is null || active is null)
+        {
+            _activeSlot = null;
+            if (slots is not null) RebuildSlots(slots, active: null);
+            else foreach (var p in ProfileSlots) p.IsActive = false; // keep last-known pills, unmark active
+        }
+        else
+        {
+            _activeSlot = active;
+            RebuildSlots(slots, active);
+        }
+        RefreshProfileText();
     }
 
     /// <summary>Transient card status ("Switching…", failure text) — detail line only.</summary>
     public void SetProfileNote(string note) => ProfileDetail = note;
 
-    private void ApplyProfileState(ProfileLivenessState state)
+    private void RebuildSlots(byte[] slots, byte? active)
     {
-        string identity = _slot is { } n ? $"Slot {n} · {SlotColour(n)}" : "";
-        (ProfileTitle, ProfileDetail) = state switch
+        ProfileSlots.Clear();
+        foreach (byte n in slots.OrderBy(n => n))
+            ProfileSlots.Add(new ProfileSlotItem(n, isApp: _slot == n) { IsActive = active == n });
+    }
+
+    /// <summary>IsApp is fixed at construction (see ProfileSlotItem), so re-marking after an adopted-
+    /// slot change means replacing the affected pill instances rather than mutating them in place.</summary>
+    private void RemarkApp()
+    {
+        for (int i = 0; i < ProfileSlots.Count; i++)
         {
-            ProfileLivenessState.NotAdopted => ("No app profile yet", "Remap any button to create one."),
-            ProfileLivenessState.Live => (identity, "● live — active on the mouse"),
-            ProfileLivenessState.NotLive => (identity, _activeSlot is { } m
-                ? $"○ Mouse is on Slot {m} · {SlotColour(m)}" : "○ Mouse is on another profile"),
-            ProfileLivenessState.Unknown => (identity, "state unknown — mouse unreachable"),
-            _ => (identity, ""), // Unchecked: identity only, no claim
-        };
-        CanActivate = state == ProfileLivenessState.NotLive;
+            var old = ProfileSlots[i];
+            bool isApp = old.Number == _slot;
+            if (isApp != old.IsApp)
+                ProfileSlots[i] = new ProfileSlotItem(old.Number, isApp) { IsActive = old.IsActive };
+        }
+    }
+
+    /// <summary>Title always names the currently-known active slot once we have one — that's real
+    /// information whether or not the app has adopted a slot. Detail states the app's relationship
+    /// to it (live / elsewhere / n/a); falls back to identity-only text before the first check or
+    /// once a check comes back unreachable.</summary>
+    private void RefreshProfileText()
+    {
+        if (_activeSlot is not { } a)
+        {
+            (ProfileTitle, ProfileDetail) = _slot is { } n
+                ? ($"Slot {n} · {SlotColour(n)}", _profileChecked ? "state unknown — mouse unreachable" : "")
+                : ("No app profile yet", "Remap any button to create one.");
+            return;
+        }
+        ProfileTitle = $"Slot {a} · {SlotColour(a)}";
+        ProfileDetail = _slot is not { } appSlot ? ""
+            : a == appSlot ? "● app profile active"
+            : $"○ remaps live on Slot {appSlot} · {SlotColour(appSlot)}";
     }
 
     // ---- settings (overlay) ----

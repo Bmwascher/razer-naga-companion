@@ -13,7 +13,7 @@ public partial class MouseStageView : UserControl
     public event Action<CalloutViewModel>? CaptureRequested; // window owns the keyboard hook
     public event Action<int>? ApplyDpiRequested;
     public event Action? LivenessRefreshRequested;
-    public event Action? ActivateProfileRequested;
+    public event Action<byte>? SwitchProfileRequested;
 
     private const int StaggerStepMs = 30;
     private static readonly Duration StaggerDuration = new(TimeSpan.FromMilliseconds(200));
@@ -149,5 +149,10 @@ public partial class MouseStageView : UserControl
     { var vm = (DashboardViewModel)DataContext; vm.AddPreset(vm.Dpi); }
 
     private void OnRefreshLiveness(object s, RoutedEventArgs e) => LivenessRefreshRequested?.Invoke();
-    private void OnActivateProfile(object s, RoutedEventArgs e) => ActivateProfileRequested?.Invoke();
+
+    private void OnSwitchProfile(object s, RoutedEventArgs e)
+    {
+        var item = (ProfileSlotItem)((FrameworkElement)s).DataContext;
+        SwitchProfileRequested?.Invoke(item.Number);
+    }
 }
