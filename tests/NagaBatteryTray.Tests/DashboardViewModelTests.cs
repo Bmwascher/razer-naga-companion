@@ -98,10 +98,24 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void ProfileSlotItem_label_names_slot_and_colour()
+    public void ProfileSlotItem_name_defaults_to_slot_number_and_colour_names_the_led()
     {
-        Assert.Equal("Slot 2 · red", new ProfileSlotItem(2).Label);
-        Assert.Equal("Slot 3 · green", new ProfileSlotItem(3).Label);
+        Assert.Equal("Slot 2", new ProfileSlotItem(2).Name);
+        Assert.Equal("red", new ProfileSlotItem(2).Colour);
+        Assert.Equal("green", new ProfileSlotItem(3).Colour);
+    }
+
+    [Fact]
+    public void Slot_names_seed_from_settings_and_default_when_absent()
+    {
+        var src = new AppSettings();
+        src.ProfileNames[2] = "Work";
+        var vm = NewVm(src);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 1);
+
+        Assert.Equal("Slot 1", vm.ProfileSlots.Single(p => p.Number == 1).Name);
+        Assert.Equal("Work", vm.ProfileSlots.Single(p => p.Number == 2).Name);
+        Assert.Equal("Slot 3", vm.ProfileSlots.Single(p => p.Number == 3).Name);
     }
 
     [Fact]
@@ -194,6 +208,125 @@ public class DashboardViewModelTests
         vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry");
         Assert.Contains("wiggle", vm.ProfileDetail);
         Assert.Equal((byte)3, vm.SelectedProfileSlot?.Number); // selection untouched by a note
+    }
+
+    // ---- profile card: rename (dashboard-polish spec §5.4) ----
+
+    [Fact]
+    public void Rename_commit_updates_the_item_and_round_trips_via_ApplyTo()
+    {
+        var vm = NewVm();
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2);
+
+        vm.BeginRename();
+        Assert.True(vm.IsRenamingProfile);
+        Assert.Equal("Slot 2", vm.ProfileNameDraft); // draft seeds from the current name
+        vm.ProfileNameDraft = "Work";
+        vm.CommitRename();
+
+        Assert.False(vm.IsRenamingProfile);
+        Assert.Equal("Work", vm.ProfileSlots.Single(p => p.Number == 2).Name);
+        var target = new AppSettings();
+        vm.ApplyTo(target);
+        Assert.Equal("Work", target.ProfileNames[2]);
+    }
+
+    [Fact]
+    public void Rename_trims_and_clamps_to_24_chars()
+    {
+        var vm = NewVm();
+        vm.SetProfileInventory(new byte[] { 1 }, active: 1);
+        vm.BeginRename();
+        vm.ProfileNameDraft = "  " + new string('x', 40) + "  ";
+        vm.CommitRename();
+        Assert.Equal(new string('x', 24), vm.ProfileSlots.Single().Name);
+    }
+
+    [Fact]
+    public void Rename_to_empty_or_the_default_resets_and_drops_the_map_entry()
+    {
+        var vm = NewVm();
+        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 2);
+        vm.BeginRename(); vm.ProfileNameDraft = "Work"; vm.CommitRename();
+
+        vm.BeginRename(); vm.ProfileNameDraft = "   "; vm.CommitRename();
+        Assert.Equal("Slot 2", vm.ProfileSlots.Single(p => p.Number == 2).Name);
+        var target = new AppSettings();
+        vm.ApplyTo(target);
+        Assert.Empty(target.ProfileNames);
+
+        vm.BeginRename(); vm.ProfileNameDraft = "Work"; vm.CommitRename();
+        vm.BeginRename(); vm.ProfileNameDraft = "Slot 2"; vm.CommitRename(); // typing the default = reset
+        vm.ApplyTo(target);
+        Assert.Empty(target.ProfileNames);
+    }
+
+    [Fact]
+    public void Rename_cancel_discards_the_draft()
+    {
+        var vm = NewVm();
+        vm.SetProfileInventory(new byte[] { 1 }, active: 1);
+        vm.BeginRename();
+        vm.ProfileNameDraft = "Nope";
+        vm.CancelRename();
+        Assert.False(vm.IsRenamingProfile);
+        Assert.Equal("Slot 1", vm.ProfileSlots.Single().Name);
+    }
+
+    [Fact]
+    public void BeginRename_without_a_selection_is_a_noop()
+    {
+        var vm = NewVm();
+        vm.BeginRename(); // no inventory yet — nothing selected
+        Assert.False(vm.IsRenamingProfile);
+    }
+
+    [Fact]
+    public void Inventory_sync_mid_rename_cancels_the_edit()
+    {
+        var vm = NewVm();
+        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 1);
+        vm.BeginRename();
+        vm.ProfileNameDraft = "Drafted";
+
+        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 2); // mouse moved under the edit
+
+        Assert.False(vm.IsRenamingProfile); // draft can't land on a different slot
+        Assert.Equal("Slot 1", vm.ProfileSlots.Single(p => p.Number == 1).Name);
+    }
+
+    // ---- profile card: LED caption (dashboard-polish spec §5.5) ----
+
+    [Fact]
+    public void ShowLedCaption_true_only_with_a_selection_and_no_note()
+    {
+        var vm = NewVm();
+        Assert.False(vm.ShowLedCaption);                            // nothing selected yet
+
+        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 1);
+        Assert.True(vm.ShowLedCaption);                             // steady state
+
+        vm.SetProfileNote("Switching…");
+        Assert.False(vm.ShowLedCaption);                            // a note takes the line
+
+        vm.SetProfileInventory(new byte[] { 1, 2 }, active: 2);     // refresh clears the note
+        Assert.True(vm.ShowLedCaption);
+
+        vm.SetProfileInventory(null, active: null);                 // unreachable → note + no selection
+        Assert.False(vm.ShowLedCaption);
+    }
+
+    // ---- DPI status line (dashboard-polish spec §4.2) ----
+
+    [Fact]
+    public void DpiStatus_sets_and_clears()
+    {
+        var vm = NewVm();
+        Assert.Equal("", vm.DpiStatus);
+        vm.SetDpiStatus("Couldn't confirm — wiggle the mouse and retry");
+        Assert.Contains("wiggle", vm.DpiStatus);
+        vm.SetDpiStatus("");
+        Assert.Equal("", vm.DpiStatus);
     }
 
     // ---- settings / state ----

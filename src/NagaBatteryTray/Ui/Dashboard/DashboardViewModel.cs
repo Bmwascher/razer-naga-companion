@@ -14,14 +14,17 @@ public sealed class DpiPresetItem : ObservableObject
 }
 
 /// <summary>One entry in the Profile card's slot dropdown (spec §13.2 v2.3 — no slot is special
-/// anymore, so an entry is just number + colour). IsActive is INPC-mutable: the same item instance
-/// gets re-flagged as the mouse moves between slots without rebuilding the whole list.</summary>
+/// anymore, so an entry is just number + colour). Name is the app-side label (dashboard-polish
+/// §5.4; the firmware stores no names) — default "Slot N", user-renameable. IsActive and Name are
+/// INPC-mutable: the same item instance gets re-flagged/renamed without rebuilding the list.</summary>
 public sealed class ProfileSlotItem : ObservableObject
 {
-    public ProfileSlotItem(byte number) { Number = number; }
+    public ProfileSlotItem(byte number, string? name = null) { Number = number; _name = name ?? DefaultName(number); }
     public byte Number { get; }
     public string Colour => DashboardViewModel.SlotColour(Number);
-    public string Label => $"Slot {Number} · {Colour}";
+    public static string DefaultName(byte number) => $"Slot {number}";
+    public string Name { get => _name; set => Set(ref _name, value); }
+    private string _name;
     public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
     private bool _isActive;
 }
@@ -44,6 +47,7 @@ public sealed class DashboardViewModel : ObservableObject
         _pollSeconds = _seededPollSeconds = source.PollIntervalSeconds;
         _pollChargingSeconds = _seededPollChargingSeconds = source.PollIntervalChargingSeconds;
         _theme = source.Theme;
+        _profileNames = new Dictionary<byte, string>(source.ProfileNames);
 
         // chips start on the factory display and adopt hardware truth when the first sweep
         // lands (~1 s; spec §13.2 — the settings table no longer seeds or records bindings)
@@ -156,6 +160,13 @@ public sealed class DashboardViewModel : ObservableObject
     public bool CanSavePreset { get => _canSavePreset; private set => Set(ref _canSavePreset, value); }
     private bool _canSavePreset;
 
+    /// <summary>DPI card status line (dashboard-polish §4.2): "" = hidden; AppHost sets the
+    /// couldn't-confirm text on a failed apply and clears it at the start of the next one — the
+    /// surface the old Settings window had and the card lost (recorded gripe).</summary>
+    public string DpiStatus { get => _dpiStatus; private set => Set(ref _dpiStatus, value); }
+    private string _dpiStatus = "";
+    public void SetDpiStatus(string status) => DpiStatus = status;
+
     private void RefreshActive()
     {
         foreach (var p in Presets) p.IsActive = DevicePresent && p.Value == Dpi;
@@ -167,7 +178,11 @@ public sealed class DashboardViewModel : ObservableObject
     private bool _profileChecked; // true once SetProfileInventory has run at least once
     private ProfileSlotItem? _selectedSlot;
     private bool _syncingSelection; // guards programmatic selection writes from raising SwitchRequested
-    public string ProfileDetail { get => _profileDetail; private set => Set(ref _profileDetail, value); }
+    public string ProfileDetail
+    {
+        get => _profileDetail;
+        private set { if (Set(ref _profileDetail, value)) Notify(nameof(ShowLedCaption)); }
+    }
 
     /// <summary>User picked a slot in the dropdown — AppHost switches the mouse (0x05/0x04).</summary>
     public event Action<byte>? SwitchRequested;
@@ -187,11 +202,17 @@ public sealed class DashboardViewModel : ObservableObject
         set
         {
             if (!Set(ref _selectedSlot, value)) return;
+            Notify(nameof(ShowLedCaption));
             if (_syncingSelection || value is null) return;
             if (_activeSlot == value.Number) return;
             SwitchRequested?.Invoke(value.Number);
         }
     }
+
+    /// <summary>Steady-state caption row under the dropdown (dashboard-polish §5.5): the active
+    /// slot's LED colour dot + name. A transient note (Switching…/failure/unreachable) or an empty
+    /// selection takes the line instead.</summary>
+    public bool ShowLedCaption => _profileDetail.Length == 0 && _selectedSlot is not null;
 
     /// <summary>Feed the card a fresh profile-list (0x05/0x81) + active-slot (0x05/0x84) read (either
     /// null = unreachable). Drives the dropdown items, which one is selected, and the detail text.</summary>
@@ -229,6 +250,7 @@ public sealed class DashboardViewModel : ObservableObject
 
     private void SyncSelection()
     {
+        CancelRename(); // the selection is retargeting — a draft must never land on a different slot
         _syncingSelection = true;
         try { SelectedProfileSlot = ProfileSlots.FirstOrDefault(p => p.Number == _activeSlot); }
         finally { _syncingSelection = false; }
@@ -238,8 +260,47 @@ public sealed class DashboardViewModel : ObservableObject
     {
         ProfileSlots.Clear();
         foreach (byte n in slots.OrderBy(n => n))
-            ProfileSlots.Add(new ProfileSlotItem(n) { IsActive = active == n });
+            ProfileSlots.Add(new ProfileSlotItem(n, _profileNames.GetValueOrDefault(n)) { IsActive = active == n });
     }
+
+    // ---- profile card: rename (dashboard-polish §5.4 — app-side label, the firmware has no names) ----
+    private readonly Dictionary<byte, string> _profileNames;
+    internal const int MaxProfileNameLength = 24;
+    public bool IsRenamingProfile { get => _isRenaming; private set => Set(ref _isRenaming, value); }
+    private bool _isRenaming;
+    public string ProfileNameDraft { get => _nameDraft; set => Set(ref _nameDraft, value); }
+    private string _nameDraft = "";
+
+    public void BeginRename()
+    {
+        if (SelectedProfileSlot is not { } slot) return;
+        ProfileNameDraft = slot.Name;
+        IsRenamingProfile = true;
+    }
+
+    /// <summary>Commit the draft to the selected slot: trimmed, clamped to 24 chars; empty (or the
+    /// literal default "Slot N") resets to default and drops the map entry. Persisted app-side via
+    /// ApplyTo on the dashboard's save-on-close path, like DpiPresets.</summary>
+    public void CommitRename()
+    {
+        if (!IsRenamingProfile) return;
+        IsRenamingProfile = false;
+        if (SelectedProfileSlot is not { } slot) return;
+        var name = ProfileNameDraft.Trim();
+        if (name.Length > MaxProfileNameLength) name = name[..MaxProfileNameLength];
+        if (name.Length == 0 || name == ProfileSlotItem.DefaultName(slot.Number))
+        {
+            _profileNames.Remove(slot.Number);
+            slot.Name = ProfileSlotItem.DefaultName(slot.Number);
+        }
+        else
+        {
+            _profileNames[slot.Number] = name;
+            slot.Name = name;
+        }
+    }
+
+    public void CancelRename() => IsRenamingProfile = false;
 
     /// <summary>The dropdown carries the active-slot identity and every slot is equal (v2.3), so
     /// the detail line is purely transient status — steady state is empty.</summary>
@@ -269,6 +330,7 @@ public sealed class DashboardViewModel : ObservableObject
             PollChargingSeconds == _seededPollChargingSeconds ? _seededPollChargingSeconds : Math.Max(15, PollChargingSeconds);
         target.Theme = Ui.ThemeManager.Resolve(Theme);
         target.DpiPresets = Presets.Select(p => p.Value).ToList();
+        target.ProfileNames = new Dictionary<byte, string>(_profileNames);
     }
 
 }

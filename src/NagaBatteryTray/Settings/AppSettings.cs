@@ -26,4 +26,9 @@ public sealed class AppSettings
 
     /// <summary>App-side one-click DPI presets shown in the dashboard's DPI card.</summary>
     public List<int> DpiPresets { get; set; } = new() { 800, 1600, 3200 };
+
+    /// <summary>App-side labels for the mouse's onboard profile slots, keyed by slot number (1..5).
+    /// The firmware stores no names — a slot is a number + LED colour — so these exist only in the
+    /// dashboard's Profile card. Absent key = default "Slot N".</summary>
+    public Dictionary<byte, string> ProfileNames { get; set; } = new();
 }

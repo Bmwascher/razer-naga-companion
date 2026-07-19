@@ -130,4 +130,29 @@ public class SettingsStoreTests
         store.Save();
         Assert.Equal("Text", new JsonSettingsStore(path).Settings.TrayIconStyle);
     }
+
+    [Fact]
+    public void ProfileNames_default_empty_and_old_files_load_without_the_field()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, """{ "PollIntervalSeconds": 60 }"""); // pre-polish settings file
+        var store = new JsonSettingsStore(path);
+        Assert.NotNull(store.Settings.ProfileNames);
+        Assert.Empty(store.Settings.ProfileNames);
+    }
+
+    [Fact]
+    public void ProfileNames_round_trip_through_save_and_reload()
+    {
+        var path = TempFile();
+        var store = new JsonSettingsStore(path);
+        store.Settings.ProfileNames[2] = "Work";
+        store.Settings.ProfileNames[5] = "MMO night";
+        store.Save();
+
+        var reloaded = new JsonSettingsStore(path);
+        Assert.Equal(2, reloaded.Settings.ProfileNames.Count);
+        Assert.Equal("Work", reloaded.Settings.ProfileNames[2]);
+        Assert.Equal("MMO night", reloaded.Settings.ProfileNames[5]);
+    }
 }

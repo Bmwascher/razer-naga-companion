@@ -262,6 +262,7 @@ public sealed class AppHost
 
     private async Task ApplyDpiAsync(DashboardViewModel vm, int dpi)
     {
+        Dispatch(() => vm.SetDpiStatus("")); // a new attempt clears the previous verdict
         bool ok = await Task.Run(() => _monitor.SetDpiAsync(dpi, dpi));
         DpiSetting? readBack = ok ? await Task.Run(() => _monitor.GetDpiAsync()) : null;
         if (readBack is { } v && v.X == dpi)
@@ -270,9 +271,14 @@ public sealed class AppHost
         }
         else
         {
-            // keep simple: on failure just re-read the current DPI
+            // on failure re-read the current DPI so the card shows truth, and say so —
+            // the card's status line (dashboard-polish §4.2); silence was a recorded gripe
             var current = await Task.Run(() => _monitor.GetDpiAsync());
-            Dispatch(() => vm.SetCurrentDpi(current));
+            Dispatch(() =>
+            {
+                vm.SetCurrentDpi(current);
+                vm.SetDpiStatus("Couldn't confirm — wiggle the mouse and retry");
+            });
         }
     }
 
