@@ -29,6 +29,7 @@ public sealed class AppHost
     private DashboardViewModel? _dashboardVm; // live only while _dashboard is; adoption notifications
     private DeviceChangeWatcher? _deviceWatcher;
     private CancellationTokenSource? _deviceDebounce;
+    private bool _activating;
 
     public AppHost(Application app) => _app = app;
 
@@ -156,11 +157,20 @@ public sealed class AppHost
     /// then re-read to confirm. Failure is visible on the card, never silent.</summary>
     private async Task ActivateProfileAsync(DashboardViewModel vm)
     {
-        if (_settings.Settings.OnboardSlot is not int slot) return;
-        Dispatch(() => vm.SetProfileNote("Switching…"));
-        bool ok = await Task.Run(() => _monitor.SetActiveProfileAsync((byte)slot));
-        if (!ok) { Dispatch(() => vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry")); return; }
-        await RefreshProfileAsync(vm);
+        if (_activating) return;
+        _activating = true;
+        try
+        {
+            if (_settings.Settings.OnboardSlot is not int slot) return;
+            Dispatch(() => vm.SetProfileNote("Switching…"));
+            bool ok = await Task.Run(() => _monitor.SetActiveProfileAsync((byte)slot));
+            if (!ok) { Dispatch(() => vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry")); return; }
+            await RefreshProfileAsync(vm);
+        }
+        finally
+        {
+            _activating = false;
+        }
     }
 
     private void ShowSettingsOverlay(DashboardWindow win, DashboardViewModel vm)
