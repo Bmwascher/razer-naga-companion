@@ -99,9 +99,10 @@ internal static class ProfileProbeCommand
             : hits.Count > 0
                 ? "## Verdict\n**HIT:** " + string.Join("; ", hits.Select(h =>
                       $"{h.Cand.Key} {OffsetLabel(h.Hit)} ({string.Join(", ", h.Hit.SlotToValue.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}->{ValueHex(h.Hit, kv.Value)}"))})"))
-                  + "\nFollow-up: teach RazerDevice/BatteryMonitor the read; event-driven only (no polling)."
+                  + "\n(The 0x05/0x84 read is already consumed by the Profile card — RefreshProfileAsync/Activate.)"
                 : "## Verdict\nNO HIT in the enumerated corpus (see corpus tables above for the exact shapes tried). " +
-                  "The Profile card keeps the effective-action inference.";
+                  "If the previously verified 0x05/0x84 read is among the misses, the Profile card's " +
+                  "direct read will show 'state unknown' — investigate a firmware change.";
         capture.Add(verdict);
         Console.WriteLine($"\n{verdict.Replace("## Verdict\n", "Verdict: ")}");
         Console.WriteLine($"\nCapture saved: {capture.StampedPath} (+ probe-profile-latest.md)");

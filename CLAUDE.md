@@ -109,8 +109,9 @@ does, so launch it `-WindowStyle Hidden`.
   **app-owned onboard profile slot** (created on first Apply via the first FREE slot number, seeded
   with the factory map, recorded as `OnboardSlot` in settings; **the user's existing slots 01/02 are
   never taken or written**). The firmware holds bindings through power-cycles — no re-apply, no
-  sentinel poll. No command exists to set the active slot: the user selects it once with the mouse's
-  bottom button (LED colour = slot: white/red/green/blue/cyan; the dashboard's Profile card names it).
+  sentinel poll. The active slot is readable AND settable since 2026-07-18 (`0x05/0x84`/`0x05/0x04`
+  — the Profile card's ↻/Activate); the mouse's bottom button (LED colour = slot: white/red/green/
+  blue/cyan) remains the hardware fallback.
   Write path is `AppHost.WriteBindingAsync` (per-chip instant apply): ensure slot → write → read-back
   verify → persist; "Default" writes the factory action (deterministic) and is always available on any
   chip (the repair path).
