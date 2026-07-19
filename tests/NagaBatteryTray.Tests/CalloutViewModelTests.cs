@@ -263,11 +263,11 @@ public class CalloutViewModelTests
     }
 
     [Fact]
-    public void SetFromDevice_keyboard_decodes_into_the_normal_edit_state()
+    public void SetFromDevice_keyboard_on_the_app_slot_decodes_into_the_normal_edit_state()
     {
         var (vm, _, _) = NewVm(3);
         vm.SetPending();
-        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x01, 0x06 })); // Ctrl+C
+        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x01, 0x06 }), appSlot: true); // Ctrl+C
         Assert.Equal("Ctrl+C", vm.BindingText);
     }
 
@@ -275,7 +275,7 @@ public class CalloutViewModelTests
     public void SetFromDevice_disabled_and_empty_both_show_Disabled()
     {
         var (vm, _, _) = NewVm(3);
-        vm.SetFromDevice(new RawButtonAction(0x00, Array.Empty<byte>())); // fresh-slot EMPTY reads like this too
+        vm.SetFromDevice(new RawButtonAction(0x00, Array.Empty<byte>()), appSlot: true); // fresh-slot EMPTY reads like this too
         Assert.Equal("Disabled", vm.BindingText);
     }
 
@@ -283,16 +283,24 @@ public class CalloutViewModelTests
     public void SetFromDevice_foreign_category_shows_synapse_label()
     {
         var (vm, _, _) = NewVm(3);
-        vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 })); // mouse-function category
+        vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 }), appSlot: true); // mouse-function category
         Assert.Equal("Synapse action (0x01)", vm.BindingText);
         Assert.Equal("Synapse action (0x01)", vm.BindingTip);
+    }
+
+    [Fact]
+    public void SetFromDevice_keyboard_with_wrong_length_falls_back_to_synapse_label()
+    {
+        var (vm, _, _) = NewVm(3);
+        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x01 }), appSlot: true); // truncated keyboard frame
+        Assert.Equal("Synapse action (0x02)", vm.BindingText);
     }
 
     [Fact]
     public void SetFromDevice_null_shows_read_failed_with_explanatory_tooltip()
     {
         var (vm, _, _) = NewVm(3);
-        vm.SetFromDevice(null);
+        vm.SetFromDevice(null, appSlot: true);
         Assert.Equal("—", vm.BindingText);
         Assert.Contains("refresh", vm.BindingTip);
     }
@@ -306,14 +314,14 @@ public class CalloutViewModelTests
 
         var inFlight = vm.DisableAsync();          // busy
         vm.SetPending();
-        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x00, 0x04 }));
+        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x00, 0x04 }), appSlot: true);
         Assert.NotEqual("…", vm.BindingText);      // pending marker skipped
         writes[0].SetResult(true);
         await inFlight;
         Assert.Equal("Disabled", vm.BindingText);  // the edit won, not the stale sweep value
 
         vm.BeginCapture();                         // capturing
-        vm.SetFromDevice(null);
+        vm.SetFromDevice(null, appSlot: true);
         vm.CancelCapture();
         Assert.Equal("Disabled", vm.BindingText);
     }
@@ -322,8 +330,43 @@ public class CalloutViewModelTests
     public async Task A_verified_write_clears_a_device_display_override()
     {
         var (vm, _, _) = NewVm(3);
-        vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 })); // foreign display
-        await vm.DisableAsync();                                          // user writes over it
+        vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 }), appSlot: true); // foreign display
+        await vm.DisableAsync();                                                         // user writes over it
         Assert.Equal("Disabled", vm.BindingText);
+    }
+
+    [Fact]
+    public async Task Foreign_slot_read_displays_without_touching_the_edit_state()
+    {
+        var (vm, rec, _) = NewVm(1);
+        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x00, 0x22 }), appSlot: false); // foreign slot shows "5"
+        Assert.Equal("5", vm.BindingText);
+
+        // capturing the same key the FOREIGN slot showed must still write (bootstrap case) —
+        // a foreign decode written into the edit state used to let suppression swallow it
+        await vm.CaptureAsync(0x00, 0x22);
+        Assert.Single(rec.Writes);
+        Assert.Equal("5", vm.BindingText);          // now the edit state's own value
+    }
+
+    [Fact]
+    public async Task Suppression_requires_a_clean_display()
+    {
+        var (vm, rec, _) = NewVm(5);
+        await vm.DisableAsync();                    // write 1: edit state = Disabled
+        vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 }), appSlot: true); // Synapse rebound it
+
+        Assert.True(await vm.DisableAsync());       // same as edit state, but the display disagrees
+        Assert.Equal(2, rec.Writes.Count);          // → must reach the mouse, not be suppressed
+        Assert.Equal("Disabled", vm.BindingText);
+    }
+
+    [Fact]
+    public async Task No_undo_offered_when_overwriting_an_override_display()
+    {
+        var (vm, _, _) = NewVm(3);
+        vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 }), appSlot: true); // override showing
+        await vm.DisableAsync();
+        Assert.False(vm.CanUndo);                   // ↶ can't honestly restore what was displayed
     }
 }

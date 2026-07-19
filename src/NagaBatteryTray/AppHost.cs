@@ -159,11 +159,13 @@ public sealed class AppHost
             var a = await _monitor.GetActiveProfileAsync();
             return (l, a);
         });
+        _lastActive = active;
         Dispatch(() => vm.SetProfileInventory(list?.Slots, active));
         if (active is { } a2) _ = ReadGridAsync(vm, a2);
     }
 
     private int _gridSweep; // sweep generation: a new sweep or dashboard close supersedes any in flight
+    private byte? _lastActive; // last active-slot read result; null = unknown (see WriteBindingAsync)
 
     /// <summary>Grid sweep (spec §13.1): read the ACTIVE profile's 12 grid buttons (0x02/0x8c,
     /// hardware-verified) sequentially in position order, updating each chip as its read lands —
@@ -173,7 +175,11 @@ public sealed class AppHost
     /// while busy). Event-driven only — runs solely off RefreshProfileAsync's triggers.</summary>
     private async Task ReadGridAsync(DashboardViewModel vm, byte slot)
     {
+        // eligibility BEFORE taking a generation: a straggler sweep for a closed dashboard must
+        // not burn the token a just-reopened dashboard's live sweep is running under (review find)
+        if (!ReferenceEquals(_dashboardVm, vm)) return;
         int gen = Interlocked.Increment(ref _gridSweep);
+        bool appSlot = _settings.Settings.OnboardSlot is { } os && os == slot;
         Dispatch(() =>
         {
             for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++) vm.Callout(pos).SetPending();
@@ -184,7 +190,7 @@ public sealed class AppHost
             int p = pos;
             var raw = await Task.Run(() => _monitor.GetButtonAsync(slot, NagaV2ProButtons.IdForPosition(p)));
             if (gen != Volatile.Read(ref _gridSweep) || !ReferenceEquals(_dashboardVm, vm)) return;
-            Dispatch(() => vm.Callout(p).SetFromDevice(raw));
+            Dispatch(() => vm.Callout(p).SetFromDevice(raw, appSlot));
         }
     }
 
@@ -194,7 +200,13 @@ public sealed class AppHost
     /// on the card and snaps the dropdown back to the real active slot, never silent.</summary>
     private async Task SwitchProfileAsync(DashboardViewModel vm, byte slot)
     {
-        if (_activating) return;
+        if (_activating)
+        {
+            // a pick during an in-flight switch is dropped — snap the dropdown back so it
+            // doesn't display a slot nobody asked the mouse to move to (review find)
+            Dispatch(() => vm.ResyncSelection());
+            return;
+        }
         _activating = true;
         try
         {
@@ -235,6 +247,10 @@ public sealed class AppHost
         { _settings.Settings.TrayIconStyle = style; _settings.Save(); _tray.SetGaugeStyle(style != "Text"); };
         view.ResetAllRequested += () =>
         {
+            // view mode (spec §13.1): the grid is displaying a FOREIGN slot's hardware truth —
+            // a reset would write the app slot while the chips repaint with its factory values,
+            // desyncing the display from the mouse (review find). Same rule as the chips.
+            if (!vm.IsGridEditable) { view.SetResetNote("switch to the app profile to reset"); return; }
             view.SetResetNote("Resetting…");
             _ = RunResetAllAsync(view, vm);
         };
@@ -321,9 +337,13 @@ public sealed class AppHost
             var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, binding.ButtonId));
             ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
         }
-        // adoption happened mid-write: let the card + grid catch up whether or not the write
-        // verified (the slot exists and is active either way) — event-driven, no polling
-        if (created && _dashboardVm is { } dvm) _ = RefreshProfileAsync(dvm);
+        // let the card + grid catch up (event-driven, no polling) when adoption happened
+        // mid-write, or when the active slot is UNKNOWN — a write that verified against an
+        // existing app slot while the card says "state unknown" may have landed on an inactive
+        // slot; the refresh shows where the mouse really is and view mode engages if it's
+        // foreign (review find)
+        if ((created || (ok && _lastActive is null)) && _dashboardVm is { } dvm)
+            _ = RefreshProfileAsync(dvm);
         if (!ok) return false;
 
         if (kind == ButtonActionKind.Default) _settings.Settings.ButtonBindings.Remove(position);

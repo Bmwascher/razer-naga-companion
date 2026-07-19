@@ -87,19 +87,25 @@ public sealed class CalloutViewModel : ObservableObject
     }
 
     /// <summary>A grid-sweep read landed: display hardware truth for this button (spec §13.1).
-    /// Keyboard/disabled decode into the normal edit state (a fresh slot's EMPTY reads as
-    /// category 0x00 too); any other category displays as a Synapse action — the app never
-    /// rewrites raw it doesn't model; null = the read failed. Busy/capturing chips are skipped,
-    /// same as SetPending.</summary>
-    public void SetFromDevice(RawButtonAction? raw)
+    /// Only an APP-slot read may update the edit state (_kind/_mods/_usage) — no-op suppression
+    /// and undo reason about that state as "the app slot's on-mouse binding", so a foreign slot's
+    /// decode (view/bootstrap display) and any category the app doesn't model land as a
+    /// display-only override instead (review find: a foreign decode written into _kind let
+    /// suppression skip a real user action while flashing "Applied"). A fresh slot's EMPTY reads
+    /// as category 0x00 too; raw the app doesn't model is never rewritten; null = the read
+    /// failed. Busy/capturing chips are skipped, same as SetPending.</summary>
+    public void SetFromDevice(RawButtonAction? raw, bool appSlot)
     {
         if (IsBusy || IsCapturing) return;
         if (raw is not { } r) { _deviceText = ReadFailedText; NotifyBinding(); return; }
-        if (r.Category == RazerProtocol.FnKeyboard && r.Data.Length == 2)
-            SetApplied(ButtonActionKind.Key, r.Data[0], r.Data[1]);
-        else if (r.Category == RazerProtocol.FnDisabled)
-            SetApplied(ButtonActionKind.Disabled, 0, 0);
-        else { _deviceText = $"Synapse action (0x{r.Category:x2})"; NotifyBinding(); }
+        bool keyboard = r.Category == RazerProtocol.FnKeyboard && r.Data.Length == 2;
+        bool disabled = r.Category == RazerProtocol.FnDisabled;
+        if (appSlot && keyboard) { SetApplied(ButtonActionKind.Key, r.Data[0], r.Data[1]); return; }
+        if (appSlot && disabled) { SetApplied(ButtonActionKind.Disabled, 0, 0); return; }
+        _deviceText = keyboard ? KeyToHidUsage.Describe(r.Data[0], r.Data[1])
+            : disabled ? "Disabled"
+            : $"Synapse action (0x{r.Category:x2})";
+        NotifyBinding();
     }
 
     private void NotifyBinding() { Notify(nameof(BindingText)); Notify(nameof(BindingTip)); }
@@ -140,8 +146,15 @@ public sealed class CalloutViewModel : ObservableObject
         // no-op suppression (ported from the staged model): re-applying the exact current
         // binding skips the HID round-trip — no false "Not applied" when the mouse naps, no
         // slot creation for a no-op. Default stays exempt: it's the always-available repair path.
-        if (kind != ButtonActionKind.Default && kind == _kind && modifiers == _mods && usage == _usage)
+        // Requires a clean display (_deviceText null): under an override, _kind describes the app
+        // slot's RECORD while the chip shows something else, so "identical" would be a lie and
+        // the user's explicit action must reach the mouse (review find).
+        if (kind != ButtonActionKind.Default && _deviceText is null
+            && kind == _kind && modifiers == _mods && usage == _usage)
         { Status = "Applied"; return true; }
+        // under an override the pre-write display wasn't the edit state, so ↶ would "restore" a
+        // value that was never on the chip — don't offer an undo that can't be honest (review find)
+        bool restorable = _deviceText is null;
         IsBusy = true;
         Failed = false;
         Status = "Writing…";
@@ -152,7 +165,7 @@ public sealed class CalloutViewModel : ObservableObject
         _prev = (_kind, _mods, _usage);
         SetApplied(kind, modifiers, usage);
         Status = "Applied";
-        if (offerUndo) _ = OpenUndoWindowAsync();
+        if (offerUndo && restorable) _ = OpenUndoWindowAsync();
         return true;
     }
 
