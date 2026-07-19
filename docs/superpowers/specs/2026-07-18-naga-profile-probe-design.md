@@ -319,3 +319,38 @@ battery poll unaffected (it skips while the lock is busy). Tests: callout decode
 (`SetFromDevice`), selector sync guard (programmatic set must not raise `SwitchRequested`, user
 pick must, failed-switch resync), editability mapping (app-active / foreign-active / no-app /
 lost-slot), all via the existing fakes.
+
+### 13.2 v2.3 — every profile editable in place (user, 2026-07-19)
+
+> **User direction:** "What's wrong with being able to map each of the 3 profiles?" — confirmed
+> explicitly: all onboard slots become editable, reversing the Phase B no-write rule (recorded in
+> memory; the reversal is safe because v2.2 gave the app byte-for-byte reads of every slot).
+
+**Model: you edit the profile you're on — and you can be on any of them.** View mode, the
+app-owned-slot concept, and the "○ remaps live on Slot N" line all disappear. Writes target the
+**ACTIVE (displayed) slot** (AppHost resolves it from the last active-slot read, or reads it
+on demand if unknown; unknown-and-unreadable → the write fails visibly as today). The adoption
+machinery (`EnsureOnboardSlotAsync`, factory seeding, the recorded `OnboardSlot`, the settings
+`ButtonBindings` table, the popup's app-profile line) is retired — the firmware holds every
+binding, the grid reads hardware truth, and no slot is special. The `OnboardSlot`/`ButtonBindings`
+settings PROPERTIES survive for JSON back-compat but are no longer read or written.
+
+**Safety = snapshot + raw undo (replaces no-write).** `CalloutViewModel` tracks the button's
+best-known on-mouse raw action (`_currentRaw`): set by every sweep read and updated to the wire
+form of every verified write. Before any overwrite the current raw is snapshotted; undo restores
+it through a new raw write path (`AppHost.RestoreRawAsync` → `SetButtonAsync(activeSlot, id,
+raw.Category, raw.Data)` + read-back verify) — which restores **Synapse macros and mouse functions
+byte-for-byte**, actions the app can't even model. Undo is offered only when a snapshot exists
+(a write landing before the first sweep read of that chip has no known prior — no undo window,
+honest as ever). The kind-tuple undo path (`_prev`) is deleted; one undo mechanism remains.
+Display after an unmodeled restore is the "Synapse action (0xNN)" label, same as a sweep read.
+No-op suppression still requires a clean display and never fires under an override.
+
+**Consequences swept up:** `IsGridEditable`/`GridHint`/capture-revocation and all view-mode
+guards are deleted (every state is editable; offline still disables the grid); `ProfileSlotItem`
+loses `IsApp` and the "· app" label suffix; the card detail line reduces to transient status
+("Switching…", failure text, "state unknown — mouse unreachable", else empty); reset-all resets
+the ACTIVE slot (wording already says "to factory"; each chip's individual raw undo still opens).
+Tests move accordingly: raw-snapshot undo suite (restore byte-for-byte incl. unmodeled raw,
+no-undo-without-snapshot, busy-guard preserved), editability suite deleted, selection suite
+unchanged.
