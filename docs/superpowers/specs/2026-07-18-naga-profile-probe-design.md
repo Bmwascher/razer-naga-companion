@@ -266,3 +266,53 @@ read; in v2.1 the state enum is gone too — pill flags (`IsActive`/`IsApp`) plu
 bool carry the states. The popup's profile line stays
 settings-based (no I/O on that path). Tests: VM state mapping + monitor pass-throughs via
 `FakeRazerDevice` (extended with active-slot fields).
+
+### 13.1 v2.2 — dropdown selector + the grid reads the displayed profile (user, 2026-07-19)
+
+> **User direction:** "The profile selector should be a dropdown and then each profile should
+> accurately read the configured 12 buttons."
+
+Two changes, superseding v2.1's pill row (all v2.1 protocol rules stand — same commands, same
+event-driven triggers, no polling, visible failure):
+
+**Dropdown selector.** The pill `ItemsControl` becomes a themed `ComboBox` over the same
+`ProfileSlots` items (label "Slot N · colour", " · app" suffix on the adopted slot), two-way bound
+to a new `SelectedProfileSlot`. The selected item ALWAYS mirrors the mouse's actual active slot —
+programmatic sync (inventory reads, failed-switch resync) is guarded so only a USER pick raises the
+VM's `SwitchRequested`, which drives the existing `0x05/0x04` switch + confirm re-read. A failed
+switch resyncs the selection back to the last-known active slot (the dropdown never lies about
+where the mouse is). `ProfileTitle` is dropped — the dropdown carries the identity; the detail
+line remains the status surface ("● app profile active" / "○ remaps live on Slot N · colour" /
+"Switching…" / failure / "state unknown — mouse unreachable").
+
+**The grid shows hardware truth for the ACTIVE profile.** After every inventory read that yields
+an active slot (dashboard open, ↻, post-switch confirm, post-adopt refresh — the existing triggers,
+nothing new), AppHost sweeps the 12 grid buttons of that slot via the existing verified
+`GetButtonAsync(slot, buttonId)` (`0x02/0x8c`, hypershift 0), sequentially in position order,
+updating each callout chip as its read lands (~0.5 s/button at the default `SetReadDelayMs`; chips
+show "…" while pending, so the fill is visibly progressive, top-down). A generation counter
+discards results from a superseded sweep (new switch/refresh mid-sweep) and the sweep stops when
+the dashboard has closed; a chip that is busy or capturing is skipped, never clobbered. Decode for
+display: `FnKeyboard` → the existing `KeyToHidUsage.Describe`; `FnDisabled`/empty → "Disabled";
+any other category → "Synapse action (0xNN)" (raw round-trips, never rewritten); failed read →
+"—" with an explanatory tooltip. This surfaces bindings the app never wrote (Synapse-configured
+user slots) — the whole point of the revision.
+
+**Edit rule — you edit the profile you're on, and only the app slot is editable.**
+- Active == app slot → full editing (capture/Disable/Default/undo), unchanged pipeline.
+- Active is a user slot and the app slot exists on the mouse → **view mode**: hover-pairing and
+  tooltips stay live, action buttons and capture are disabled, and a hint replaces the offline
+  text slot: "viewing Slot M — switch to Slot N · colour to edit". The user's slots' CONTENTS are
+  never written (standing constraint); viewing them is read-only by construction.
+- No app slot on the mouse (fresh install, or the recorded slot was lost to a factory reset) →
+  editable: the first write creates + factory-seeds the slot as today AND THEN **switches the
+  mouse to it** (`0x05/0x04`, best-effort) — without the switch the just-written binding would be
+  invisible under the new read-what's-active grid. This is the one new write in v2.2 and it is a
+  slot SWITCH (bottom-button parity), never a content write to a user slot.
+
+Perf gate: the sweep is 12 feature-report reads serialized on the existing `_readLock`, fired only
+by the same explicit user actions that already trigger profile reads — no new timers, no polling,
+battery poll unaffected (it skips while the lock is busy). Tests: callout decode mapping
+(`SetFromDevice`), selector sync guard (programmatic set must not raise `SwitchRequested`, user
+pick must, failed-switch resync), editability mapping (app-active / foreign-active / no-app /
+lost-slot), all via the existing fakes.
