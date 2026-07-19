@@ -24,6 +24,15 @@ public interface IRazerDevice : IDisposable
     /// <summary>Create an onboard profile slot (0x05/0x02). True = firmware acked (status 0x02).</summary>
     Task<bool> CreateProfileAsync(byte slot, CancellationToken ct);
 
+    /// <summary>Read which onboard slot is ACTIVE (0x05/0x84, hardware-verified 2026-07-18,
+    /// echo-checked parse). Null = unreachable or invalid reply.</summary>
+    Task<byte?> GetActiveProfileAsync(CancellationToken ct);
+
+    /// <summary>Switch the active onboard slot (0x05/0x04, hardware-verified 2026-07-18; persists
+    /// across power-cycles — bottom-button parity). Only ever targets the app's adopted slot.
+    /// True = firmware acked (status 0x02).</summary>
+    Task<bool> SetActiveProfileAsync(byte slot, CancellationToken ct);
+
     /// <summary>Drop any cached connection so the next call re-selects the active interface. Used after a
     /// device-change (e.g. USB-C plug flips wireless&lt;-&gt;wired) where the cached handle would read stale.</summary>
     void Reset();

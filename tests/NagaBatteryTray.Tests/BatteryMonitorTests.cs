@@ -153,4 +153,21 @@ public class BatteryMonitorTests
         Assert.True(await m.CreateProfileAsync(3));
         Assert.Equal(new byte[] { 3 }, fake.CreatedSlots.ToArray());
     }
+
+    [Fact]
+    public async Task GetActiveProfile_passes_through_to_the_device()
+    {
+        var fake = new FakeRazerDevice { ActiveProfile = 3 };
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        Assert.Equal((byte)3, await m.GetActiveProfileAsync());
+    }
+
+    [Fact]
+    public async Task SetActiveProfile_forwards_slot_and_result()
+    {
+        var fake = new FakeRazerDevice { SetActiveProfileResult = true };
+        using var m = new BatteryMonitor(fake, TempStore(), a => a());
+        Assert.True(await m.SetActiveProfileAsync(2));
+        Assert.Equal((byte)2, fake.ActiveProfileSets.Single());
+    }
 }

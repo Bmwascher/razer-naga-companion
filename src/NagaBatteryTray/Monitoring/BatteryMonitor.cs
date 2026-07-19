@@ -101,6 +101,26 @@ public sealed class BatteryMonitor : IDisposable
         finally { _readLock.Release(); }
     }
 
+    /// <summary>Read the active onboard slot. Blocks for the read lock.</summary>
+    public async Task<byte?> GetActiveProfileAsync()
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return null; }
+        try { return await _device.GetActiveProfileAsync(_cts.Token); }
+        catch (OperationCanceledException) { return null; }
+        finally { _readLock.Release(); }
+    }
+
+    /// <summary>Switch the active onboard slot (write-on-action only). Blocks for the read lock.</summary>
+    public async Task<bool> SetActiveProfileAsync(byte slot)
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (OperationCanceledException) { return false; }
+        try { return await _device.SetActiveProfileAsync(slot, _cts.Token); }
+        catch (OperationCanceledException) { return false; }
+        finally { _readLock.Release(); }
+    }
+
     private async Task PollAsync(bool reconnect = false)
     {
         if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip

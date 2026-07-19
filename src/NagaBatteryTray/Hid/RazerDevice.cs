@@ -256,6 +256,42 @@ public sealed class RazerDevice : IRazerDevice
         }
     }
 
+    public async Task<byte?> GetActiveProfileAsync(CancellationToken ct)
+    {
+        try
+        {
+            byte tid = await EnsureConnectedAsync(ct);
+            if (tid == 0) return null;
+            var reply = await ExchangeAsync(RazerProtocol.BuildGetActiveProfileBuffer(tid), ct);
+            if (reply is null) return null;
+            if (RazerProtocol.ParseActiveProfileReply(reply, out byte slot) != ReplyResult.Success) return null;
+            return slot;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CloseHandle();
+            LogOnce(ex);
+            return null;
+        }
+    }
+
+    public async Task<bool> SetActiveProfileAsync(byte slot, CancellationToken ct)
+    {
+        try
+        {
+            byte tid = await EnsureConnectedAsync(ct);
+            if (tid == 0) return false;
+            var reply = await ExchangeAsync(RazerProtocol.BuildSetActiveProfileBuffer(tid, slot), ct);
+            return reply is not null && reply[1] == 0x02;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CloseHandle();
+            LogOnce(ex);
+            return false;
+        }
+    }
+
     private void CloseHandle()
     {
         _handle?.Dispose();

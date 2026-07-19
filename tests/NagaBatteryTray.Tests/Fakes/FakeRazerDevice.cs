@@ -49,6 +49,19 @@ public sealed class FakeRazerDevice : IRazerDevice
         return Task.FromResult(CreateProfileResult);
     }
 
+    public byte? ActiveProfile { get; set; }
+    public bool SetActiveProfileResult { get; set; } = true;
+    public List<byte> ActiveProfileSets { get; } = new();
+
+    public Task<byte?> GetActiveProfileAsync(CancellationToken ct) => Task.FromResult(ActiveProfile);
+
+    public Task<bool> SetActiveProfileAsync(byte slot, CancellationToken ct)
+    {
+        ActiveProfileSets.Add(slot);
+        if (SetActiveProfileResult) ActiveProfile = slot; // realistic: a successful set changes the active slot
+        return Task.FromResult(SetActiveProfileResult);
+    }
+
     public int ResetCount { get; private set; }
     public void Reset() => ResetCount++;
 
