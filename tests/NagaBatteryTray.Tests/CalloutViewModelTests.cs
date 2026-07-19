@@ -251,4 +251,79 @@ public class CalloutViewModelTests
         Assert.False(vm.IsCapturing);
         Assert.Empty(rec.Writes);
     }
+
+    // ---- grid sweep display (spec §13.1: the grid shows hardware truth for the active profile) ----
+
+    [Fact]
+    public void SetPending_shows_the_pending_marker_until_a_read_lands()
+    {
+        var (vm, _, _) = NewVm(3);
+        vm.SetPending();
+        Assert.Equal("…", vm.BindingText);
+    }
+
+    [Fact]
+    public void SetFromDevice_keyboard_decodes_into_the_normal_edit_state()
+    {
+        var (vm, _, _) = NewVm(3);
+        vm.SetPending();
+        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x01, 0x06 })); // Ctrl+C
+        Assert.Equal("Ctrl+C", vm.BindingText);
+    }
+
+    [Fact]
+    public void SetFromDevice_disabled_and_empty_both_show_Disabled()
+    {
+        var (vm, _, _) = NewVm(3);
+        vm.SetFromDevice(new RawButtonAction(0x00, Array.Empty<byte>())); // fresh-slot EMPTY reads like this too
+        Assert.Equal("Disabled", vm.BindingText);
+    }
+
+    [Fact]
+    public void SetFromDevice_foreign_category_shows_synapse_label()
+    {
+        var (vm, _, _) = NewVm(3);
+        vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 })); // mouse-function category
+        Assert.Equal("Synapse action (0x01)", vm.BindingText);
+        Assert.Equal("Synapse action (0x01)", vm.BindingTip);
+    }
+
+    [Fact]
+    public void SetFromDevice_null_shows_read_failed_with_explanatory_tooltip()
+    {
+        var (vm, _, _) = NewVm(3);
+        vm.SetFromDevice(null);
+        Assert.Equal("—", vm.BindingText);
+        Assert.Contains("refresh", vm.BindingTip);
+    }
+
+    [Fact]
+    public async Task Sweep_never_clobbers_a_busy_or_capturing_chip()
+    {
+        var writes = new List<TaskCompletionSource<bool>>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) =>
+        { var tcs = new TaskCompletionSource<bool>(); writes.Add(tcs); return tcs.Task; });
+
+        var inFlight = vm.DisableAsync();          // busy
+        vm.SetPending();
+        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x00, 0x04 }));
+        Assert.NotEqual("…", vm.BindingText);      // pending marker skipped
+        writes[0].SetResult(true);
+        await inFlight;
+        Assert.Equal("Disabled", vm.BindingText);  // the edit won, not the stale sweep value
+
+        vm.BeginCapture();                         // capturing
+        vm.SetFromDevice(null);
+        vm.CancelCapture();
+        Assert.Equal("Disabled", vm.BindingText);
+    }
+
+    [Fact]
+    public async Task A_verified_write_clears_a_device_display_override()
+    {
+        var (vm, _, _) = NewVm(3);
+        vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 })); // foreign display
+        await vm.DisableAsync();                                          // user writes over it
+        Assert.Equal("Disabled", vm.BindingText);
+    }
 }

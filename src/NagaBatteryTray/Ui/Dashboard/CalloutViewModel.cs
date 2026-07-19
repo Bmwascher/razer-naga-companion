@@ -13,8 +13,12 @@ public sealed class CalloutViewModel : ObservableObject
     private readonly WriteBinding _write;
     private readonly Func<Task> _undoWindow; // one-shot delay; injectable for tests (default 5 s)
 
+    private const string PendingText = "…";
+    private const string ReadFailedText = "—";
+
     private ButtonActionKind _kind = ButtonActionKind.Default;
     private byte _mods, _usage;
+    private string? _deviceText; // non-null overrides BindingText: sweep pending "…", failed read "—", or a foreign-category label
     private (ButtonActionKind Kind, byte Mods, byte Usage) _prev;
     private int _undoVersion;
     private bool _isCapturing, _isBusy, _canUndo, _isHighlighted, _failed;
@@ -30,17 +34,23 @@ public sealed class CalloutViewModel : ObservableObject
     public int Position { get; }
     public string Label => Position.ToString();
 
-    public string BindingText => _kind switch
+    public string BindingText => _deviceText ?? _kind switch
     {
         ButtonActionKind.Disabled => "Disabled",
         ButtonActionKind.Key => KeyToHidUsage.Describe(_mods, _usage),
         _ => KeyToHidUsage.Describe(0, NagaV2ProButtons.FactoryBindingForPosition(Position).HidUsage),
     };
 
+    /// <summary>Key-box tooltip: normally the binding text itself (full value for a trimmed box);
+    /// a failed sweep read gets an explanation instead of a bare dash.</summary>
+    public string BindingTip => _deviceText == ReadFailedText
+        ? "couldn't read this button — refresh to retry"
+        : BindingText;
+
     public bool IsCapturing
     {
         get => _isCapturing;
-        private set { if (Set(ref _isCapturing, value)) { Notify(nameof(BindingText)); Notify(nameof(IsEngaged)); } }
+        private set { if (Set(ref _isCapturing, value)) { NotifyBinding(); Notify(nameof(IsEngaged)); } }
     }
     public bool IsBusy { get => _isBusy; private set => Set(ref _isBusy, value); }
     /// <summary>Last write failed — the compact row has no status line, so this drives the
@@ -58,12 +68,41 @@ public sealed class CalloutViewModel : ObservableObject
     public bool IsHighlighted { get => _isHighlighted; set => Set(ref _isHighlighted, value); }
     public string Status { get => _status; set => Set(ref _status, value); }
 
-    /// <summary>Seed from the persisted table (dashboard open).</summary>
+    /// <summary>Seed from the persisted table (dashboard open) or a verified write/sweep decode.
+    /// Clears any device-display override — a concrete binding always supersedes it.</summary>
     public void SetApplied(ButtonActionKind kind, byte modifiers, byte usage)
     {
         _kind = kind; _mods = modifiers; _usage = usage;
-        Notify(nameof(BindingText));
+        _deviceText = null;
+        NotifyBinding();
     }
+
+    /// <summary>Grid-sweep start (spec §13.1): show the pending marker until this button's read
+    /// lands. Skipped while the chip is mid-edit — the sweep must never clobber a live edit.</summary>
+    public void SetPending()
+    {
+        if (IsBusy || IsCapturing) return;
+        _deviceText = PendingText;
+        NotifyBinding();
+    }
+
+    /// <summary>A grid-sweep read landed: display hardware truth for this button (spec §13.1).
+    /// Keyboard/disabled decode into the normal edit state (a fresh slot's EMPTY reads as
+    /// category 0x00 too); any other category displays as a Synapse action — the app never
+    /// rewrites raw it doesn't model; null = the read failed. Busy/capturing chips are skipped,
+    /// same as SetPending.</summary>
+    public void SetFromDevice(RawButtonAction? raw)
+    {
+        if (IsBusy || IsCapturing) return;
+        if (raw is not { } r) { _deviceText = ReadFailedText; NotifyBinding(); return; }
+        if (r.Category == RazerProtocol.FnKeyboard && r.Data.Length == 2)
+            SetApplied(ButtonActionKind.Key, r.Data[0], r.Data[1]);
+        else if (r.Category == RazerProtocol.FnDisabled)
+            SetApplied(ButtonActionKind.Disabled, 0, 0);
+        else { _deviceText = $"Synapse action (0x{r.Category:x2})"; NotifyBinding(); }
+    }
+
+    private void NotifyBinding() { Notify(nameof(BindingText)); Notify(nameof(BindingTip)); }
 
     public void BeginCapture() { Status = ""; Failed = false; IsCapturing = true; }
     public void CancelCapture() => IsCapturing = false;
