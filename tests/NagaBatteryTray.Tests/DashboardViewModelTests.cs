@@ -261,6 +261,32 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public void Entering_view_mode_revokes_a_live_capture()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.Callout(4).BeginCapture();                             // capture starts before the first inventory read
+        Assert.True(vm.AnyCapturing);
+
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 3); // read lands: foreign slot → view mode
+
+        Assert.False(vm.IsGridEditable);
+        Assert.False(vm.Callout(4).IsCapturing);                  // the capture didn't survive into view mode
+        Assert.False(vm.AnyCapturing);
+    }
+
+    [Fact]
+    public void An_editable_refresh_does_not_revoke_a_live_capture()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.Callout(4).BeginCapture();
+
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2); // read lands: app slot active
+
+        Assert.True(vm.IsGridEditable);
+        Assert.True(vm.Callout(4).IsCapturing);                   // an authorized capture rides through
+    }
+
+    [Fact]
     public void SetProfileInventory_without_adopted_slot_still_lists_pills()
     {
         var vm = NewVm(onboardSlot: null);

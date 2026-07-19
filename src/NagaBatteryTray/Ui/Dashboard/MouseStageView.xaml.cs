@@ -123,11 +123,13 @@ public partial class MouseStageView : UserControl
 
     private void OnUndo(object s, RoutedEventArgs e) => _ = Vm(s).UndoAsync();
     // Disable/Default are also offered inside the capture card - resolve the capture first
-    // so the row doesn't stay armed after the write
+    // so the row doesn't stay armed after the write. GridEditable guards are defense-in-depth:
+    // the VM revokes captures on the view-mode transition, but these handlers are reachable
+    // from the capture card during the same dispatcher turn (review find)
     private void OnDisable(object s, RoutedEventArgs e)
-    { var vm = Vm(s); vm.CancelCapture(); _ = vm.DisableAsync(); }
+    { if (!GridEditable) return; var vm = Vm(s); vm.CancelCapture(); _ = vm.DisableAsync(); }
     private void OnDefault(object s, RoutedEventArgs e)
-    { var vm = Vm(s); vm.CancelCapture(); _ = vm.DefaultAsync(); }
+    { if (!GridEditable) return; var vm = Vm(s); vm.CancelCapture(); _ = vm.DefaultAsync(); }
 
     // every pointer interaction with the slider (thumb drag, track click, page-jump hold)
     // ends in a mouse-up — apply once there

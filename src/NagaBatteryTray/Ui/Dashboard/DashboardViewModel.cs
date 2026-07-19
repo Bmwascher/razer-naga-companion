@@ -310,6 +310,10 @@ public sealed class DashboardViewModel : ObservableObject
         {
             IsGridEditable = false;
             GridHint = $"viewing Slot {a} — switch to Slot {app} · {SlotColour(app)} to edit";
+            // revoke any live capture: one can start before the first inventory read lands
+            // (IsGridEditable begins true), and its capture card / keyboard submission would
+            // otherwise survive into view mode (review find)
+            foreach (var c in Callouts) c.CancelCapture();
         }
         else
         {
