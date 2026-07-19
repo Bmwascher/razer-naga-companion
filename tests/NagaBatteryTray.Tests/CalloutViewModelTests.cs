@@ -455,4 +455,56 @@ public class CalloutViewModelTests
         Assert.Equal(new byte[] { 0x00, 0x3a }, rec.RawWrites[^1].Raw.Data);
         Assert.Equal("F1", vm.BindingText);
     }
+
+    [Fact]
+    public async Task SetPending_during_a_live_capture_voids_the_old_slots_raw()
+    {
+        var (vm, rec, _) = NewVm(1);
+        vm.SetFromDevice(Key(0x00, 0x1e));   // slot A's raw known
+        vm.BeginCapture();
+        vm.SetPending();                     // slot switch while the capture is live
+        await vm.CaptureAsync(0x00, 0x04);   // capture completes — the write targets slot B
+
+        Assert.False(vm.CanUndo);            // slot A's raw must not arm undo on slot B
+        await vm.UndoAsync();
+        Assert.Empty(rec.RawWrites);
+    }
+
+    [Fact]
+    public async Task Raw_undo_superseded_mid_flight_does_not_repaint_or_repopulate()
+    {
+        var rawWrites = new List<TaskCompletionSource<bool>>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) => Task.FromResult(true),
+            (_, _) => { var t = new TaskCompletionSource<bool>(); rawWrites.Add(t); return t.Task; },
+            () => new TaskCompletionSource().Task);
+        vm.SetFromDevice(Key(0x00, 0x3a));       // F1 on slot A
+        await vm.CaptureAsync(0x00, 0x04);       // now "A"
+
+        var undo = vm.UndoAsync();               // raw restore in flight
+        vm.SetPending();                         // slot switch mid-restore (busy → display skip)
+        rawWrites[0].SetResult(true);
+        await undo;
+
+        Assert.NotEqual("F1", vm.BindingText);   // no stale repaint of slot A's raw
+        await vm.DisableAsync();                 // next write happens on slot B...
+        Assert.False(vm.CanUndo);                // ...and finds no snapshot (nothing repopulated)
+    }
+
+    [Fact]
+    public async Task Failed_undo_superseded_mid_flight_does_not_reopen_the_window()
+    {
+        var rawWrites = new List<TaskCompletionSource<bool>>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) => Task.FromResult(true),
+            (_, _) => { var t = new TaskCompletionSource<bool>(); rawWrites.Add(t); return t.Task; },
+            () => new TaskCompletionSource().Task);
+        vm.SetFromDevice(Key(0x00, 0x3a));
+        await vm.CaptureAsync(0x00, 0x04);
+
+        var undo = vm.UndoAsync();
+        vm.SetPending();                         // superseded mid-restore
+        rawWrites[0].SetResult(false);           // ...and the restore failed
+        await undo;
+
+        Assert.False(vm.CanUndo);                // a voided snapshot must not be re-armed
+    }
 }

@@ -15,8 +15,9 @@ public readonly record struct ProfileList(byte Capacity, byte[] Slots);
 /// "the factory action" — it is never written to the device as-is (the factory binding is).</summary>
 public readonly record struct ButtonBinding(byte ButtonId, ButtonActionKind Kind, byte Modifiers, byte HidUsage)
 {
-    /// <summary>Wire form for the 0x02/0x0c SET (spec §5.1). Throws on Default — an untouched/default
-    /// button must never be written (§3.1 discipline).</summary>
+    /// <summary>Wire form for the 0x02/0x0c SET (spec §5.1). Throws on Default — the marker itself
+    /// has no wire form; callers map it to <see cref="NagaV2ProButtons.FactoryBindingForPosition"/>
+    /// first (the factory action IS written, since v2.3 to whichever slot is active).</summary>
     public (byte Category, byte[] Data) ToWire() => Kind switch
     {
         ButtonActionKind.Disabled => (RazerProtocol.FnDisabled, Array.Empty<byte>()),

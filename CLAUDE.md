@@ -82,10 +82,11 @@ does, so launch it `-WindowStyle Hidden`.
   reference repo — our own discovery). Consumed by the Profile card (`AppHost.RefreshProfileAsync`
   read on open/refresh, `SwitchProfileAsync` write-on-action via the card's slot dropdown) and the
   `--probe-profile` tools.
-  `Hid/ButtonBinding.cs` holds the button model: `ButtonBinding` (+`ToWire`; Default throws — never
-  written), `RawButtonAction`, `ProfileList`, and `NagaV2ProButtons` (grid ids `0x40..0x4b` physical
-  order; `FactoryBindingForPosition` = the digits row `1..9 0 - =` — a **freshly created onboard slot
-  is EMPTY**, so "Default" writes the baked-in factory action and new slots are seeded with it).
+  `Hid/ButtonBinding.cs` holds the button model: `ButtonBinding` (+`ToWire`; the Default marker
+  itself has no wire form — callers map it to the factory binding first), `RawButtonAction`,
+  `ProfileList`, and `NagaV2ProButtons` (grid ids `0x40..0x4b` physical order;
+  `FactoryBindingForPosition` = the digits row `1..9 0 - =` — a **freshly created onboard slot is
+  EMPTY** (hardware-observed), so "Default" writes the baked-in factory action).
 - `Hid/RazerDevice.cs` (implements `Hid/IRazerDevice.cs`) — zero-access `CreateFile` +
   `HidD_Set/GetFeature`; `ExchangeAsync` transport (SET→`SetReadDelayMs` wait→GET, busy-retry,
   close-on-failure) for battery/DPI/writes + the tid probe, and `FastReadAsync` for idempotent
@@ -239,12 +240,13 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
   plug/unplug (device-change hook), GUID tray icon (stable taskbar position), larger tray digits,
   widened popup + themed header/charging-pill, no popup reposition flash.
 - [x] B — Button remapping (MVP: key+modifiers/disable per grid button, onboard app-owned slot —
-  shipped 2026-07-11). Spike + Stage 2 both hardware-accepted same day; see
+  shipped 2026-07-11; the app-owned-slot model was superseded 2026-07-19 by v2.3 in-place editing
+  of ANY slot, spec §13.2). Spike + Stage 2 both hardware-accepted same day; see
   `docs/superpowers/specs/2026-06-21-naga-button-remap-design.md`.
 - [x] GUI redesign — themed dashboard (`Ui/Dashboard/` + `Ui/Themes/`, 5 presets) replaces the old
-  Settings window: instant-apply button remap chips with undo, DPI presets, a Profile liveness card,
-  and a tray battery-level ring (shipped 2026-07-11); see
-  `docs/superpowers/specs/2026-07-11-naga-gui-redesign-design.md`.
+  Settings window: instant-apply button remap chips with undo, DPI presets, a Profile card (a
+  liveness card then; a slot dropdown since v2.2-2.3), and a tray battery-level ring (shipped
+  2026-07-11); see `docs/superpowers/specs/2026-07-11-naga-gui-redesign-design.md`.
 - [x] Profile probing — read-only `--probe-profile` spike (hardware run 2026-07-18): **HIT — the
   active onboard slot IS readable**: class `0x05` get `0x84` (data_size `0x06`, zero args) returns
   the active slot number at report arg[0] (literal 1..5; verified bijective/stable/reproduced across

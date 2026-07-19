@@ -93,8 +93,11 @@ public sealed class CalloutViewModel : ObservableObject
     public void SetPending()
     {
         ExpireUndo();
-        if (IsBusy || IsCapturing) return;
+        // the raw is voided even mid-edit: a live capture completing AFTER a slot switch would
+        // otherwise snapshot the OLD slot's raw under the NEW generation and arm a cross-slot
+        // undo (review find). Only the DISPLAY update below is skipped for a busy/capturing chip.
         _currentRaw = null;
+        if (IsBusy || IsCapturing) return;
         _deviceText = PendingText;
         NotifyBinding();
     }
@@ -157,6 +160,7 @@ public sealed class CalloutViewModel : ObservableObject
         if (!CanUndo || IsBusy) return;
         CanUndo = false;
         if (_prevRaw is not { } prev) return; // the window only opens with a snapshot; defensive
+        int gen = _snapshotGen; // if a sweep/slot change lands mid-restore, this undo is superseded
         IsBusy = true;
         Failed = false;
         Status = "Writing…";
@@ -168,12 +172,20 @@ public sealed class CalloutViewModel : ObservableObject
             Failed = true;
             // reopen rather than burn: the snapshot may be the only copy of an unmodelable
             // Synapse action, and it's still valid — the mouse still holds the new binding
-            // (review find). One transient failure must not lose the restore forever.
-            _ = OpenUndoWindowAsync();
+            // (review find). One transient failure must not lose the restore forever. A
+            // SUPERSEDED window (slot changed mid-restore) must NOT reopen, though — its
+            // snapshot no longer belongs to the displayed slot (review find).
+            if (gen == _snapshotGen) _ = OpenUndoWindowAsync();
             return;
         }
-        _currentRaw = prev;
-        DisplayRaw(prev);
+        if (gen == _snapshotGen)
+        {
+            _currentRaw = prev;
+            DisplayRaw(prev);
+        }
+        // superseded: the restore itself landed where it was aimed (its slot resolved before the
+        // switch queued behind it on the read lock), but the OLD slot's raw must not repaint or
+        // repopulate the chip that now displays another slot (review find)
         Status = "Applied";
     }
 
