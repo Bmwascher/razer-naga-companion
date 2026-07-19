@@ -12,8 +12,7 @@ public partial class MouseStageView : UserControl
 {
     public event Action<CalloutViewModel>? CaptureRequested; // window owns the keyboard hook
     public event Action<int>? ApplyDpiRequested;
-    public event Action? LivenessRefreshRequested;
-    public event Action<byte>? SwitchProfileRequested;
+    public event Action? ProfileRefreshRequested;
 
     private const int StaggerStepMs = 30;
     private static readonly Duration StaggerDuration = new(TimeSpan.FromMilliseconds(200));
@@ -92,9 +91,14 @@ public partial class MouseStageView : UserControl
     private void OnChipEnter(object s, RoutedEventArgs e) => Vm(s).IsHighlighted = true;
     private void OnChipLeave(object s, RoutedEventArgs e) { Vm(s).IsHighlighted = false; ReleasePress(s); }
 
-    private void OnChipClick(object s, RoutedEventArgs e) => CaptureRequested?.Invoke(Vm(s));
+    // view mode (spec §13.1: a foreign slot's grid is read-only) blocks capture at the entry
+    // points; the action buttons are collapsed by the template, so this is the remaining path
+    private bool GridEditable => DataContext is DashboardViewModel { IsGridEditable: true };
+
+    private void OnChipClick(object s, RoutedEventArgs e)
+    { if (GridEditable) CaptureRequested?.Invoke(Vm(s)); }
     private void OnChipKeyUp(object s, System.Windows.Input.KeyEventArgs e)
-    { if (e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
+    { if (GridEditable && e.Key is System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)
         CaptureRequested?.Invoke(Vm(s)); }
 
     // Press feedback (spec: chips + grid keys scale to 0.97 on pointer-down, back to 1.0 on
@@ -148,12 +152,5 @@ public partial class MouseStageView : UserControl
     private void OnSavePreset(object s, RoutedEventArgs e)
     { var vm = (DashboardViewModel)DataContext; vm.AddPreset(vm.Dpi); }
 
-    private void OnRefreshLiveness(object s, RoutedEventArgs e) => LivenessRefreshRequested?.Invoke();
-
-    private void OnSwitchProfile(object s, RoutedEventArgs e)
-    {
-        var item = (ProfileSlotItem)((FrameworkElement)s).DataContext;
-        if (item.IsActive) return; // already there - the pill isn't hit-test visible, but guard anyway
-        SwitchProfileRequested?.Invoke(item.Number);
-    }
+    private void OnRefreshProfile(object s, RoutedEventArgs e) => ProfileRefreshRequested?.Invoke();
 }

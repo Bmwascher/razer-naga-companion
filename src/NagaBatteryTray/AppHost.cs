@@ -115,14 +115,15 @@ public sealed class AppHost
         var vm = new DashboardViewModel(_settings.Settings, _startup.IsEnabled(), WriteBindingAsync);
         var win = new DashboardWindow(vm);
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
-        win.LivenessRefreshRequested += () => _ = RefreshProfileAsync(vm);
-        win.SwitchProfileRequested += slot => _ = SwitchProfileAsync(vm, slot);
+        win.ProfileRefreshRequested += () => _ = RefreshProfileAsync(vm);
+        vm.SwitchRequested += slot => _ = SwitchProfileAsync(vm, slot); // dropdown pick (spec §13.1)
         win.SettingsOverlayRequested += () => ShowSettingsOverlay(win, vm);
         EventHandler<DeviceState> onState = (_, state) => Dispatch(() => vm.ApplyState(state));
         _monitor.StateChanged += onState;
         win.Closed += (_, _) =>
         {
             _monitor.StateChanged -= onState; // release-on-close: don't leave the VM rooted by the app-lifetime monitor
+            Interlocked.Increment(ref _gridSweep); // supersede any in-flight grid sweep promptly
             SaveDashboardSettings(vm);
             _dashboard = null; // release-on-close: idle memory returns to baseline
             _dashboardVm = null;
@@ -144,10 +145,12 @@ public sealed class AppHost
         await RefreshProfileAsync(vm);
     }
 
-    /// <summary>Profile card refresh (spec §13 v2.1): the full slot inventory (0x05/0x81) plus the
+    /// <summary>Profile card refresh (spec §13.1): the full slot inventory (0x05/0x81) plus the
     /// active-slot read (0x05/0x84), superseding the old effective-action inference. Both reads run
     /// inside one Task.Run — the sequential awaits still serialize on the monitor's lock either way.
-    /// Only called on dashboard open / explicit refresh — never polled (also runs after a switch).</summary>
+    /// Only called on dashboard open / explicit refresh — never polled (also runs after a switch and
+    /// after slot adoption). A known active slot then kicks the grid sweep, fire-and-forget so a
+    /// switch in progress isn't blocked behind ~12 reads.</summary>
     private async Task RefreshProfileAsync(DashboardViewModel vm)
     {
         var (list, active) = await Task.Run(async () =>
@@ -157,11 +160,38 @@ public sealed class AppHost
             return (l, a);
         });
         Dispatch(() => vm.SetProfileInventory(list?.Slots, active));
+        if (active is { } a2) _ = ReadGridAsync(vm, a2);
     }
 
-    /// <summary>Slot selector click: switch the mouse to ANY listed onboard slot (0x05/0x04,
-    /// write-on-action) — no adopted-slot gate, since every pill comes from the device's own list —
-    /// then re-read to confirm. Failure is visible on the card, never silent.</summary>
+    private int _gridSweep; // sweep generation: a new sweep or dashboard close supersedes any in flight
+
+    /// <summary>Grid sweep (spec §13.1): read the ACTIVE profile's 12 grid buttons (0x02/0x8c,
+    /// hardware-verified) sequentially in position order, updating each chip as its read lands —
+    /// hardware truth for whatever slot the mouse is on, including Synapse-configured user slots.
+    /// ~0.5 s per button at the default SetReadDelayMs, so the fill is visibly progressive; each
+    /// read serializes on the monitor's lock like every other pass-through (the battery poll skips
+    /// while busy). Event-driven only — runs solely off RefreshProfileAsync's triggers.</summary>
+    private async Task ReadGridAsync(DashboardViewModel vm, byte slot)
+    {
+        int gen = Interlocked.Increment(ref _gridSweep);
+        Dispatch(() =>
+        {
+            for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++) vm.Callout(pos).SetPending();
+        });
+        for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
+        {
+            if (gen != Volatile.Read(ref _gridSweep) || !ReferenceEquals(_dashboardVm, vm)) return;
+            int p = pos;
+            var raw = await Task.Run(() => _monitor.GetButtonAsync(slot, NagaV2ProButtons.IdForPosition(p)));
+            if (gen != Volatile.Read(ref _gridSweep) || !ReferenceEquals(_dashboardVm, vm)) return;
+            Dispatch(() => vm.Callout(p).SetFromDevice(raw));
+        }
+    }
+
+    /// <summary>Dropdown pick: switch the mouse to ANY listed onboard slot (0x05/0x04,
+    /// write-on-action) — no adopted-slot gate, since every entry comes from the device's own list —
+    /// then re-read to confirm (which also sweeps the newly active slot's grid). Failure is visible
+    /// on the card and snaps the dropdown back to the real active slot, never silent.</summary>
     private async Task SwitchProfileAsync(DashboardViewModel vm, byte slot)
     {
         if (_activating) return;
@@ -170,7 +200,15 @@ public sealed class AppHost
         {
             Dispatch(() => vm.SetProfileNote("Switching…"));
             bool ok = await Task.Run(() => _monitor.SetActiveProfileAsync(slot));
-            if (!ok) { Dispatch(() => vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry")); return; }
+            if (!ok)
+            {
+                Dispatch(() =>
+                {
+                    vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry");
+                    vm.ResyncSelection();
+                });
+                return;
+            }
             await RefreshProfileAsync(vm);
         }
         finally
@@ -227,21 +265,25 @@ public sealed class AppHost
         }
     }
 
-    /// <summary>Returns the app-owned onboard slot, adopting one on first use: re-creates the recorded
-    /// slot if the mouse lost it (e.g. factory reset), else creates the first FREE slot — a user's
-    /// existing slots are never taken or written. Every created slot is seeded with the factory map.
+    /// <summary>Returns the app-owned onboard slot (plus whether this call created it), adopting one
+    /// on first use: re-creates the recorded slot if the mouse lost it (e.g. factory reset), else
+    /// creates the first FREE slot — a user's existing slots are never taken or written. Every
+    /// created slot is seeded with the factory map and then SWITCHED TO (spec §13.1: the grid shows
+    /// the ACTIVE profile, so without the switch the write that triggered adoption would land
+    /// invisibly; best-effort — a slot switch only, bottom-button parity, never a content write).
     /// Null = mouse unreachable, create refused, or no free slot.</summary>
-    private async Task<byte?> EnsureOnboardSlotAsync()
+    private async Task<(byte Slot, bool Created)?> EnsureOnboardSlotAsync()
     {
         if (await Task.Run(() => _monitor.GetProfileListAsync()) is not { } list) return null;
 
         if (_settings.Settings.OnboardSlot is { } recorded)
         {
             byte r = (byte)recorded;
-            if (Array.IndexOf(list.Slots, r) >= 0) return r;
+            if (Array.IndexOf(list.Slots, r) >= 0) return (r, false);
             if (!await Task.Run(() => _monitor.CreateProfileAsync(r))) return null;
             await SeedFactoryMapAsync(r);
-            return r;
+            await Task.Run(() => _monitor.SetActiveProfileAsync(r));
+            return (r, true);
         }
 
         byte free = 0;
@@ -250,22 +292,23 @@ public sealed class AppHost
         if (free == 0) return null; // every slot holds someone else's profile — never overwrite
         if (!await Task.Run(() => _monitor.CreateProfileAsync(free))) return null;
         await SeedFactoryMapAsync(free);
+        await Task.Run(() => _monitor.SetActiveProfileAsync(free));
         _settings.Settings.OnboardSlot = free;
         _settings.Save();
-        // the open dashboard's VM was built before the slot existed — tell its Profile card
-        Dispatch(() => _dashboardVm?.SetAdoptedSlot(free));
-        // ...and refresh the pill list so the new slot's pill appears immediately (event-driven,
-        // piggybacks this remap action — no polling)
-        if (_dashboardVm is { } dvm) _ = RefreshProfileAsync(dvm);
-        return free;
+        return (free, true);
     }
 
     /// <summary>The dashboard's instant-apply write: one binding into the app-owned slot
     /// (ensure slot → write → read-back verify → persist). Kind=Default writes the factory action
-    /// and drops the table entry. Returns false on any failure (nothing persisted).</summary>
+    /// and drops the table entry. Returns false on any failure (nothing persisted). When the ensure
+    /// step just created (and switched to) the slot, the card + grid refresh runs AFTER the write —
+    /// queuing it first would park this write behind the sweep's ~14 serialized reads.</summary>
     private async Task<bool> WriteBindingAsync(int position, ButtonActionKind kind, byte modifiers, byte usage)
     {
-        if (await EnsureOnboardSlotAsync() is not { } slot) return false;
+        if (await EnsureOnboardSlotAsync() is not { } ensured) return false;
+        var (slot, created) = ensured;
+        if (created)
+            Dispatch(() => _dashboardVm?.SetAdoptedSlot(slot)); // the open VM was built before the slot existed
 
         var binding = kind == ButtonActionKind.Default
             ? NagaV2ProButtons.FactoryBindingForPosition(position)
@@ -278,6 +321,9 @@ public sealed class AppHost
             var readBack = await Task.Run(() => _monitor.GetButtonAsync(slot, binding.ButtonId));
             ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
         }
+        // adoption happened mid-write: let the card + grid catch up whether or not the write
+        // verified (the slot exists and is active either way) — event-driven, no polling
+        if (created && _dashboardVm is { } dvm) _ = RefreshProfileAsync(dvm);
         if (!ok) return false;
 
         if (kind == ButtonActionKind.Default) _settings.Settings.ButtonBindings.Remove(position);

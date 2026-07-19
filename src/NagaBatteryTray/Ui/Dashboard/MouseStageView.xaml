@@ -6,26 +6,6 @@
     xmlns:local="clr-namespace:NagaBatteryTray.Ui.Dashboard">
   <UserControl.Resources>
     <local:GridKeyMarginConverter x:Key="GridKeyMargin"/>
-    <!-- profile card slot selector (spec §13 v2.1): one pill per existing onboard slot. The active
-         pill gets the accent highlight and stops being a click target (clicking the slot you're
-         already on is a no-op); every other pill is a live click-to-switch target - safe to offer
-         freely, the switch persists across power-cycles (spec §12). IsHitTestVisible/Focusable, NOT
-         IsEnabled - WPF-UI 4.3.0's Button template has its own IsEnabled=False trigger on the named
-         ContentBorder that overrides Background/BorderBrush, so an IsEnabled=False setter here would
-         silently lose the accent look (review find; the click handler has its own IsActive guard too). -->
-    <Style x:Key="ProfileSlotButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Margin" Value="0,0,6,6"/>
-      <Setter Property="Padding" Value="8,3"/>
-      <Setter Property="FontSize" Value="12"/>
-      <Style.Triggers>
-        <DataTrigger Binding="{Binding IsActive}" Value="True">
-          <Setter Property="Background" Value="{DynamicResource App.AccentSoft}"/>
-          <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
-          <Setter Property="IsHitTestVisible" Value="False"/>
-          <Setter Property="Focusable" Value="False"/>
-        </DataTrigger>
-      </Style.Triggers>
-    </Style>
     <!-- during the undo window only ↶ shows - undo is the salient act and the expanded 15px
          binding text needs the width; Disable/Default return after the 5s window -->
     <Style x:Key="HideDuringUndoButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
@@ -102,7 +82,7 @@
               <Border.Style>
                 <Style TargetType="Border">
                   <Setter Property="BorderBrush" Value="{DynamicResource App.ChipStroke}"/>
-                  <Setter Property="ToolTip" Value="{Binding BindingText}"/>
+                  <Setter Property="ToolTip" Value="{Binding BindingTip}"/>
                   <Style.Triggers>
                     <DataTrigger Binding="{Binding Failed}" Value="True">
                       <Setter Property="BorderBrush" Value="{DynamicResource Status.Critical}"/>
@@ -160,7 +140,8 @@
                    squeezed the key-box into trimming. The key-box is left-anchored, so the
                    icons appearing in the empty right space shifts nothing. Last trigger wins:
                    while capturing the cluster stays collapsed - actions are noise mid-capture
-                   and "press a key…" needs the width. -->
+                   and "press a key…" needs the width; in view mode (spec §13.1: a foreign
+                   slot's grid is read-only) it never shows at all. -->
               <Style TargetType="StackPanel">
                 <Setter Property="Visibility" Value="Collapsed"/>
                 <Style.Triggers>
@@ -174,6 +155,9 @@
                     <Setter Property="Visibility" Value="Visible"/>
                   </DataTrigger>
                   <DataTrigger Binding="{Binding IsCapturing}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding DataContext.IsGridEditable, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
                     <Setter Property="Visibility" Value="Collapsed"/>
                   </DataTrigger>
                 </Style.Triggers>
@@ -392,6 +376,25 @@
         </Style>
       </TextBlock.Style>
     </TextBlock>
+    <!-- view-mode hint (spec §13.1): shares the offline text's footer slot - they can't collide,
+         offline shows when the device is gone, this only while it's online in view mode -->
+    <TextBlock Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
+               Text="{Binding GridHint}">
+      <TextBlock.Style>
+        <Style TargetType="TextBlock" BasedOn="{StaticResource SubtleText}">
+          <Setter Property="Visibility" Value="Collapsed"/>
+          <Style.Triggers>
+            <MultiDataTrigger>
+              <MultiDataTrigger.Conditions>
+                <Condition Binding="{Binding DeviceOnline}" Value="True"/>
+                <Condition Binding="{Binding IsGridEditable}" Value="False"/>
+              </MultiDataTrigger.Conditions>
+              <Setter Property="Visibility" Value="Visible"/>
+            </MultiDataTrigger>
+          </Style.Triggers>
+        </Style>
+      </TextBlock.Style>
+    </TextBlock>
 
     <ItemsControl Grid.Column="2" x:Name="RightChips" VerticalAlignment="Center"
                   ItemTemplate="{StaticResource ChipTemplate}"/>
@@ -485,22 +488,20 @@
           <DockPanel LastChildFill="False">
             <TextBlock Style="{DynamicResource LabelText}" Text="PROFILE"/>
             <ui:Button DockPanel.Dock="Right" Content="↻" Padding="6,2"
-                       Click="OnRefreshLiveness" Opacity="0.6"/>
+                       Click="OnRefreshProfile" Opacity="0.6"/>
           </DockPanel>
-          <TextBlock Style="{DynamicResource BodyText}" Text="{Binding ProfileTitle}" FontWeight="SemiBold"/>
-          <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding ProfileDetail}" TextWrapping="Wrap"/>
-          <ItemsControl ItemsSource="{Binding ProfileSlots}" Margin="0,6,0,0">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <Button Content="{Binding Label}" Style="{StaticResource ProfileSlotButton}"
-                        Click="OnSwitchProfile"
-                        IsEnabled="{Binding DataContext.DeviceOnline, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
+          <!-- slot dropdown (spec §13.1): one entry per existing onboard slot, the selection
+               mirrors the mouse's actual active slot; picking another entry switches the mouse
+               (0x05/0x04, safe to offer freely - persists across power-cycles, spec §12) and the
+               grid re-reads the newly active slot's 12 buttons. Programmatic selection sync is
+               guarded in the VM, so only a user pick raises the switch. -->
+          <ComboBox Margin="0,6,0,0" HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding ProfileSlots}"
+                    SelectedItem="{Binding SelectedProfileSlot, Mode=TwoWay}"
+                    DisplayMemberPath="Label"
+                    IsEnabled="{Binding DeviceOnline}"/>
+          <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding ProfileDetail}"
+                     TextWrapping="Wrap" Margin="0,6,0,0"/>
         </StackPanel>
       </Border>
     </StackPanel>
