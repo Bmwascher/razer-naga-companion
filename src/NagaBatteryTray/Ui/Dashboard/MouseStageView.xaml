@@ -6,6 +6,7 @@
     xmlns:local="clr-namespace:NagaBatteryTray.Ui.Dashboard">
   <UserControl.Resources>
     <local:GridKeyMarginConverter x:Key="GridKeyMargin"/>
+    <local:RailTopMarginConverter x:Key="RailTopMargin"/>
     <!-- onboard-slot LED dot (dashboard-polish §5.3): fill = the slot's bottom-button LED colour
          (theme-independent Slot.* keys); the ChipStroke ring keeps the white dot visible on light
          cards. Binds Number, so it works wherever the DataContext is a ProfileSlotItem. -->
@@ -232,7 +233,9 @@
       <ColumnDefinition Width="200"/>
       <ColumnDefinition Width="*"/>
       <ColumnDefinition Width="200"/>
-      <ColumnDefinition Width="230"/>
+      <!-- 248: three preset pills (each reserving ✕ width) + wrap margins need ~206px of card
+           content; at 230 the third pill wrapped to its own line -->
+      <ColumnDefinition Width="248"/>
     </Grid.ColumnDefinitions>
 
     <ItemsControl Grid.Column="0" x:Name="LeftChips" VerticalAlignment="Center"
@@ -403,13 +406,18 @@
     <ItemsControl Grid.Column="2" x:Name="RightChips" VerticalAlignment="Center"
                   ItemTemplate="{StaticResource ChipTemplate}"/>
 
-    <!-- right rail. The wrapper grid pins the rail's top edge to the chip columns' top edge
-         (dashboard-polish §6): its height mirrors LeftChips' rendered height and both center,
-         so the cards share the chips' datum instead of floating on their own midline; any
-         excess rail height hangs below (Grid doesn't clip). -->
-    <Grid Grid.Column="3" VerticalAlignment="Center" Margin="8,0,0,0"
-          Height="{Binding ActualHeight, ElementName=LeftChips}">
-    <StackPanel VerticalAlignment="Top">
+    <!-- right rail, top edge pinned to the chip columns' top edge (dashboard-polish §6): a
+         computed top margin of (column − chips)/2 = where the centered chips start. Top-aligned
+         and height-unconstrained, so rail content taller than the chips band hangs below —
+         NEVER reintroduce a bound Height here: WPF layout-clips a child arranged smaller than
+         its desired size, which silently amputated the Profile card's body. -->
+    <StackPanel Grid.Column="3" VerticalAlignment="Top">
+      <StackPanel.Margin>
+        <MultiBinding Converter="{StaticResource RailTopMargin}">
+          <Binding Path="ActualHeight" RelativeSource="{RelativeSource AncestorType=Grid}"/>
+          <Binding Path="ActualHeight" ElementName="LeftChips"/>
+        </MultiBinding>
+      </StackPanel.Margin>
       <Border Style="{DynamicResource CardBorder}" Margin="0,0,0,10">
         <StackPanel>
           <StackPanel Orientation="Horizontal">
@@ -603,6 +611,5 @@
         </StackPanel>
       </Border>
     </StackPanel>
-    </Grid>
   </Grid>
 </UserControl>

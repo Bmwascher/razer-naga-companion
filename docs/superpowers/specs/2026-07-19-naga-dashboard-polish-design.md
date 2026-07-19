@@ -182,18 +182,33 @@ identities, not theme accents):
 ## 6. D — Rail alignment
 
 The rail (`Grid.Column 3`) centers independently of the chip columns, so its card edges align
-with nothing (screenshot: DPI card top ~68px above the first chip row). Shared top datum:
+with nothing (screenshot: DPI card top ~68px above the first chip row). Shared top datum via a
+computed margin — the rail stays Top-aligned and **height-unconstrained**:
 
 ```xml
-<Grid Grid.Column="3" VerticalAlignment="Center" Margin="8,0,0,0"
-      Height="{Binding ActualHeight, ElementName=LeftChips}">
-  <StackPanel VerticalAlignment="Top"> <!-- existing two cards --> </StackPanel>
-</Grid>
+<StackPanel Grid.Column="3" VerticalAlignment="Top">
+  <StackPanel.Margin>
+    <MultiBinding Converter="{StaticResource RailTopMargin}">
+      <Binding Path="ActualHeight" RelativeSource="{RelativeSource AncestorType=Grid}"/>
+      <Binding Path="ActualHeight" ElementName="LeftChips"/>
+    </MultiBinding>
+  </StackPanel.Margin>
+  <!-- existing two cards -->
+</StackPanel>
 ```
 
-The rail's top edge lands exactly on the chip columns' top edge; excess height hangs below
-(Grid doesn't clip). Post-pill rework the rail's height is near the chip columns' (~230px),
-so the overhang is small. No change to the chip columns or stage.
+`RailTopMarginConverter` returns `Thickness(8, max(0, (columnH − chipsH) / 2), 0, 0)` — the
+offset the centered chips column sits at — and tolerates `UnsetValue` during the first layout
+pass. Rail content taller than the chips band hangs below.
+
+> **Superseded first cut (hardware run 2026-07-19):** the original design here bound a wrapper
+> Grid's `Height` to the chips' height with top-aligned content, claiming "Grid doesn't clip."
+> Wrong: WPF applies a **layout clip** to a child arranged smaller than its desired size, which
+> amputated everything past the chips band — the Profile card rendered as a bare header (the
+> user's screenshot). Never reintroduce a bound Height on the rail.
+
+The rail column also widens 230 → 248: three preset pills, each reserving ✕ width, need ~206px
+of card content width; at 230 the third pill wrapped to its own line.
 
 ## 7. Testing
 
