@@ -15,6 +15,9 @@ public class DashboardViewModelTests
         return s;
     }
 
+    private static DashboardViewModel NewVm(int? onboardSlot) =>
+        new DashboardViewModel(new AppSettings { OnboardSlot = onboardSlot }, runAtStartup: false, NoWrite);
+
     [Fact]
     public void Callouts_seed_from_the_table()
     {
@@ -82,17 +85,41 @@ public class DashboardViewModelTests
         Assert.Equal(new[] { 800, 1200, 1600 }, vm.Presets.Select(p => p.Value));
     }
 
-    [Theory]
-    [InlineData(ProfileLivenessState.NotAdopted, "No app profile yet")]
-    [InlineData(ProfileLivenessState.Live, "bindings live")]
-    [InlineData(ProfileLivenessState.NotLive, "another profile")]
-    [InlineData(ProfileLivenessState.Unchecked, "Slot 3")]
-    [InlineData(ProfileLivenessState.Unknown, "unknown")]
-    public void Profile_card_text_tracks_state(ProfileLivenessState state, string fragment)
+    [Fact]
+    public void SetActiveSlot_maps_states_from_slot_equality()
     {
-        var vm = new DashboardViewModel(Seeded(), false, NoWrite);
-        vm.SetLiveness(state);
-        Assert.Contains(fragment, vm.ProfileTitle + " " + vm.ProfileDetail);
+        var vm = NewVm(onboardSlot: 2);
+        vm.SetActiveSlot(2);
+        Assert.Contains("Slot 2", vm.ProfileTitle);
+        Assert.Contains("live", vm.ProfileDetail); // Live: "● active on the mouse"-style line contains "live"
+        Assert.False(vm.CanActivate);
+
+        vm.SetActiveSlot(3);
+        Assert.Contains("Slot 3", vm.ProfileDetail); // NotLive: names where the mouse actually is
+        Assert.True(vm.CanActivate);
+
+        vm.SetActiveSlot(null);                    // Unknown: unreachable
+        Assert.Contains("unknown", vm.ProfileDetail);
+        Assert.False(vm.CanActivate);
+    }
+
+    [Fact]
+    public void SetActiveSlot_without_adopted_slot_stays_NotAdopted()
+    {
+        var vm = NewVm(onboardSlot: null);
+        vm.SetActiveSlot(1);
+        Assert.Contains("No app profile", vm.ProfileTitle);
+        Assert.False(vm.CanActivate);
+    }
+
+    [Fact]
+    public void SetProfileNote_overwrites_detail_only()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.SetActiveSlot(3);
+        vm.SetProfileNote("Couldn't switch — wiggle the mouse and retry");
+        Assert.Contains("wiggle", vm.ProfileDetail);
+        Assert.Contains("Slot 2", vm.ProfileTitle); // title untouched
     }
 
     [Fact]

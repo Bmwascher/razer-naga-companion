@@ -5,6 +5,8 @@ using NagaBatteryTray.Settings;
 
 namespace NagaBatteryTray.Ui.Dashboard;
 
+public enum ProfileLivenessState { NotAdopted, Unchecked, Unknown, Live, NotLive }
+
 public sealed class DpiPresetItem : ObservableObject
 {
     private bool _isActive;
@@ -51,7 +53,7 @@ public sealed class DashboardViewModel : ObservableObject
 
         Presets = new ObservableCollection<DpiPresetItem>();
         foreach (int v in source.DpiPresets.Distinct().OrderBy(v => v)) Presets.Add(new DpiPresetItem(v));
-        SetLiveness(_slot is null ? ProfileLivenessState.NotAdopted : ProfileLivenessState.Unchecked);
+        ApplyProfileState(_slot is null ? ProfileLivenessState.NotAdopted : ProfileLivenessState.Unchecked);
     }
 
     // ---- callouts ----
@@ -153,9 +155,15 @@ public sealed class DashboardViewModel : ObservableObject
         CanSavePreset = DevicePresent && !Presets.Any(p => p.Value == Dpi);
     }
 
-    // ---- profile card ----
+    // ---- profile card (direct active-slot read, spec §13) ----
+    private byte? _activeSlot;
     public string ProfileTitle { get => _profileTitle; private set => Set(ref _profileTitle, value); }
     public string ProfileDetail { get => _profileDetail; private set => Set(ref _profileDetail, value); }
+
+    /// <summary>Activate is offered only when we KNOW the mouse is on another slot — adopted slot
+    /// present, active slot read successfully, and they differ.</summary>
+    public bool CanActivate { get => _canActivate; private set => Set(ref _canActivate, value); }
+    private bool _canActivate;
 
     /// <summary>First remap on a fresh install adopts a slot AFTER this VM was built — update the
     /// identity the Profile card renders. Liveness deliberately resets to Unchecked (identity only,
@@ -164,20 +172,36 @@ public sealed class DashboardViewModel : ObservableObject
     {
         if (_slot == slot) return;
         _slot = slot;
-        SetLiveness(ProfileLivenessState.Unchecked);
+        ApplyProfileState(ProfileLivenessState.Unchecked);
     }
 
-    public void SetLiveness(ProfileLivenessState state)
+    /// <summary>Feed the card a fresh 0x05/0x84 read (null = unreachable). Drives the whole
+    /// state machine — Live/NotLive are slot equality now, not byte inference.</summary>
+    public void SetActiveSlot(byte? active)
+    {
+        _activeSlot = active;
+        ApplyProfileState(_slot is null ? ProfileLivenessState.NotAdopted
+            : active is null ? ProfileLivenessState.Unknown
+            : active == _slot ? ProfileLivenessState.Live
+            : ProfileLivenessState.NotLive);
+    }
+
+    /// <summary>Transient card status ("Switching…", failure text) — detail line only.</summary>
+    public void SetProfileNote(string note) => ProfileDetail = note;
+
+    private void ApplyProfileState(ProfileLivenessState state)
     {
         string identity = _slot is { } n ? $"Slot {n} · {SlotColour(n)}" : "";
         (ProfileTitle, ProfileDetail) = state switch
         {
             ProfileLivenessState.NotAdopted => ("No app profile yet", "Remap any button to create one."),
-            ProfileLivenessState.Live => (identity, "● bindings live"),
-            ProfileLivenessState.NotLive => (identity, "○ Mouse is on another profile — press the bottom button until the LED is " + (_slot is { } m ? SlotColour(m) : "right") + "."),
+            ProfileLivenessState.Live => (identity, "● live — active on the mouse"),
+            ProfileLivenessState.NotLive => (identity,
+                $"○ Mouse is on Slot {_activeSlot} · {SlotColour(_activeSlot!.Value)}"),
             ProfileLivenessState.Unknown => (identity, "state unknown — mouse unreachable"),
-            _ => (identity, ""), // Unchecked: identity only, no liveness claim
+            _ => (identity, ""), // Unchecked: identity only, no claim
         };
+        CanActivate = state == ProfileLivenessState.NotLive;
     }
 
     // ---- settings (overlay) ----

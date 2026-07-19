@@ -114,7 +114,7 @@ public sealed class AppHost
         var vm = new DashboardViewModel(_settings.Settings, _startup.IsEnabled(), WriteBindingAsync);
         var win = new DashboardWindow(vm);
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
-        win.LivenessRefreshRequested += () => _ = RefreshLivenessAsync(vm);
+        win.LivenessRefreshRequested += () => _ = RefreshProfileAsync(vm);
         win.SettingsOverlayRequested += () => ShowSettingsOverlay(win, vm);
         EventHandler<DeviceState> onState = (_, state) => Dispatch(() => vm.ApplyState(state));
         _monitor.StateChanged += onState;
@@ -139,13 +139,16 @@ public sealed class AppHost
     {
         var dpi = await Task.Run(() => _monitor.GetDpiAsync());
         Dispatch(() => vm.SetCurrentDpi(dpi));
-        await RefreshLivenessAsync(vm);
+        await RefreshProfileAsync(vm);
     }
 
-    private async Task RefreshLivenessAsync(DashboardViewModel vm)
+    /// <summary>Profile card refresh (spec §13): one direct active-slot read (0x05/0x84), superseding
+    /// the old effective-action inference. Only called on dashboard open / explicit refresh — never
+    /// polled (Task 3 also drives this after Activate).</summary>
+    private async Task RefreshProfileAsync(DashboardViewModel vm)
     {
-        var state = await CheckLivenessAsync();
-        Dispatch(() => vm.SetLiveness(state));
+        var active = await Task.Run(() => _monitor.GetActiveProfileAsync());
+        Dispatch(() => vm.SetActiveSlot(active));
     }
 
     private void ShowSettingsOverlay(DashboardWindow win, DashboardViewModel vm)
@@ -252,22 +255,6 @@ public sealed class AppHost
         _settings.Save();
         Dispatch(() => _popup?.SetProfile(_settings.Settings.OnboardSlot));
         return true;
-    }
-
-    /// <summary>Profile-card liveness (spec §4.4): one effective read (profile 0) compared against the
-    /// app slot's stored binding. Only called on dashboard open / explicit refresh — never polled.</summary>
-    private async Task<ProfileLivenessState> CheckLivenessAsync()
-    {
-        var s = _settings.Settings;
-        if (s.OnboardSlot is null) return ProfileLivenessState.NotAdopted;
-        var probe = s.ButtonBindings.OrderBy(kv => kv.Key).FirstOrDefault();
-        if (probe.Value is null) return ProfileLivenessState.Unchecked;
-
-        var expected = new ButtonBinding(NagaV2ProButtons.IdForPosition(probe.Key),
-            probe.Value.Kind, probe.Value.Modifiers, probe.Value.HidUsage).ToWire();
-        var effective = await Task.Run(() =>
-            _monitor.GetButtonAsync(RazerProtocol.ButtonProfileDirect, NagaV2ProButtons.IdForPosition(probe.Key)));
-        return ProfileLiveness.Evaluate(s.OnboardSlot, expected, effective);
     }
 
     /// <summary>Settings-overlay "Reset all to factory": runs the counted reset (each chip shows its
