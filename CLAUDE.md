@@ -80,7 +80,7 @@ does, so launch it `-WindowStyle Hidden`.
   **set 0x05/0x04** (ds 0x01, arg[0]=slot; **persists across power-cycle** — full bottom-button
   parity) both hardware-verified 2026-07-18 (`--probe-profile` sweep + `--set-test`; in no
   reference repo — our own discovery). Consumed by the Profile card (`AppHost.RefreshProfileAsync`
-  read on open/refresh, `SwitchProfileAsync` write-on-action via the card's slot selector) and the
+  read on open/refresh, `SwitchProfileAsync` write-on-action via the card's slot dropdown) and the
   `--probe-profile` tools.
   `Hid/ButtonBinding.cs` holds the button model: `ButtonBinding` (+`ToWire`; Default throws — never
   written), `RawButtonAction`, `ProfileList`, and `NagaV2ProButtons` (grid ids `0x40..0x4b` physical
@@ -111,11 +111,13 @@ does, so launch it `-WindowStyle Hidden`.
   with the factory map, recorded as `OnboardSlot` in settings; **the user's existing slots 01/02 are
   never taken or written**). The firmware holds bindings through power-cycles — no re-apply, no
   sentinel poll. The active slot is readable AND settable since 2026-07-18 (`0x05/0x84`/`0x05/0x04`
-  — the Profile card's ↻/Activate); the mouse's bottom button (LED colour = slot: white/red/green/
+  — the Profile card's ↻/dropdown); the mouse's bottom button (LED colour = slot: white/red/green/
   blue/cyan) remains the hardware fallback.
   Write path is `AppHost.WriteBindingAsync` (per-chip instant apply): ensure slot → write → read-back
   verify → persist; "Default" writes the factory action (deterministic) and is always available on any
-  chip (the repair path).
+  chip (the repair path). Since v2.2 the ensure step also **switches the mouse onto a slot it just
+  created** (adopt → seed → set-active, best-effort) — the grid displays the ACTIVE slot, so the
+  triggering write must land visibly; still never a content write to a user slot.
 - `Settings/` — `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at
   `%APPDATA%\NagaBatteryTray\settings.json` (Roaming — **not** the install dir under `%LOCALAPPDATA%`);
   holds cadences, low-battery threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), cached
@@ -171,10 +173,19 @@ does, so launch it `-WindowStyle Hidden`.
   `SettingsView` (theme picker, general toggles, battery polling, reset-all-buttons). `CalloutViewModel`
   is the per-button state machine (Idle → Capturing → Writing → Confirmed | Failed) that replaces
   `ButtonRowViewModel`'s staged-op model — every action writes instantly through `AppHost`'s
-  `WriteBindingAsync`, no stage-then-commit step. `DashboardViewModel` is the window's VM (header/DPI/
-  profile state plus the `Callouts` list); the Profile card reads the active slot directly
-  (`0x05/0x84`) on open/refresh and offers Activate (`0x05/0x04`, write-on-action) to switch the
-  mouse onto the app's slot — `ProfileLiveness`'s effective-action inference is deleted. WPF gotcha
+  `WriteBindingAsync`, no stage-then-commit step. **The grid shows hardware truth for the ACTIVE
+  slot (v2.2)**: every inventory read that yields an active slot kicks `AppHost.ReadGridAsync` — a
+  generation-guarded sequential sweep of the 12 buttons (`0x02/0x8c`) that fills chips
+  progressively (`SetPending`/`SetFromDevice`; keyboard/disabled decode, other categories show
+  "Synapse action (0xNN)", raw never rewritten). Editing follows *you-edit-the-profile-you're-on*:
+  the app slot active → full editing; a foreign slot active while the app slot exists → view mode
+  (`IsGridEditable`/`GridHint` — hover/tooltips live, actions gone, user-slot contents never
+  written); no/lost app slot → editable, first write bootstraps (create+seed+switch).
+  `DashboardViewModel` is the window's VM (header/DPI/
+  profile state plus the `Callouts` list); the Profile card is a slot **dropdown**
+  (`SelectedProfileSlot` mirrors the mouse's actual active slot from `0x05/0x84`; sync is guarded
+  so only a USER pick raises `SwitchRequested` → `0x05/0x04`, and a failed switch snaps the
+  selection back) — `ProfileLiveness`'s effective-action inference is deleted. WPF gotcha
   (fixed a first-click crash): a compiled template's plain
   `<ScaleTransform/>` is shared + frozen across stamped elements — swap in a fresh per-element
   transform before animating (`MouseStageView.PressScale`).
