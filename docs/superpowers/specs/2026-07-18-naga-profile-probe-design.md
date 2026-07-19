@@ -262,6 +262,7 @@ otherwise **NotLive** with "On Slot M · colour" plus an **Activate** button tha
 on click, re-reads to confirm, and surfaces failure visibly ("Couldn't switch — wiggle the mouse
 and retry"). Safe to offer freely: the write persists across power-cycles (§12) — no re-apply
 machinery. `ProfileLiveness` (the effective-action comparer) retires, superseded by the direct
-read; the state enum survives, driven by slot equality. The popup's profile line stays
+read; in v2.1 the state enum is gone too — pill flags (`IsActive`/`IsApp`) plus a checked/unchecked
+bool carry the states. The popup's profile line stays
 settings-based (no I/O on that path). Tests: VM state mapping + monitor pass-throughs via
 `FakeRazerDevice` (extended with active-slot fields).
