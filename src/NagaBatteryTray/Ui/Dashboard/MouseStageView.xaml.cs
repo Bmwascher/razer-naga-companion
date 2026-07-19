@@ -153,6 +153,7 @@ public partial class MouseStageView : UserControl
     private void OnSwitchProfile(object s, RoutedEventArgs e)
     {
         var item = (ProfileSlotItem)((FrameworkElement)s).DataContext;
+        if (item.IsActive) return; // already there - the pill isn't hit-test visible, but guard anyway
         SwitchProfileRequested?.Invoke(item.Number);
     }
 }

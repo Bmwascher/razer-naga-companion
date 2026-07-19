@@ -254,6 +254,9 @@ public sealed class AppHost
         _settings.Save();
         // the open dashboard's VM was built before the slot existed — tell its Profile card
         Dispatch(() => _dashboardVm?.SetAdoptedSlot(free));
+        // ...and refresh the pill list so the new slot's pill appears immediately (event-driven,
+        // piggybacks this remap action — no polling)
+        if (_dashboardVm is { } dvm) _ = RefreshProfileAsync(dvm);
         return free;
     }
 

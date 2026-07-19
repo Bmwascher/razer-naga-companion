@@ -132,6 +132,20 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public void SetProfileInventory_list_read_fails_but_active_known_keeps_pills_and_marks_active()
+    {
+        var vm = NewVm(onboardSlot: 2);
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 2); // establish pills first
+        vm.SetProfileInventory(null, active: 3);                  // list read failed, active read succeeded
+
+        Assert.Equal(3, vm.ProfileSlots.Count);                            // prior pills kept
+        Assert.True(vm.ProfileSlots.Single(p => p.Number == 3).IsActive);
+        Assert.False(vm.ProfileSlots.Single(p => p.Number == 2).IsActive);
+        Assert.Contains("Slot 3", vm.ProfileTitle);                        // normal active-slot title
+        Assert.Contains("remaps live on Slot 2", vm.ProfileDetail);        // normal detail, not "unknown"
+    }
+
+    [Fact]
     public void SetProfileInventory_without_adopted_slot_still_lists_pills()
     {
         var vm = NewVm(onboardSlot: null);

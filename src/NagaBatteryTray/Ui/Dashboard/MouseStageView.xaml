@@ -7,9 +7,12 @@
   <UserControl.Resources>
     <local:GridKeyMarginConverter x:Key="GridKeyMargin"/>
     <!-- profile card slot selector (spec §13 v2.1): one pill per existing onboard slot. The active
-         pill gets the accent highlight and disables itself (clicking the slot you're already on is
-         a no-op); every other pill is a live click-to-switch target - safe to offer freely, the
-         switch persists across power-cycles (spec §12). -->
+         pill gets the accent highlight and stops being a click target (clicking the slot you're
+         already on is a no-op); every other pill is a live click-to-switch target - safe to offer
+         freely, the switch persists across power-cycles (spec §12). IsHitTestVisible/Focusable, NOT
+         IsEnabled - WPF-UI 4.3.0's Button template has its own IsEnabled=False trigger on the named
+         ContentBorder that overrides Background/BorderBrush, so an IsEnabled=False setter here would
+         silently lose the accent look (review find; the click handler has its own IsActive guard too). -->
     <Style x:Key="ProfileSlotButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Margin" Value="0,0,6,6"/>
       <Setter Property="Padding" Value="8,3"/>
@@ -18,7 +21,8 @@
         <DataTrigger Binding="{Binding IsActive}" Value="True">
           <Setter Property="Background" Value="{DynamicResource App.AccentSoft}"/>
           <Setter Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
-          <Setter Property="IsEnabled" Value="False"/>
+          <Setter Property="IsHitTestVisible" Value="False"/>
+          <Setter Property="Focusable" Value="False"/>
         </DataTrigger>
       </Style.Triggers>
     </Style>
@@ -492,7 +496,8 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Button Content="{Binding Label}" Style="{StaticResource ProfileSlotButton}"
-                        Click="OnSwitchProfile"/>
+                        Click="OnSwitchProfile"
+                        IsEnabled="{Binding DataContext.DeviceOnline, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>

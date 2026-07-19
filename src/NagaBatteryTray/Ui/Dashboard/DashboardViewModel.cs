@@ -198,16 +198,23 @@ public sealed class DashboardViewModel : ObservableObject
     public void SetProfileInventory(byte[]? slots, byte? active)
     {
         _profileChecked = true;
-        if (slots is null || active is null)
-        {
-            _activeSlot = null;
-            if (slots is not null) RebuildSlots(slots, active: null);
-            else foreach (var p in ProfileSlots) p.IsActive = false; // keep last-known pills, unmark active
-        }
-        else
+        if (slots is not null)
         {
             _activeSlot = active;
             RebuildSlots(slots, active);
+        }
+        else if (active is not null && ProfileSlots.Count > 0)
+        {
+            // partial read: the list call failed but the active-slot call succeeded and we already
+            // have pills from a prior read — keep them and just re-flag which one is active, rather
+            // than forcing the card back to "state unknown" over one failed half of the pair (review find)
+            _activeSlot = active;
+            foreach (var p in ProfileSlots) p.IsActive = p.Number == active;
+        }
+        else
+        {
+            _activeSlot = null;
+            foreach (var p in ProfileSlots) p.IsActive = false; // keep last-known pills, unmark active
         }
         RefreshProfileText();
     }

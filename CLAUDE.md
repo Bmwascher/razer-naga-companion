@@ -80,7 +80,8 @@ does, so launch it `-WindowStyle Hidden`.
   **set 0x05/0x04** (ds 0x01, arg[0]=slot; **persists across power-cycle** — full bottom-button
   parity) both hardware-verified 2026-07-18 (`--probe-profile` sweep + `--set-test`; in no
   reference repo — our own discovery). Consumed by the Profile card (`AppHost.RefreshProfileAsync`
-  read on open/refresh, `ActivateProfileAsync` write-on-action) and the `--probe-profile` tools.
+  read on open/refresh, `SwitchProfileAsync` write-on-action via the card's slot selector) and the
+  `--probe-profile` tools.
   `Hid/ButtonBinding.cs` holds the button model: `ButtonBinding` (+`ToWire`; Default throws — never
   written), `RawButtonAction`, `ProfileList`, and `NagaV2ProButtons` (grid ids `0x40..0x4b` physical
   order; `FactoryBindingForPosition` = the digits row `1..9 0 - =` — a **freshly created onboard slot

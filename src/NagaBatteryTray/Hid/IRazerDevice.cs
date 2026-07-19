@@ -29,8 +29,8 @@ public interface IRazerDevice : IDisposable
     Task<byte?> GetActiveProfileAsync(CancellationToken ct);
 
     /// <summary>Switch the active onboard slot (0x05/0x04, hardware-verified 2026-07-18; persists
-    /// across power-cycles — bottom-button parity). Only ever targets the app's adopted slot.
-    /// True = firmware acked (status 0x02).</summary>
+    /// across power-cycles — bottom-button parity). Targets slots from the device's own profile
+    /// list (the card's selector). True = firmware acked (status 0x02).</summary>
     Task<bool> SetActiveProfileAsync(byte slot, CancellationToken ct);
 
     /// <summary>Drop any cached connection so the next call re-selects the active interface. Used after a
