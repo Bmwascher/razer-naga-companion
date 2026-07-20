@@ -438,11 +438,14 @@
                its template so hover paints the pill, not the row; the active pill's fill IS the
                indicator (the old dot + ✓ retire). ✕ rides inside the pill with reserved width
                (Hidden, not Collapsed) so pills never resize under the pointer. -->
-          <ItemsControl ItemsSource="{Binding Presets}" Margin="0,8,0,0">
+          <!-- negative right margin swallows the last column's 6px pill gutter, so the row runs
+               flush to both card edges like the slider above it -->
+          <ItemsControl ItemsSource="{Binding Presets}" Margin="0,8,-6,0">
             <ItemsControl.ItemsPanel>
-              <!-- shared-size scope: every pill's value column matches the widest, so the row
-                   reads as even segments (round-3 gripe: 800/1100/1600 were three widths) -->
-              <ItemsPanelTemplate><WrapPanel Grid.IsSharedSizeScope="True"/></ItemsPanelTemplate>
+              <!-- a row is three uniform segments filling the card width (round-3 gripe: three
+                   content-sized pills left a ragged gap on the right); a 4th preset wraps to a
+                   second row at the same cell width -->
+              <ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
@@ -460,7 +463,7 @@
                               BorderBrush="{DynamicResource App.ChipStroke}">
                         <Grid>
                           <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" SharedSizeGroup="PillValue"/>
+                            <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                           </Grid.ColumnDefinitions>
                           <TextBlock Style="{DynamicResource BodyText}" Text="{Binding Value}"

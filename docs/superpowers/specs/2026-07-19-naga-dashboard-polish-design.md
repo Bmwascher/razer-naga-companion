@@ -83,10 +83,13 @@ hover background paints a giant bar behind ~50px of content, and the ✕ docks t
   margin `4,0,0,0`, Opacity 0.6). Remove is `Visibility=Hidden` at rest → `Visible` on pill
   `IsMouseOver` — **Hidden, not Collapsed**, so the width is reserved and pills never resize
   under the pointer (the app's reserved-space idiom). Round-3 additions (2026-07-20):
-  - **Uniform widths**: the WrapPanel is a `Grid.IsSharedSizeScope`; each pill's value column
-    carries `SharedSizeGroup="PillValue"` (text centered), so every pill matches the widest
-    value and the row reads as even segments (user gripe: 800/1100/1600 were three widths).
-    The ghost Save pill sits outside the ItemsControl, so it stays content-sized.
+  - **Uniform segments filling the card**: the panel is a `UniformGrid Columns="3"` — a row
+    is three equal cells running flush to both card edges like the slider (the ItemsControl's
+    `-6` right margin swallows the last column's pill gutter); a 4th preset wraps to a second
+    row at the same cell width. Pill text centers in a star column, ✕ keeps its reserved Auto
+    column. The ghost Save pill sits outside the ItemsControl, so it stays content-sized.
+    (User gripes, in order: 800/1100/1600 were three widths → a shared-size WrapPanel made
+    them equal but left a ragged right gap → this. Don't resurrect either predecessor.)
   - **✕ Click must set `e.Handled = true`.** The first cut assumed a nested button "captures
     its own click" — false: `Click` is a bubbling routed event, so the ✕'s Click continued
     into the pill's `OnApplyPreset` AFTER removal had discarded the container, and the hard
