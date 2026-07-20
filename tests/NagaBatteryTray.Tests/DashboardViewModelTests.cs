@@ -106,6 +106,30 @@ public class DashboardViewModelTests
     }
 
     [Fact]
+    public void LedCaption_names_the_colour_and_adds_the_slot_number_only_when_renamed()
+    {
+        var slot = new ProfileSlotItem(1);
+        Assert.Equal("white LED on the mouse", slot.LedCaption);    // box already says "Slot 1"
+
+        slot.Name = "World of Warcraft";                            // rename hides the number…
+        Assert.Equal("Slot 1 — white LED on the mouse", slot.LedCaption); // …so the caption regains it
+
+        slot.Name = ProfileSlotItem.DefaultName(1);                 // rename reset drops the prefix
+        Assert.Equal("white LED on the mouse", slot.LedCaption);
+    }
+
+    [Fact]
+    public void LedCaption_notifies_when_the_name_changes()
+    {
+        var slot = new ProfileSlotItem(2);
+        var raised = new List<string?>();
+        slot.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        slot.Name = "Work";
+        Assert.Contains(nameof(ProfileSlotItem.LedCaption), raised);
+    }
+
+    [Fact]
     public void Slot_names_seed_from_settings_and_default_when_absent()
     {
         var src = new AppSettings();

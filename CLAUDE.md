@@ -183,8 +183,8 @@ does, so launch it `-WindowStyle Hidden`.
   line surfaces a failed apply via `DashboardViewModel.DpiStatus`) and a Profile card (slot
   dropdown rows carry the slot's **LED colour dot** + app-side name; ✎ swaps the box for a
   rename TextBox — Enter commits / Esc cancels / 24-char cap, stored in settings
-  `ProfileNames`; an LED caption row under the box spells the colour out and yields to
-  transient notes), and, as a right-docked overlay,
+  `ProfileNames`; a text-only LED caption row under the box spells the colour out — plus the
+  slot number once a rename hides it — and yields to transient notes), and, as a right-docked overlay,
   `SettingsView` (theme picker, general toggles, battery polling, reset-all-buttons). `CalloutViewModel`
   is the per-button state machine (Idle → Capturing → Writing → Confirmed | Failed) that replaces
   `ButtonRowViewModel`'s staged-op model — every action writes instantly through `AppHost`'s

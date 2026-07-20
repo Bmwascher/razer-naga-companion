@@ -170,8 +170,15 @@ identities, not theme accents):
 
 ### 5.5 LED caption (the "circle + text below the box")
 
-- New row under the dropdown: `Ellipse 8×8` (same style as §5.3) + `SubtleText`
-  `{Binding SelectedProfileSlot.Colour, StringFormat={}{0} — LED on the mouse}`.
+- New row under the dropdown: `SubtleText` bound to `ProfileSlotItem.LedCaption` — **text only,
+  no dot** (round-3 user feedback 2026-07-20: a second dot under the box's swatch read as
+  "double redundancy"). The caption is adaptive: default-named slot → `white LED on the mouse`
+  (the box already reads "Slot 1", so the caption adds only the colour); renamed slot →
+  `Slot 1 — white LED on the mouse` (the custom name hides the number the mouse actually
+  knows, so the caption regains it). `Name`'s setter re-notifies `LedCaption`.
+  - *Superseded first cut:* `Ellipse 8×8` (same style as §5.3) + `SubtleText`
+    `{Binding Colour, StringFormat={}{0} — LED on the mouse}` — shipped, then revised on
+    round-3 feedback.
 - Visible only when `ShowLedCaption` — a VM bool (INPC):
   `ProfileDetail == "" && SelectedProfileSlot != null`, re-notified wherever either input
   changes. The existing transient `ProfileDetail` TextBlock keeps its slot; the two are

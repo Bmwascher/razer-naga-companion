@@ -585,16 +585,14 @@
             </ui:TextBox.Style>
           </ui:TextBox>
           <!-- steady state: the active slot's LED colour, spelled out (dashboard-polish §5.5) -
-               the dot in the box shows it, this row explains it -->
-          <StackPanel Orientation="Horizontal" Margin="0,6,0,0"
-                      DataContext="{Binding SelectedProfileSlot}"
-                      Visibility="{Binding DataContext.ShowLedCaption,
-                                   RelativeSource={RelativeSource AncestorType=UserControl},
-                                   Converter={StaticResource BoolToVis}}">
-            <Ellipse Style="{StaticResource SlotDot}"/>
-            <TextBlock Style="{DynamicResource SubtleText}" Margin="6,0,0,0" VerticalAlignment="Center"
-                       Text="{Binding Colour, StringFormat={}{0} — LED on the mouse}"/>
-          </StackPanel>
+               text only, no second dot (the box's swatch already shows the colour); a renamed
+               slot regains its number here, since the custom name hides it -->
+          <TextBlock Style="{DynamicResource SubtleText}" Margin="0,6,0,0"
+                     DataContext="{Binding SelectedProfileSlot}"
+                     Text="{Binding LedCaption}"
+                     Visibility="{Binding DataContext.ShowLedCaption,
+                                  RelativeSource={RelativeSource AncestorType=UserControl},
+                                  Converter={StaticResource BoolToVis}}"/>
           <!-- transient note (Switching…/failure/unreachable); collapsed when empty so the
                caption row above doesn't ride on a blank line -->
           <TextBlock Text="{Binding ProfileDetail}" TextWrapping="Wrap" Margin="0,6,0,0">

@@ -18,7 +18,7 @@ using Application = System.Windows.Application;
 /// `dotnet test` runs never touch it — the WPF-windows-verified-on-the-installed-build convention
 /// stands; this is a magnifying glass for iterating on layout, not coverage.
 /// Optional: NAGA_UI_PROBE_OUT (PNG path), NAGA_UI_PROBE_THEME (preset name, default Ultraviolet),
-/// NAGA_UI_PROBE_STATE (steady | renaming | switching | offline, default steady).</summary>
+/// NAGA_UI_PROBE_STATE (steady | renaming | named | switching | offline, default steady).</summary>
 public class DashboardScreenshotProbe
 {
     [Fact]
@@ -67,6 +67,8 @@ public class DashboardScreenshotProbe
         switch (state)
         {
             case "renaming": vm.BeginRename(); vm.ProfileNameDraft = "Work"; break;
+            case "named": // a committed rename via the real path — the caption regains the slot number
+                vm.BeginRename(); vm.ProfileNameDraft = "World of Warcraft"; vm.CommitRename(); break;
             case "switching": vm.SetProfileNote("Switching…"); break;
             case "offline": vm.ApplyState(DeviceState.Unknown); vm.SetProfileInventory(null, null); break;
         }

@@ -23,8 +23,13 @@ public sealed class ProfileSlotItem : ObservableObject
     public byte Number { get; }
     public string Colour => DashboardViewModel.SlotColour(Number);
     public static string DefaultName(byte number) => $"Slot {number}";
-    public string Name { get => _name; set => Set(ref _name, value); }
+    public string Name { get => _name; set { if (Set(ref _name, value)) Notify(nameof(LedCaption)); } }
     private string _name;
+    /// <summary>Caption under the dropdown: colour only while the box already reads "Slot N";
+    /// a rename hides the number the mouse actually knows, so the caption regains it.</summary>
+    public string LedCaption => _name == DefaultName(Number)
+        ? $"{Colour} LED on the mouse"
+        : $"Slot {Number} — {Colour} LED on the mouse";
     public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
     private bool _isActive;
 }
