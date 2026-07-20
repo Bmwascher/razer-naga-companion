@@ -1,0 +1,19 @@
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      # Full suite, incl. the always-on WPF-window regression (DpiPillInteractionTests) —
+      # hosted Windows runners can drive off-screen WPF windows. The screenshot probe stays
+      # inert without NAGA_UI_PROBE=1.
+      - run: dotnet test --configuration Debug

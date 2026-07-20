@@ -15,3 +15,7 @@ publish/
 .vs/
 Thumbs.db
 .DS_Store
+
+# Claude Code local state (session snapshots, personal settings)
+.claude/state/
+.claude/settings.local.json

@@ -43,8 +43,10 @@ reference is `docs/architecture.md`; per-feature design history is `docs/superpo
   `--filter "FullyQualifiedName~<Class>"` (or `Name=<method>`)
 - Install/update: `.\scripts\install.ps1` (publish → `%LOCALAPPDATA%\Programs\NagaBatteryTray` →
   run-at-login → launch); `.\scripts\uninstall.ps1` reverses (keeps settings.json)
-- Solution: `NagaBatteryTray.slnx` (XML format). No CI / global.json / .editorconfig — local
-  `dotnet test` is the verification.
+- Solution: `NagaBatteryTray.slnx` (XML format). `global.json` pins SDK 10.0.301
+  (`rollForward: latestFeature`). CI: `.github/workflows/test.yml` runs `dotnet test` on a
+  windows runner per push/PR — local `dotnet test` remains the primary verification. No
+  `.editorconfig`.
 - Release publish is self-contained single-file; the 5 `*_cor3.dll` WPF natives MUST ship beside
   the exe (copying the exe alone → `DllNotFoundException`).
 - **SAC (this machine)** may veto launching fresh unsigned builds by hash (`0x800711C7`). Dev

@@ -9,6 +9,7 @@
 [![Synapse](https://img.shields.io/badge/Razer%20Synapse-not%20required-44D62C)](#why)
 [![Idle RAM](https://img.shields.io/badge/idle%20RAM-~23%20MB-brightgreen)](#-footprint)
 [![Idle CPU](https://img.shields.io/badge/idle%20CPU-0%25-brightgreen)](#-footprint)
+[![tests](https://github.com/Bmwascher/razer-naga-companion/actions/workflows/test.yml/badge.svg)](https://github.com/Bmwascher/razer-naga-companion/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 <br/>
@@ -108,6 +109,16 @@ Measured on the installed build, sitting idle in the tray:
 ---
 
 ## 🚀 Install
+
+### Option A — download a release (no SDK needed)
+
+Grab the zip from the [latest release](https://github.com/Bmwascher/razer-naga-companion/releases/latest),
+extract it anywhere, and run `NagaBatteryTray.exe`. It's fully self-contained (keep the five
+small `*_cor3.dll` files next to the exe). Toggle **Run at startup** from the tray icon's
+right-click menu. The exe is unsigned, so SmartScreen may warn on first run — "More info →
+Run anyway".
+
+### Option B — build from source
 
 **Prerequisite:** the [.NET 10 SDK](https://dotnet.microsoft.com/download) to build it.
 A per-user SDK install works fine — **no admin required**.

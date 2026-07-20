@@ -8,6 +8,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>NagaBatteryTray</RootNamespace>
     <AssemblyName>NagaBatteryTray</AssemblyName>
+    <Version>2.3.0</Version>
     <StartupObject>NagaBatteryTray.Program</StartupObject>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
