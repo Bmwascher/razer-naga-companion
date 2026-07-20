@@ -293,7 +293,14 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
 
 ## Conventions
 TDD, DRY, YAGNI, surgical changes, conventional-commit messages, frequent commits. Read the FULL
-file before editing. WPF-UI gotcha: `NumberBox.Value` commits on LostFocus/Enter — bind it
+file before editing.
+**README.md rides every branch** (rule added 2026-07-20 after a 132-commit catch-up produced from
+commit archaeology): any user-visible change — features, UI, install/uninstall, diagnostics,
+roadmap — updates README.md in the SAME branch before it merges. The README's screenshots live in
+`docs/images/` and are rendered by the gated UI probe (`NAGA_UI_PROBE=1` +
+`--filter DashboardScreenshotProbe`; `NAGA_UI_PROBE_TARGET=popup` for the popup) — regenerate them
+in the same pass whenever the dashboard or popup visibly changes; stale screenshots are worse than
+stale prose. WPF-UI gotcha: `NumberBox.Value` commits on LostFocus/Enter — bind it
 `UpdateSourceTrigger=PropertyChanged` so a button Click reads the typed value, not the prior one.
 Tests cover logic layers only — `RazerProtocol`, `BatteryMonitor`, `DashboardViewModel`,
 `JsonSettingsStore`, `IconRenderer`, `StartupRegistration`, `ButtonBinding`/`NagaV2ProButtons`,

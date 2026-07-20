@@ -11,6 +11,10 @@
 [![Idle CPU](https://img.shields.io/badge/idle%20CPU-0%25-brightgreen)](#-footprint)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+<br/>
+
+<img src="docs/images/dashboard.png" width="85%" alt="The dashboard: instant-apply remap chips around the thumb grid, a DPI card with segmented presets and click-to-type readout, and the onboard-profile card (Ultraviolet theme)"/>
+
 </div>
 
 ---
@@ -35,18 +39,24 @@ directly over HID with no Synapse, no driver, and no admin rights.
   and classic big digits.
 - 🖱️ **Click for details** — a compact popup with the exact %, a charging chip, a level
   bar, the active link (Wired / Wireless / On battery), and Refresh + Open dashboard.
-- 🎨 **Themed dashboard** — one window replaces the old Settings dialog: a vector mouse
-  silhouette with the 12 thumb-grid buttons laid out around it for remapping, a settings
+- 🎨 **Themed dashboard** — one window for everything: the thumb panel rendered photo-real
+  with the 12 grid buttons overlaid for remapping, DPI and Profile cards, a settings
   overlay (low-battery threshold, poll cadence, reset-all-buttons), and five built-in
   themes (Porcelain, Razer, Ice, Ultraviolet, Ember) that repaint the whole UI live.
-- 🎯 **Active DPI control** — read and set the mouse's current hardware DPI from the
-  dashboard, with quick-apply presets (default 800/1600/3200, add/remove your own); the
-  change is written to the device — no Synapse round-trip.
+- 🎯 **DPI control** — read and set the mouse's hardware DPI with a log-scale slider, a
+  segmented preset row (default 800/1600/3200 — add/remove your own), or by **typing it**:
+  click the big readout, enter a value, and Enter applies it to the device and saves it as
+  a preset. Failed writes are surfaced, never silent. No Synapse round-trip.
 - ⌨️ **Button remapping** — click a thumb-grid button, press a key (with Ctrl/Shift/Alt/Win
-  modifiers), or hit Disable — it applies instantly, with a 5-second undo. Bindings are
-  written **once into an onboard profile the app creates and owns** — the mouse keeps them
-  through power-cycles and reboots with **no software running at all**, and your existing
-  onboard profiles are never touched.
+  modifiers), or hit Disable — it applies instantly to the mouse's **onboard memory**, with
+  a 5-second undo that restores the previous binding byte-for-byte (even Synapse macros the
+  app can't model). The grid always shows what's really on the mouse: it reads the active
+  onboard slot back from the hardware. Bindings survive power-cycles and reboots with **no
+  software running at all**.
+- 🗂️ **Onboard profile switching** — see and switch the mouse's active onboard slot (1–5)
+  from the dashboard, with each slot's LED colour and your own rename labels. *(The
+  active-slot read/set protocol isn't in openrazer or any public reference — it was found
+  by this project's own hardware probe sweep.)*
 - 🔔 **Low-battery toast** — a native Windows notification when you drop to/below your
   threshold (default 15%) while on battery.
 - ⚡ **Charging aware** — polls faster while charging (15 s vs 60 s), suppresses nagging
@@ -61,19 +71,25 @@ directly over HID with no Synapse, no driver, and no admin rights.
 
 ## 👀 What it looks like
 
-```
-Tray:  [95]   ← battery %, fills the icon, recolored by level — click to open ↓
+The tray shows a battery coin gauge (or classic digits) recolored by level — click it for
+the popup:
 
-┌──────────────────────────────────┐
-│  Naga V2 Pro               Wired │
-│                                  │
-│  95%    [ Charging ]             │
-│  ███████████████████████████░    │
-│  Profile 1 · white               │
-│                                  │
-│  [  Refresh   ][ Open dashboard ]│
-└──────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/images/popup.png" width="320" alt="Tray popup: battery %, charging chip, level bar, active link, Refresh and Open dashboard buttons"/>
+</p>
+
+**Five themes, one click** — every color in the UI repaints live:
+
+<p align="center">
+  <img src="docs/images/theme-porcelain.png" width="24%" alt="Porcelain theme"/>
+  <img src="docs/images/theme-razer.png" width="24%" alt="Razer theme"/>
+  <img src="docs/images/theme-ice.png" width="24%" alt="Ice theme"/>
+  <img src="docs/images/theme-ember.png" width="24%" alt="Ember theme"/>
+</p>
+
+*(Screenshots are rendered straight from the real windows by the repo's UI probe — set
+`NAGA_UI_PROBE=1` and run `dotnet test --filter DashboardScreenshotProbe` — so they can't
+drift from the code.)*
 
 ---
 
@@ -142,6 +158,8 @@ prints the raw battery reply:
 & "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe          # battery
 & "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dpi      # active DPI
 & "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-buttons  # remap protocol
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-profile  # onboard slots
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dock     # Mouse Dock Pro
 ```
 
 ---
@@ -155,15 +173,17 @@ flowchart LR
     Mon --> Tray["TrayIcon<br/>GUID-stable icon"]
     Mon --> Popup["PopupWindow<br/>compact card"]
     Mon --> Toast["Notifications<br/>low-battery toast"]
-    Mon --> Dash["DashboardWindow<br/>remap · DPI · theme · settings"]
+    Mon --> Dash["DashboardWindow<br/>remap · DPI · profiles · themes"]
     DevChg["DeviceChangeWatcher<br/>USB plug/unplug"] --> Mon
     Cfg[("settings.json")] -.-> Mon
     Host["AppHost / Program<br/>lifecycle · single-instance · run-at-login"] --- Mon
 ```
 
 - **`Hid/RazerProtocol.cs`** — pure protocol: builds the 90-byte feature report, computes
-  the XOR CRC, parses replies. Battery = class `0x07` / id `0x80`; value at reply byte 9,
-  scaled `× 100 / 255`.
+  the XOR CRC, parses replies. Battery = class `0x07` / id `0x80` (value at reply byte 9,
+  scaled `× 100 / 255`); DPI = class `0x04`; button bindings = class `0x02`; onboard
+  profiles (list / active-slot get & set) = class `0x05`. All hardware-verified against the
+  real mouse.
 - **`Hid/RazerDevice.cs`** — opens the mouse's HID collection with zero-access
   `CreateFile` + `HidD_SetFeature` / `HidD_GetFeature` (the feature report lives on the
   OS-owned mouse collection, which a normal HID stream can't open), probes transaction
@@ -172,13 +192,14 @@ flowchart LR
 - **`Monitoring/BatteryMonitor.cs`** — polling timer + state machine (online/unknown,
   low-battery edge logic, staleness → unknown); also the DPI and button read/set
   pass-throughs (everything shares one lock — never two concurrent device exchanges).
-- **`Ui/`** — `IconRenderer` (GDI+ number icon, DPI-aware, supersampled, fills the icon
-  height, with a battery-level ring around the digits), `TrayIcon` + `TrayIconController`
-  (Win32 `Shell_NotifyIcon` with a stable GUID so the taskbar position survives restarts),
-  `PopupWindow` (compact WPF card, multi-monitor placement), `Dashboard/` (`DashboardWindow`
-  — remap buttons on a vector mouse stage, DPI presets, a settings overlay), `Themes/` (5
-  preset themes swapped at runtime by `ThemeManager`), `DeviceChangeWatcher` (instant
-  refresh on USB plug/unplug), `Notifications` (toast).
+- **`Ui/`** — `IconRenderer` (GDI+ number icon, DPI-aware, supersampled, with a
+  battery-level ring), `TrayIcon` + `TrayIconController` (Win32 `Shell_NotifyIcon` with a
+  stable GUID so the taskbar position survives restarts), `PopupWindow` (compact WPF card,
+  multi-monitor placement), `Dashboard/` (`DashboardWindow` — instant-apply remap chips on
+  a photo-real mouse stage, a DPI card with segmented presets + type-in readout, a Profile
+  card with slot switching/renaming, a settings overlay), `Themes/` (5 preset themes
+  swapped at runtime by `ThemeManager`), `DeviceChangeWatcher` (instant refresh on USB
+  plug/unplug), `Notifications` (toast).
 - **`AppHost.cs` / `Program.cs`** — single-instance mutex, lifecycle wiring, and refresh
   on power-resume / session-unlock / USB device-change.
 
@@ -198,15 +219,27 @@ Full design and implementation notes live in [`docs/superpowers/`](docs/superpow
       this firmware (it never answers a battery query). Charging while docked already shows
       via the mouse's own read.*
 - [x] **B — Button remapping**: bind each thumb-grid button to a key (+modifiers) or disable
-      it, stored in an onboard profile the app owns — survives power-cycles with no software
-      running. *(The V2 Pro's remap protocol wasn't publicly documented; a hardware spike
-      captured it — grid ids `0x40..0x4b`, command `0x02/0x0c` — see
-      [`docs/superpowers/`](docs/superpowers/).)*
+      it, written straight into the mouse's onboard memory — survives power-cycles with no
+      software running. *(The V2 Pro's remap protocol wasn't publicly documented; a hardware
+      spike captured it — grid ids `0x40..0x4b`, command `0x02/0x0c` — see
+      [`docs/superpowers/`](docs/superpowers/).)* Since v2.3 the grid shows **hardware truth**:
+      it reads the active onboard slot back and edits any slot in place, protected by a
+      byte-for-byte snapshot + raw undo.
 - [x] **GUI redesign**: the old Settings window is gone — a themed dashboard (5 built-in
-      themes: Porcelain, Razer, Ice, Ultraviolet, Ember) replaces it with a vector mouse
-      stage for instant-apply button remapping (capture + 5 s undo), DPI presets, a profile
-      liveness card, and a tray battery-level ring. See
-      [`docs/superpowers/`](docs/superpowers/).
+      themes: Porcelain, Razer, Ice, Ultraviolet, Ember) replaces it with a photo-real mouse
+      stage for instant-apply button remapping (capture + 5 s undo), DPI presets, a Profile
+      card, and a tray battery-level ring. See [`docs/superpowers/`](docs/superpowers/).
+- [x] **Onboard profile switching**: the Profile card reads and sets the mouse's active
+      slot (LED-colour dots, app-side rename labels). *(Class `0x05` get `0x84` / set `0x04`,
+      persists across power-cycles — found by this project's own opt-in probe sweep; not in
+      openrazer or any reference repo.)*
+- [x] **Dashboard polish**: slot renaming, a segmented DPI preset control with a
+      click-to-type readout, failed-apply surfacing, and an off-screen screenshot probe for
+      iterating on layout without installing.
+- [ ] **DPI stages + polling rate**: program the onboard 5-stage DPI table (+ stage
+      up/down) and the polling rate — the preset row likely becomes the onboard stage table.
+- [ ] **Lighting**: thumb-grid / scroll-wheel zone effects + brightness, theme-sync
+      candidate.
 
 ---
 

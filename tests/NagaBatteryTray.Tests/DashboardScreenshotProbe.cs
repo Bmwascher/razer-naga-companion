@@ -18,7 +18,9 @@ using Application = System.Windows.Application;
 /// `dotnet test` runs never touch it — the WPF-windows-verified-on-the-installed-build convention
 /// stands; this is a magnifying glass for iterating on layout, not coverage.
 /// Optional: NAGA_UI_PROBE_OUT (PNG path), NAGA_UI_PROBE_THEME (preset name, default Ultraviolet),
-/// NAGA_UI_PROBE_STATE (steady | renaming | named | typing | switching | offline, default steady).</summary>
+/// NAGA_UI_PROBE_STATE (steady | renaming | named | typing | switching | offline, default steady),
+/// NAGA_UI_PROBE_TARGET (dashboard | popup, default dashboard). Also the README screenshot
+/// source — regenerate docs/images/ with it whenever the UI visibly changes.</summary>
 [Collection("wpf-ui")] // shares a WPF Application slot with DpiPillInteractionTests — never in parallel
 public class DashboardScreenshotProbe
 {
@@ -30,16 +32,17 @@ public class DashboardScreenshotProbe
             ?? Path.Combine(Path.GetTempPath(), "naga-dashboard-probe.png");
         string theme = Environment.GetEnvironmentVariable("NAGA_UI_PROBE_THEME") ?? "Ultraviolet";
         string state = Environment.GetEnvironmentVariable("NAGA_UI_PROBE_STATE") ?? "steady";
+        string target = Environment.GetEnvironmentVariable("NAGA_UI_PROBE_TARGET") ?? "dashboard";
 
         Exception? failure = null;
-        var t = new Thread(() => { try { Run(outPath, theme, state); } catch (Exception ex) { failure = ex; } });
+        var t = new Thread(() => { try { Run(outPath, theme, state, target); } catch (Exception ex) { failure = ex; } });
         t.SetApartmentState(ApartmentState.STA);
         t.Start();
         t.Join();
         Assert.True(failure is null, failure?.ToString());
     }
 
-    private static void Run(string outPath, string theme, string state)
+    private static void Run(string outPath, string theme, string state, string target = "dashboard")
     {
         // mirror AppHost.Start's resource setup on a fresh Application (none exists in a test host)
         var app = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -53,6 +56,21 @@ public class DashboardScreenshotProbe
         // tints Fluent chrome, which doesn't matter for layout diagnosis.
         app.Resources.MergedDictionaries.Add(new ResourceDictionary
         { Source = new Uri($"pack://application:,,,/NagaBatteryTray;component/Ui/Themes/{theme}.xaml") });
+
+        if (target == "popup")
+        {
+            var pop = new NagaBatteryTray.Ui.PopupWindow { ShowInTaskbar = false, ShowActivated = false };
+            pop.ApplyState(DeviceState.Online(95, charging: true, wired: true));
+            pop.Show();
+            pop.UpdateLayout();
+            DoEvents();
+            long settle = Environment.TickCount64 + 400;
+            while (Environment.TickCount64 < settle) { Thread.Sleep(50); DoEvents(); }
+            Capture(pop, outPath);
+            pop.Close();
+            Dispatcher.CurrentDispatcher.InvokeShutdown();
+            return;
+        }
 
         var vm = new DashboardViewModel(new AppSettings(), runAtStartup: false,
             (p, k, m, u) => Task.FromResult(true), (p, r) => Task.FromResult(true));
@@ -87,14 +105,19 @@ public class DashboardScreenshotProbe
         long until = Environment.TickCount64 + 1200;
         while (Environment.TickCount64 < until) { Thread.Sleep(50); DoEvents(); }
 
+        Capture(win, outPath);
+
+        win.Close();
+        Dispatcher.CurrentDispatcher.InvokeShutdown();
+    }
+
+    private static void Capture(Window win, string outPath)
+    {
         var rtb = new RenderTargetBitmap((int)win.ActualWidth, (int)win.ActualHeight, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(win);
         var enc = new PngBitmapEncoder();
         enc.Frames.Add(BitmapFrame.Create(rtb));
         using (var fs = File.Create(outPath)) enc.Save(fs);
-
-        win.Close();
-        Dispatcher.CurrentDispatcher.InvokeShutdown();
     }
 
     private static void DoEvents()
