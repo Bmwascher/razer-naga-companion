@@ -273,16 +273,21 @@ our gating constraint forbids — borrow the protocol bytes, not the I/O path.
   Profile card direct read + Activate (event-driven / write-on-action only — no polling). Capture:
   `%APPDATA%\NagaBatteryTray\probe-profile-*.md`; see
   `docs/superpowers/specs/2026-07-18-naga-profile-probe-design.md` §10.
-- [x] Dashboard polish (2026-07-19) — post-v2.3 screenshot review pass: `CardTitle` header role
-  (cards/sections stop using 10px small-caps titles), DPI preset **pills** + couldn't-confirm
-  status line (closes all three recorded 2026-07-17 DPI-card gripes), profile slot **rename**
-  (app-side `ProfileNames`) + LED colour dots + caption, rail top aligned to the chip columns.
+- [x] Dashboard polish (2026-07-19, accepted 2026-07-20) — post-v2.3 screenshot review pass:
+  `CardTitle` header role (cards/sections stop using 10px small-caps titles), DPI preset row +
+  couldn't-confirm status line (closes all three recorded 2026-07-17 DPI-card gripes), profile
+  slot **rename** (app-side `ProfileNames`) + LED colour dots + caption, rail top aligned to the
+  chip columns. Round-3 user iteration (2026-07-20): text-only adaptive LED caption, presets
+  became a **segmented control**, preset-✕ crash fixed (bubbled Click → `DpiPillInteractionTests`
+  regression + the gated `NAGA_UI_PROBE=1` screenshot probe), click-to-type DPI readout.
   See `docs/superpowers/specs/2026-07-19-naga-dashboard-polish-design.md`.
 - [ ] DPI stages + polling rate — program the onboard 5-stage DPI table (+ stage up/down) and
   polling-rate get/set; both openrazer-validated commands, write-on-action only (ordered 2026-07-17).
   Includes the deferred **DPI card rework part 2** (user, 2026-07-17): the app-side preset list
   likely becomes the onboard stage table (the hover/✕/silent-failure gripes recorded then were
-  already closed by the 2026-07-19 dashboard-polish pass).
+  already closed by the 2026-07-19 dashboard-polish pass). Also carries the deferred **right-rail
+  relayout** (user, 2026-07-20): the side panel's card arrangement gets rethought when the
+  polling-rate box joins it.
 - [ ] Lighting (last) — thumb-grid / scroll-wheel zone effects + brightness, theme-sync candidate;
   openrazer class 0x03/0x0F matrix commands.
 
