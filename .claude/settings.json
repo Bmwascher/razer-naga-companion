@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \"$env:LOCALAPPDATA\\Microsoft\\dotnet\\dotnet.exe\" test)",
+      "PowerShell(& \"$env:LOCALAPPDATA\\Microsoft\\dotnet\\dotnet.exe\" test *)",
+      "PowerShell(& \"$env:LOCALAPPDATA\\Microsoft\\dotnet\\dotnet.exe\" build)",
+      "PowerShell(& \"$env:LOCALAPPDATA\\Microsoft\\dotnet\\dotnet.exe\" build *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Select-String *)"
+    ]
+  }
+}
