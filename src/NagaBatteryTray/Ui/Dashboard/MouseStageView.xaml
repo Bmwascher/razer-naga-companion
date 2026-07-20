@@ -420,8 +420,39 @@
       </StackPanel.Margin>
       <Border Style="{DynamicResource CardBorder}" Margin="0,0,0,10">
         <StackPanel>
-          <StackPanel Orientation="Horizontal">
-            <TextBlock Style="{DynamicResource NumeralText}" Text="{Binding DpiText}"/>
+          <!-- click-to-type readout (dashboard-polish §4.3): the numerals themselves are the
+               input affordance — click swaps in a box seeded with the current value. Enter
+               applies AND saves as a preset; click-away (incl. clicking + Save) just applies;
+               Esc cancels. Transparent background so the whole row hit-tests. -->
+          <StackPanel Orientation="Horizontal" Background="Transparent" Cursor="IBeam"
+                      MouseLeftButtonDown="OnDpiReadoutClick" ToolTip="Click to type a DPI">
+            <TextBlock Text="{Binding DpiText}">
+              <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource NumeralText}">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsEditingDpi}" Value="True">
+                      <Setter Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
+            <ui:TextBox x:Name="DpiEditBox" MaxLength="5" MinWidth="96" FontSize="24"
+                        FontWeight="Light" VerticalAlignment="Center"
+                        Text="{Binding DpiDraft, UpdateSourceTrigger=PropertyChanged}"
+                        KeyDown="OnDpiEditKeyDown" LostFocus="OnDpiEditLostFocus"
+                        PreviewTextInput="OnDpiEditTextInput">
+              <ui:TextBox.Style>
+                <Style TargetType="ui:TextBox" BasedOn="{StaticResource {x:Type ui:TextBox}}">
+                  <Setter Property="Visibility" Value="Collapsed"/>
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsEditingDpi}" Value="True">
+                      <Setter Property="Visibility" Value="Visible"/>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </ui:TextBox.Style>
+            </ui:TextBox>
             <TextBlock Style="{DynamicResource CardTitle}" Text="DPI" VerticalAlignment="Bottom" Margin="4,0,0,5"/>
           </StackPanel>
           <!-- SmallChange: WPF's 0.1 default on a 0..1 log slider makes one arrow press jump DPI

@@ -340,6 +340,66 @@ public class DashboardViewModelTests
         Assert.False(vm.ShowLedCaption);
     }
 
+    // ---- DPI type-in (dashboard-polish spec §4.3): click the readout, type, Enter/save ----
+
+    [Fact]
+    public void BeginDpiEdit_seeds_the_draft_and_requires_a_device()
+    {
+        var vm = NewVm();
+        vm.BeginDpiEdit();
+        Assert.False(vm.IsEditingDpi);                      // offline: nothing to type at
+
+        vm.SetCurrentDpi(new DpiSetting(1600, 1600));
+        vm.BeginDpiEdit();
+        Assert.True(vm.IsEditingDpi);
+        Assert.Equal("1600", vm.DpiDraft);
+    }
+
+    [Fact]
+    public void CommitDpiEdit_parses_rounds_to_50_and_clamps_to_the_hardware_range()
+    {
+        var vm = NewVm();
+        vm.SetCurrentDpi(new DpiSetting(1600, 1600));
+
+        vm.BeginDpiEdit(); vm.DpiDraft = "2450";
+        Assert.True(vm.CommitDpiEdit());
+        Assert.False(vm.IsEditingDpi);
+        Assert.Equal(2450, vm.Dpi);
+
+        vm.BeginDpiEdit(); vm.DpiDraft = "1101";            // slider granularity: nearest 50
+        Assert.True(vm.CommitDpiEdit());
+        Assert.Equal(1100, vm.Dpi);
+
+        vm.BeginDpiEdit(); vm.DpiDraft = "99999";           // clamped to the protocol ceiling
+        Assert.True(vm.CommitDpiEdit());
+        Assert.Equal(30000, vm.Dpi);
+    }
+
+    [Fact]
+    public void CommitDpiEdit_rejects_junk_and_double_commits()
+    {
+        var vm = NewVm();
+        vm.SetCurrentDpi(new DpiSetting(1600, 1600));
+
+        vm.BeginDpiEdit(); vm.DpiDraft = "fast";
+        Assert.False(vm.CommitDpiEdit());                   // no parse → no change, no apply
+        Assert.Equal(1600, vm.Dpi);
+
+        Assert.False(vm.CommitDpiEdit());                   // not editing anymore → no-op
+    }
+
+    [Fact]
+    public void CancelDpiEdit_discards_the_draft()
+    {
+        var vm = NewVm();
+        vm.SetCurrentDpi(new DpiSetting(1600, 1600));
+        vm.BeginDpiEdit(); vm.DpiDraft = "2450";
+        vm.CancelDpiEdit();
+        Assert.False(vm.IsEditingDpi);
+        Assert.Equal(1600, vm.Dpi);
+        Assert.False(vm.CommitDpiEdit());                   // the Esc→LostFocus chain can't revive it
+    }
+
     // ---- DPI status line (dashboard-polish spec §4.2) ----
 
     [Fact]

@@ -130,6 +130,24 @@ just re-reads and moves on).
   Collapsed while `DpiStatus` is `""` (style DataTrigger). Appearing shifts the card ~16px —
   acceptable for a rare event (same behavior as the profile note).
 
+### 4.3 Type-in readout (round-3 addition, user-requested 2026-07-20)
+
+The log slider is deliberately coarse; typing is the precise path. The big numeral readout is
+itself the affordance: clicking it swaps in a `ui:TextBox` (24px Light, `MaxLength 5`,
+digits-only `PreviewTextInput`, seeded with the current value, focus + select-all) — the
+profile-rename swap idiom, IBeam cursor + "Click to type a DPI" tooltip on the row.
+
+- VM: `IsEditingDpi` / `DpiDraft` / `BeginDpiEdit` (no-op offline or mid-edit) /
+  `CommitDpiEdit` (parse → snap to the slider's 50-DPI granularity → `Dpi` setter clamps;
+  junk or not-editing → `false`) / `CancelDpiEdit`.
+- Gestures: **Enter** = commit → apply to the mouse → `AddPreset` (the user's "enter or
+  clicking save adds it"; `AddPreset` dedupes). **Click-away** = commit → apply only — this is
+  also what makes *clicking + Save* work: its LostFocus commit lands before the Click reads
+  `Dpi`. **Esc** = cancel (the no-op `CommitDpiEdit` defuses the collapse→LostFocus chain).
+- Deleting a preset never changes the live DPI (user decision 2026-07-20): presets are
+  shortcuts, not the source of truth — after deleting the active one, no segment is active and
+  the ghost pill reads "+ Save N" as the one-click restore.
+
 ## 5. C — Profile card: rename + LED colour
 
 ### 5.1 Slot colour brushes

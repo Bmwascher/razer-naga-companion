@@ -143,6 +143,34 @@ public sealed class DashboardViewModel : ObservableObject
         RefreshActive();
     }
 
+    /// <summary>Type-in for the big readout (dashboard-polish §4.3): clicking the numerals swaps
+    /// in a box seeded with the current DPI. Commit parses, snaps to the slider's 50-DPI
+    /// granularity, and clamps (the Dpi setter's clamp); junk or a commit while not editing is a
+    /// no-op returning false, so the Esc→collapse→LostFocus chain can't double-fire — the
+    /// profile-rename idiom.</summary>
+    public bool IsEditingDpi { get => _isEditingDpi; private set => Set(ref _isEditingDpi, value); }
+    private bool _isEditingDpi;
+    public string DpiDraft { get => _dpiDraft; set => Set(ref _dpiDraft, value); }
+    private string _dpiDraft = "";
+
+    public void BeginDpiEdit()
+    {
+        if (!DevicePresent || IsEditingDpi) return;
+        DpiDraft = Dpi.ToString();
+        IsEditingDpi = true;
+    }
+
+    public bool CommitDpiEdit()
+    {
+        if (!IsEditingDpi) return false;
+        IsEditingDpi = false;
+        if (!int.TryParse(DpiDraft.Trim(), out int typed)) return false;
+        Dpi = (int)Math.Round(typed / 50.0) * 50;
+        return true;
+    }
+
+    public void CancelDpiEdit() => IsEditingDpi = false;
+
     public ObservableCollection<DpiPresetItem> Presets { get; }
 
     public void AddPreset(int value)

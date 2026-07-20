@@ -154,6 +154,36 @@ public partial class MouseStageView : UserControl
     private void OnSavePreset(object s, RoutedEventArgs e)
     { var vm = (DashboardViewModel)DataContext; vm.AddPreset(vm.Dpi); }
 
+    // ---- DPI type-in (dashboard-polish §4.3): Enter applies AND saves as a preset ("enter or
+    // clicking save adds it"), click-away (incl. clicking + Save, whose LostFocus commits before
+    // its Click reads Dpi) applies only, Esc cancels - CommitDpiEdit no-ops when not editing,
+    // defusing the Esc→collapse→LostFocus chain like the profile rename ----
+    private void OnDpiReadoutClick(object s, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var vm = (DashboardViewModel)DataContext;
+        vm.BeginDpiEdit();
+        if (!vm.IsEditingDpi) return; // offline: nothing to type at
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        { DpiEditBox.Focus(); DpiEditBox.SelectAll(); }));
+    }
+    private void OnDpiEditKeyDown(object s, System.Windows.Input.KeyEventArgs e)
+    {
+        var vm = (DashboardViewModel)DataContext;
+        if (e.Key == System.Windows.Input.Key.Enter)
+        {
+            if (vm.CommitDpiEdit()) { ApplyDpiRequested?.Invoke(vm.Dpi); vm.AddPreset(vm.Dpi); }
+            e.Handled = true;
+        }
+        else if (e.Key == System.Windows.Input.Key.Escape) { vm.CancelDpiEdit(); e.Handled = true; }
+    }
+    private void OnDpiEditLostFocus(object s, RoutedEventArgs e)
+    {
+        var vm = (DashboardViewModel)DataContext;
+        if (vm.CommitDpiEdit()) ApplyDpiRequested?.Invoke(vm.Dpi);
+    }
+    private void OnDpiEditTextInput(object s, System.Windows.Input.TextCompositionEventArgs e) =>
+        e.Handled = !e.Text.All(char.IsDigit);
+
     private void OnRefreshProfile(object s, RoutedEventArgs e) => ProfileRefreshRequested?.Invoke();
 
     // ---- profile rename (dashboard-polish §5.4): the box swaps in via IsRenamingProfile;

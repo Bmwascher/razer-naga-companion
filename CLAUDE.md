@@ -177,10 +177,14 @@ does, so launch it `-WindowStyle Hidden`.
   instant-apply binding callout chips — click to capture a key, Disable, or Default, each with a
   5 s one-shot undo, actions revealed on hover/focus (reserved-height, so columns never shift);
   hovering a chip or its grid key highlights both (two-way hover-pairing) —
-  plus a DPI card (log-scale slider + app-side preset **pills** — re-templated buttons so hover
-  paints the pill, not a full-width bar; in-pill hover-revealed ✕ with reserved width; active
-  pill filled accent-soft; a `Status.Warning` "Couldn't confirm — wiggle the mouse and retry"
-  line surfaces a failed apply via `DashboardViewModel.DpiStatus`) and a Profile card (slot
+  plus a DPI card (log-scale slider; app-side presets as a **segmented control** — one ChipFill
+  track, bare touching segments, only the active one chromed, in-segment hover-revealed ✕ with
+  reserved width whose Click MUST stay `e.Handled` — un-handled it bubbles into the segment's
+  apply Click against a disconnected container (was an app-killing crash; regression:
+  `DpiPillInteractionTests`); a **click-to-type readout** — the big numerals swap for a
+  digits-only box, Enter applies + saves as preset, click-away applies, Esc cancels, and
+  deleting a preset never changes the live DPI; a `Status.Warning` "Couldn't confirm — wiggle
+  the mouse and retry" line surfaces a failed apply via `DashboardViewModel.DpiStatus`) and a Profile card (slot
   dropdown rows carry the slot's **LED colour dot** + app-side name; ✎ swaps the box for a
   rename TextBox — Enter commits / Esc cancels / 24-char cap, stored in settings
   `ProfileNames`; a text-only LED caption row under the box spells the colour out — plus the
