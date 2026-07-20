@@ -438,69 +438,74 @@
                its template so hover paints the pill, not the row; the active pill's fill IS the
                indicator (the old dot + ✓ retire). ✕ rides inside the pill with reserved width
                (Hidden, not Collapsed) so pills never resize under the pointer. -->
-          <!-- negative right margin swallows the last column's 6px pill gutter, so the row runs
-               flush to both card edges like the slider above it -->
-          <ItemsControl ItemsSource="{Binding Presets}" Margin="0,8,-6,0">
-            <ItemsControl.ItemsPanel>
-              <!-- a row is three uniform segments filling the card width (round-3 gripe: three
-                   content-sized pills left a ragged gap on the right); a 4th preset wraps to a
-                   second row at the same cell width -->
-              <ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <Button Click="OnApplyPreset" Margin="0,0,6,6" Cursor="Hand"
-                        IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                  <!-- ToolTip is object-typed, so Binding.StringFormat is silently dropped there —
-                       a nested ToolTip with ContentStringFormat actually formats (review find) -->
-                  <Button.ToolTip>
-                    <ToolTip Content="{Binding Value}" ContentStringFormat="Apply {0} DPI"/>
-                  </Button.ToolTip>
-                  <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                      <Border x:Name="PillRoot" CornerRadius="8" Padding="8,3" BorderThickness="1"
-                              Background="{DynamicResource App.ChipFill}"
-                              BorderBrush="{DynamicResource App.ChipStroke}">
-                        <Grid>
-                          <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                          </Grid.ColumnDefinitions>
-                          <TextBlock Style="{DynamicResource BodyText}" Text="{Binding Value}"
-                                     VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                          <Button x:Name="RemovePill" Grid.Column="1" Content="✕" FontSize="9"
-                                  Width="14" Padding="0" Margin="4,0,0,0" Opacity="0.6"
-                                  Visibility="Hidden" Background="Transparent" BorderThickness="0"
-                                  Click="OnRemovePreset" ToolTip="Remove preset"/>
-                        </Grid>
-                      </Border>
-                      <ControlTemplate.Triggers>
-                        <!-- hover/focus = border only (hoverable, not selected); active = filled -->
-                        <Trigger Property="IsMouseOver" Value="True">
-                          <Setter TargetName="PillRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
-                          <Setter TargetName="RemovePill" Property="Visibility" Value="Visible"/>
-                        </Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True">
-                          <Setter TargetName="PillRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
-                        </Trigger>
-                        <DataTrigger Binding="{Binding IsActive}" Value="True">
-                          <Setter TargetName="PillRoot" Property="Background" Value="{DynamicResource App.AccentSoft}"/>
-                          <Setter TargetName="PillRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
-                        </DataTrigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                          <Setter TargetName="PillRoot" Property="Opacity" Value="0.45"/>
-                        </Trigger>
-                      </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                  </Button.Template>
-                </Button>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
+          <!-- segmented control (round-3 "apple polish"): ONE track holds the presets — segments
+               touch inside it (no gutters, no per-pill outlines), and only the active segment
+               carries chrome. Radii are concentric: track 8, inset 2, segment 6. -->
+          <Border Margin="0,8,0,0" CornerRadius="8" BorderThickness="1" Padding="2"
+                  Background="{DynamicResource App.ChipFill}"
+                  BorderBrush="{DynamicResource App.ChipStroke}">
+            <ItemsControl ItemsSource="{Binding Presets}">
+              <ItemsControl.ItemsPanel>
+                <!-- three equal segments per row; a 4th preset wraps at the same cell width -->
+                <ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Button Click="OnApplyPreset" Cursor="Hand"
+                          IsEnabled="{Binding DataContext.DevicePresent, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                    <!-- ToolTip is object-typed, so Binding.StringFormat is silently dropped there —
+                         a nested ToolTip with ContentStringFormat actually formats (review find) -->
+                    <Button.ToolTip>
+                      <ToolTip Content="{Binding Value}" ContentStringFormat="Apply {0} DPI"/>
+                    </Button.ToolTip>
+                    <Button.Template>
+                      <ControlTemplate TargetType="Button">
+                        <!-- constant 1px transparent border so the active accent ring never
+                             shifts layout; rest state is bare text on the track -->
+                        <Border x:Name="SegRoot" CornerRadius="6" Padding="6,3" BorderThickness="1"
+                                Background="Transparent" BorderBrush="Transparent">
+                          <Grid>
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*"/>
+                              <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{DynamicResource BodyText}" Text="{Binding Value}"
+                                       VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                            <Button x:Name="RemovePill" Grid.Column="1" Content="✕" FontSize="9"
+                                    Width="14" Padding="0" Margin="4,0,0,0" Opacity="0.6"
+                                    Visibility="Hidden" Background="Transparent" BorderThickness="0"
+                                    Click="OnRemovePreset" ToolTip="Remove preset"/>
+                          </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                          <!-- hover/focus = faint wash; active = filled + accent ring (declared
+                               after hover so the active fill wins while hovered) -->
+                          <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="SegRoot" Property="Background" Value="{DynamicResource App.ChipStroke}"/>
+                            <Setter TargetName="RemovePill" Property="Visibility" Value="Visible"/>
+                          </Trigger>
+                          <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="SegRoot" Property="Background" Value="{DynamicResource App.ChipStroke}"/>
+                          </Trigger>
+                          <DataTrigger Binding="{Binding IsActive}" Value="True">
+                            <Setter TargetName="SegRoot" Property="Background" Value="{DynamicResource App.AccentSoft}"/>
+                            <Setter TargetName="SegRoot" Property="BorderBrush" Value="{DynamicResource App.Accent}"/>
+                          </DataTrigger>
+                          <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="SegRoot" Property="Opacity" Value="0.45"/>
+                          </Trigger>
+                        </ControlTemplate.Triggers>
+                      </ControlTemplate>
+                    </Button.Template>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
           <!-- the slider already selects any value, so typing was redundant: dial it in, then
                save. A ghost pill (transparent fill) so saving reads as part of the preset set;
                disabled while the current DPI is already a preset. -->
-          <Button HorizontalAlignment="Left" Click="OnSavePreset" Cursor="Hand"
+          <Button HorizontalAlignment="Left" Click="OnSavePreset" Cursor="Hand" Margin="0,6,0,0"
                   IsEnabled="{Binding CanSavePreset}" ToolTip="Save the current DPI as a preset">
             <Button.Template>
               <ControlTemplate TargetType="Button">

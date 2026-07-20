@@ -83,13 +83,17 @@ hover background paints a giant bar behind ~50px of content, and the ✕ docks t
   margin `4,0,0,0`, Opacity 0.6). Remove is `Visibility=Hidden` at rest → `Visible` on pill
   `IsMouseOver` — **Hidden, not Collapsed**, so the width is reserved and pills never resize
   under the pointer (the app's reserved-space idiom). Round-3 additions (2026-07-20):
-  - **Uniform segments filling the card**: the panel is a `UniformGrid Columns="3"` — a row
-    is three equal cells running flush to both card edges like the slider (the ItemsControl's
-    `-6` right margin swallows the last column's pill gutter); a 4th preset wraps to a second
-    row at the same cell width. Pill text centers in a star column, ✕ keeps its reserved Auto
-    column. The ghost Save pill sits outside the ItemsControl, so it stays content-sized.
+  - **Segmented control** (final form, round-3 "apple polish"): ONE track Border
+    (`CornerRadius 8, Padding 2, App.ChipFill/App.ChipStroke`) holds a `UniformGrid
+    Columns="3"` of bare segments — no gutters, no per-segment outlines. Segment = `CornerRadius
+    6` (concentric with the track), constant transparent 1px border (no layout shift), text
+    centered in a star column, ✕ in its reserved Auto column. Hover/focus = `App.ChipStroke`
+    wash; active = `App.AccentSoft` fill + `App.Accent` ring (declared after hover, so it wins
+    while hovered); a 4th preset wraps to a second row in the same track. The ghost Save pill
+    sits below the track (`Margin 0,6,0,0`), content-sized.
     (User gripes, in order: 800/1100/1600 were three widths → a shared-size WrapPanel made
-    them equal but left a ragged right gap → this. Don't resurrect either predecessor.)
+    them equal but left a ragged right gap → a bare UniformGrid filled the width but the wide
+    outlined pills read as "big gaps" → this. Don't resurrect any predecessor.)
   - **✕ Click must set `e.Handled = true`.** The first cut assumed a nested button "captures
     its own click" — false: `Click` is a bubbling routed event, so the ✕'s Click continued
     into the pill's `OnApplyPreset` AFTER removal had discarded the container, and the hard
