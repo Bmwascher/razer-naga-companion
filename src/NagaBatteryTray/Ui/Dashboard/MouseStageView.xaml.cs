@@ -138,12 +138,19 @@ public partial class MouseStageView : UserControl
 
     private void OnApplyPreset(object s, RoutedEventArgs e)
     {
-        var item = (DpiPresetItem)((FrameworkElement)s).DataContext;
+        // pattern-match, never hard-cast: a Click bubbling out of a just-removed pill reaches
+        // this with the {DisconnectedItem} sentinel as DataContext (crashed the app 2026-07-20)
+        if (((FrameworkElement)s).DataContext is not DpiPresetItem item) return;
         ((DashboardViewModel)DataContext).Dpi = item.Value;
         ApplyDpiRequested?.Invoke(item.Value);
     }
-    private void OnRemovePreset(object s, RoutedEventArgs e) =>
+    private void OnRemovePreset(object s, RoutedEventArgs e)
+    {
+        // the ✕ lives INSIDE the pill Button - without this its Click bubbles on into the
+        // pill's Click, so removing would also apply (or crash on the disconnected container)
+        e.Handled = true;
         ((DashboardViewModel)DataContext).RemovePreset((DpiPresetItem)((FrameworkElement)s).DataContext);
+    }
     private void OnSavePreset(object s, RoutedEventArgs e)
     { var vm = (DashboardViewModel)DataContext; vm.AddPreset(vm.Dpi); }
 

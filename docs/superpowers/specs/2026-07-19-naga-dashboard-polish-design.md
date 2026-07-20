@@ -82,8 +82,18 @@ hover background paints a giant bar behind ~50px of content, and the ✕ docks t
 - Pill content: value text + nested remove `Button` (`✕`, `FontSize 9`, width 14,
   margin `4,0,0,0`, Opacity 0.6). Remove is `Visibility=Hidden` at rest → `Visible` on pill
   `IsMouseOver` — **Hidden, not Collapsed**, so the width is reserved and pills never resize
-  under the pointer (the app's reserved-space idiom). The nested button captures its own
-  click, so remove never also applies. Deliberate consequence (branch review, accepted): the
+  under the pointer (the app's reserved-space idiom). Round-3 additions (2026-07-20):
+  - **Uniform widths**: the WrapPanel is a `Grid.IsSharedSizeScope`; each pill's value column
+    carries `SharedSizeGroup="PillValue"` (text centered), so every pill matches the widest
+    value and the row reads as even segments (user gripe: 800/1100/1600 were three widths).
+    The ghost Save pill sits outside the ItemsControl, so it stays content-sized.
+  - **✕ Click must set `e.Handled = true`.** The first cut assumed a nested button "captures
+    its own click" — false: `Click` is a bubbling routed event, so the ✕'s Click continued
+    into the pill's `OnApplyPreset` AFTER removal had discarded the container, and the hard
+    cast of the `{DisconnectedItem}` sentinel crashed the app (WER APPCRASH, user-hit).
+    `OnApplyPreset` also pattern-matches its DataContext (soft return) as defense; regression
+    lives in `DpiPillInteractionTests` — a real bubbled Click through a real window.
+  Deliberate consequence (branch review, accepted): the
   nested ✕ inherits the pill's `!DevicePresent` disable, so presets can't be removed while the
   mouse is offline — the old layout's offline removal was accidental, and whole-pill disable
   matches how the rest of the dashboard treats an absent device.
@@ -94,8 +104,9 @@ hover background paints a giant bar behind ~50px of content, and the ✕ docks t
   `Background Transparent`, `BorderBrush App.ChipStroke`, text `App.TextSecondary`. Keeps the
   existing `+ Save {Dpi}` TextBlock-child binding, disabled-dimming mirror, `CanSavePreset`
   gate, and tooltip.
-- Handlers (`OnApplyPreset`/`OnRemovePreset`/`OnSavePreset`) and the VM preset model
-  (`DpiPresetItem`, `AddPreset`, `RemovePreset`, `RefreshActive`) are unchanged.
+- The VM preset model (`DpiPresetItem`, `AddPreset`, `RemovePreset`, `RefreshActive`) is
+  unchanged; `OnRemovePreset`/`OnApplyPreset` carry the round-3 handled/pattern-match fix
+  above, `OnSavePreset` is untouched.
 
 ### 4.2 Failure status line
 

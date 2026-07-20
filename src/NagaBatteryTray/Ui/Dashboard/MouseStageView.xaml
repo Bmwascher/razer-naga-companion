@@ -440,7 +440,9 @@
                (Hidden, not Collapsed) so pills never resize under the pointer. -->
           <ItemsControl ItemsSource="{Binding Presets}" Margin="0,8,0,0">
             <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+              <!-- shared-size scope: every pill's value column matches the widest, so the row
+                   reads as even segments (round-3 gripe: 800/1100/1600 were three widths) -->
+              <ItemsPanelTemplate><WrapPanel Grid.IsSharedSizeScope="True"/></ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
@@ -456,14 +458,18 @@
                       <Border x:Name="PillRoot" CornerRadius="8" Padding="8,3" BorderThickness="1"
                               Background="{DynamicResource App.ChipFill}"
                               BorderBrush="{DynamicResource App.ChipStroke}">
-                        <StackPanel Orientation="Horizontal">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="PillValue"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
                           <TextBlock Style="{DynamicResource BodyText}" Text="{Binding Value}"
-                                     VerticalAlignment="Center"/>
-                          <Button x:Name="RemovePill" Content="✕" FontSize="9" Width="14" Padding="0"
-                                  Margin="4,0,0,0" Opacity="0.6" Visibility="Hidden"
-                                  Background="Transparent" BorderThickness="0"
+                                     VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                          <Button x:Name="RemovePill" Grid.Column="1" Content="✕" FontSize="9"
+                                  Width="14" Padding="0" Margin="4,0,0,0" Opacity="0.6"
+                                  Visibility="Hidden" Background="Transparent" BorderThickness="0"
                                   Click="OnRemovePreset" ToolTip="Remove preset"/>
-                        </StackPanel>
+                        </Grid>
                       </Border>
                       <ControlTemplate.Triggers>
                         <!-- hover/focus = border only (hoverable, not selected); active = filled -->

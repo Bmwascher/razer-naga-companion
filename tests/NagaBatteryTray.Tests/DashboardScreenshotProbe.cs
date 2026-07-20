@@ -19,6 +19,7 @@ using Application = System.Windows.Application;
 /// stands; this is a magnifying glass for iterating on layout, not coverage.
 /// Optional: NAGA_UI_PROBE_OUT (PNG path), NAGA_UI_PROBE_THEME (preset name, default Ultraviolet),
 /// NAGA_UI_PROBE_STATE (steady | renaming | named | switching | offline, default steady).</summary>
+[Collection("wpf-ui")] // shares a WPF Application slot with DpiPillInteractionTests — never in parallel
 public class DashboardScreenshotProbe
 {
     [Fact]
@@ -67,8 +68,10 @@ public class DashboardScreenshotProbe
         switch (state)
         {
             case "renaming": vm.BeginRename(); vm.ProfileNameDraft = "Work"; break;
-            case "named": // a committed rename via the real path — the caption regains the slot number
-                vm.BeginRename(); vm.ProfileNameDraft = "World of Warcraft"; vm.CommitRename(); break;
+            case "named": // a committed rename via the real path — the caption regains the slot number;
+                          // plus a 4th preset so pill wrap + shared-size evenness are visible
+                vm.BeginRename(); vm.ProfileNameDraft = "World of Warcraft"; vm.CommitRename();
+                vm.AddPreset(1100); break;
             case "switching": vm.SetProfileNote("Switching…"); break;
             case "offline": vm.ApplyState(DeviceState.Unknown); vm.SetProfileInventory(null, null); break;
         }
