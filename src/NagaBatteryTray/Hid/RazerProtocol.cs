@@ -5,10 +5,42 @@ public enum ReplyResult { Success, Busy, Failed }
 public static class RazerProtocol
 {
     public const int VendorId = 0x1532;
-    public const int MousePidWireless = 0x00A8;
-    public const int MousePidWired = 0x00A7;
+    public const int MousePidWireless = 0x00A8;      // Naga V2 Pro via HyperSpeed dongle
+    public const int MousePidWired = 0x00A7;         // Naga V2 Pro cabled
+    public const int MousePidV3Wireless = 0x00E8;    // Naga V3 Pro via HyperSpeed dongle (probe 2026-08-19)
+    public const int MousePidV3Wired = 0x00E7;       // Naga V3 Pro cabled (probe 2026-08-19)
     public const int DockPid = 0x00A4;       // Razer Mouse Dock Pro (separate USB device)
     public const int UsagePageVendor = 0xFF00;
+
+    /// <summary>A supported mouse: its two link PIDs and the name the UI shows. Command constants are
+    /// shared — the 2026-08-19 probe verified the V3 Pro speaks the identical protocol (spec §3).</summary>
+    public readonly record struct MouseModel(int WiredPid, int WirelessPid, string DisplayName);
+
+    /// <summary>Preference order within a link type: V3 first (daily driver), then V2.</summary>
+    public static readonly MouseModel[] SupportedMice =
+    {
+        new(MousePidV3Wired, MousePidV3Wireless, "Naga V3 Pro"),
+        new(MousePidWired, MousePidWireless, "Naga V2 Pro"),
+    };
+
+    /// <summary>Device-scan order: every model's wired PID before any wireless PID — a cabled mouse
+    /// must always win over a still-plugged-in receiver that can no longer reach it.</summary>
+    public static int[] ScanPids { get; } =
+        { MousePidV3Wired, MousePidWired, MousePidV3Wireless, MousePidWireless };
+
+    public static bool IsWiredPid(int pid)
+    {
+        foreach (var m in SupportedMice) if (m.WiredPid == pid) return true;
+        return false;
+    }
+
+    /// <summary>Display name for a mouse PID (either link), null for unknown PIDs (e.g. the dock).</summary>
+    public static string? ModelNameForPid(int pid)
+    {
+        foreach (var m in SupportedMice)
+            if (m.WiredPid == pid || m.WirelessPid == pid) return m.DisplayName;
+        return null;
+    }
 
     public const int ReportLength = 90;
     public const int BufferLength = 91; // report id + 90
