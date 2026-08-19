@@ -9,8 +9,9 @@ using NagaBatteryTray.Settings;
 namespace NagaBatteryTray.Hid;
 
 /// <summary>
-/// Reads battery/charging from a Razer Naga V2 Pro. The 90-byte Razer feature report lives on the
-/// mouse HID collection (mi_00, GetMaxFeatureReportLength == 91), which Windows owns — so it must be
+/// Reads battery/charging from a supported Razer Naga (V2 Pro / V3 Pro, RazerProtocol.SupportedMice).
+/// The 90-byte Razer feature report lives on the mouse HID collection (mi_00 on V2, mi_03 on V3 —
+/// never key on interface number; GetMaxFeatureReportLength == 91 is the selector), which Windows owns — so it must be
 /// opened with CreateFile(dwDesiredAccess = 0) and exchanged via HidD_SetFeature/HidD_GetFeature.
 /// (No collection exposes usage page 0xFF00 on this device; verified empirically.)
 /// </summary>
@@ -19,7 +20,8 @@ public sealed class RazerDevice : IRazerDevice
     private readonly ISettingsStore _settings;
     private SafeFileHandle? _handle;
     private byte _tid; // transaction id confirmed working on the currently-open collection (0 = not connected)
-    private bool _wired; // true when the live collection is the wired interface (0x00A7), false for wireless (0x00A8)
+    private bool _wired; // true when the live collection is a wired PID (RazerProtocol.IsWiredPid)
+    private string? _model; // display name of the connected model (RazerProtocol.ModelNameForPid)
     private bool _loggedError;
 
     public RazerDevice(ISettingsStore settings) => _settings = settings;
@@ -42,7 +44,7 @@ public sealed class RazerDevice : IRazerDevice
             int percent = RazerProtocol.ScaleBattery(battery.Value);
             bool isCharging = charging is not null && charging.Value != 0;
             _loggedError = false;
-            return new BatteryReading(percent, isCharging, true, now, _wired);
+            return new BatteryReading(percent, isCharging, true, now, _wired, _model);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -74,7 +76,8 @@ public sealed class RazerDevice : IRazerDevice
             if (tid != 0 && await QueryAsync(tid, RazerProtocol.CommandIdBattery, ct) is not null)
             {
                 _tid = tid;
-                _wired = pid == RazerProtocol.MousePidWired;
+                _wired = RazerProtocol.IsWiredPid(pid);
+                _model = RazerProtocol.ModelNameForPid(pid);
                 return tid;
             }
             CloseHandle();
@@ -82,12 +85,13 @@ public sealed class RazerDevice : IRazerDevice
         return 0;
     }
 
-    /// <summary>Mouse HID collections exposing the 90+1 byte feature report (with their PID), wired (0x00A7)
-    /// before wireless (0x00A8): a cabled mouse must win over a still-plugged-in receiver that can no longer
-    /// reach it. The PID is returned so the caller can report the active link (wired vs wireless).</summary>
+    /// <summary>Mouse HID collections exposing the 90+1 byte feature report (with their PID), in
+    /// RazerProtocol.ScanPids order — every wired PID before any wireless one: a cabled mouse must win
+    /// over a still-plugged-in receiver that can no longer reach it. The PID is returned so the caller
+    /// can report the active link and model.</summary>
     private static IEnumerable<(int Pid, string Path)> FindControlPaths()
     {
-        foreach (int pid in new[] { RazerProtocol.MousePidWired, RazerProtocol.MousePidWireless })
+        foreach (int pid in RazerProtocol.ScanPids)
             foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
             {
                 int max;
