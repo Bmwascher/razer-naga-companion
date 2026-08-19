@@ -16,6 +16,7 @@
 - Hard rule 2: `AppHost.RestoreRawAsync` and the sweep snapshot are untouched.
 - Hard rule 3: no `DropShadowEffect`/`BitmapEffect`; no hardcoded colors in themed XAML.
 - Hard rule 4: README + `docs/images/` screenshots update on THIS branch before merge.
+- Hard rule 5: run-at-login stays the delayed scheduled task (`StartupRegistration.cs`) — no task touches it; keep it that way.
 - Hard rule 6: TDD through `IRazerDevice`/`FakeRazerDevice`; `InternalsVisibleTo.cs` untouched; `RazerDevice` transport and probe commands are the deliberate no-unit-test exceptions.
 - Offline / unknown-model UI fallback string is exactly **"Razer Naga"**; V3 display name is exactly **"Naga V3 Pro"**; V2 is **"Naga V2 Pro"** (spec §2).
 - V3 PIDs: wired `0x00E7`, wireless `0x00E8` (spec §3). Do not touch `DockPid`.
@@ -650,7 +651,7 @@ with
         _monitor.LowBatteryCrossed += (_, pct) => Notifications.LowBattery(pct, _monitor.State.Model);
 ```
 
-(`LowBatteryCrossed` is dispatched, so `State` is already the online state that triggered it; the null fallback covers any race.)
+(Ordering fact, verified: `LowBatteryCrossed` fires at `BatteryMonitor.cs:167-168` BEFORE `SetState` at `:172`, and `AppHost.Dispatch` is a synchronous `Dispatcher.Invoke` — so the handler reads the PRIOR state, not the one that triggered it. That is still safe: the crossing requires `_armed`, which only a present reading sets, so the prior state is an online state carrying the connected model. The one benign edge: after 4+ consecutive misses `State` is `Unknown` (Model null) while `_armed` survives; a reappearance below threshold then toasts the "Razer Naga" fallback. Accepted in the plan debate 2026-08-19 — the null fallback covers it; do not restructure the event.)
 
 - [ ] **Step 4: Run the full suite**
 
@@ -814,6 +815,7 @@ Read `README.md` in full. Then:
 - `grep -n "V2 Pro" README.md` and update every hit that presents the app as V2-only. The tagline/subtitle becomes "…for the **Razer Naga V2 Pro and Naga V3 Pro**" (keep the sentence's existing shape).
 - Add one line to whatever section describes hardware support (or the intro if none): `Supported mice: Razer Naga V2 Pro (wired 0x00A7 / wireless 0x00A8) and Razer Naga V3 Pro (wired 0x00E7 / wireless 0x00E8) — auto-detected, model name shown in the dashboard.`
 - Do NOT bulk-rewrite feature history or screenshots' captions beyond what the new renders change.
+- `docs/architecture.md:93` describes the scan order as "wired `0x00A7` first, then wireless `0x00A8`" — update that one sentence to say the scan iterates `RazerProtocol.ScanPids` (every supported model's wired PID before any wireless one; V3 before V2 within a link). Leave the openrazer prior-art bullet at `docs/architecture.md:289` alone — it describes openrazer's driver and stays true.
 
 - [ ] **Step 3: Regenerate the screenshots**
 

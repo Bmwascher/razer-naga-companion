@@ -80,9 +80,11 @@ V2-era closed topic.
 
 ### 4.2 Device scan (`Hid/RazerDevice.cs`)
 
-`FindControlPaths` yields `(MouseModel Model, bool Wired, string Path)` in this order:
-**every model's wired PID first** (V3, then V2), **then every model's wireless PID** (V3,
-then V2). Rules preserved:
+`FindControlPaths` keeps its `(int Pid, string Path)` shape and iterates a flat
+`RazerProtocol.ScanPids` order — **every model's wired PID first** (V3, then V2), **then every
+model's wireless PID** (V3, then V2) — with model name and link type resolved from the PID via
+`RazerProtocol.ModelNameForPid`/`IsWiredPid` at commit time (amended 2026-08-19 in the plan
+debate; functionally identical to the tuple shape this section first sketched). Rules preserved:
 
 - Wired always beats wireless — a cabled mouse must win over a still-plugged-in receiver
   that can no longer reach it (existing rule, unchanged).
