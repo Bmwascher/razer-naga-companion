@@ -839,7 +839,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs README.md docs/images/
+git add tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs README.md docs/images/ docs/architecture.md
 git commit -m "docs(readme): dual V2/V3 Pro support + regenerated probe screenshots"
 ```
 

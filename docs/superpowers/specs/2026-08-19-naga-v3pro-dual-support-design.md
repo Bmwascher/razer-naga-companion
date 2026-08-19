@@ -89,12 +89,12 @@ debate; functionally identical to the tuple shape this section first sketched). 
 - Wired always beats wireless — a cabled mouse must win over a still-plugged-in receiver
   that can no longer reach it (existing rule, unchanged).
 - The 91-byte feature-length filter selects the control collection.
-- `EnsureOpen` already confirms a candidate collection with a real battery query before
+- `EnsureConnectedAsync` already confirms a candidate collection with a real battery query before
   committing (`RazerDevice.cs:74`); that same check is what rejects the user's still-plugged
   V2 receiver when the V2 is idle. No new logic.
 
 `RazerDevice` records the winning model's `DisplayName` alongside the existing `_wired` flag
-(`_wired` becomes `pid == model.WiredPid`).
+(`_wired` becomes `RazerProtocol.IsWiredPid(pid)`).
 
 ### 4.3 Model-name plumbing
 
@@ -114,7 +114,7 @@ debate; functionally identical to the tuple shape this section first sketched). 
 ### 4.4 Probes (`Diagnostics/`)
 
 `ProbeCommand` (3 PID loops) and `ProfileProbeCommand` (1 loop + the wired/wireless label at
-`ProfileProbeCommand.cs:867`) iterate `RazerProtocol.SupportedMice` instead of the two V2
+`ProfileProbeCommand.cs:867`) iterate `RazerProtocol.ScanPids` instead of the two V2
 constants, and print the model display name + PID they found. The wired/wireless label
 derives from the matched model's pids, not from the V2 constants. `--probe-dock` is
 untouched.
