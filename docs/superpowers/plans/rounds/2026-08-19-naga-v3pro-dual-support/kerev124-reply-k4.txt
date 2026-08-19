@@ -1,0 +1,186 @@
+• Let me read the plan file and related files to verify the amendments.Now I need to verify:
+
+  1. A1: Task 8 Step 3 — six invocations, per-file output paths, theme/state/target mapping. Check the probe source: how it reads env vars (TARGET, THEME, STATE, OUT), how many themes exist (src/NagaBatteryTray/Ui/Themes/ dictionary filenames), README references to six images (README.md:17,79,85-88), alt text at README:17 naming Ultraviolet.
+
+  2. A2: Task 7 Step 1 edits (d) and (e); ProbeCommand.cs:71 DPI line, :128 and :508 banners byte-identical.
+
+  3. A3: PopupViewModel.cs 49 lines, Notifications.cs 14 lines.
+
+  4. A4: edit-count preambles at plan:190 ("Five edits"), :686 ("Five edits"), :754 ("Two edits").
+
+  From the plan read: plan:190 "Five edits:" ✓, plan:686 "Five edits:" ✓, plan:754 "Two edits:" ✓. Task 2 lists (a)-(e) = five ✓. Task 7 Step 1 lists (a)-(e) = five ✓. Task 7 Step 2 lists (a),(b) = two ✓.
+
+  Now verify probe source: DashboardScreenshotProbe.cs full read (I read lines 90-130). Need lines 1-90 to see env var handling, themes, targets, states, and the fixture lines ~63 and ~80.
+
+  Also README.md lines 17, 79, 85-88. And themes directory listing. And ProbeCommand.cs lines 71, 128, 508. And PopupViewModel.cs line count, Notifications.cs line count.
+
+• Now let me verify the sources behind each amendment: the probe's env-var handling and fixtures, the README image references, the theme dictionaries, ProbeCommand's cited lines, and the two file line counts.
+
+• Verified so far:
+  - A2(d): ProbeCommand.cs:71 is `Console.WriteLine($"PID 0x{pid:x4} status=0x{reply[1]:x2}");` — matches plan's old string at plan:731 exactly. ✓
+  - A2(e): ProbeCommand.cs:128 is `Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");` — matches plan's old string at plan:743. Need to check :508 for byte-identical second occurrence.
+  - A1: probe env vars confirmed: NAGA_UI_PROBE_OUT is a file path (line 31-32, File.Create at :120), NAGA_UI_PROBE_THEME default Ultraviolet (:33), NAGA_UI_PROBE_STATE (:34, states steady/renaming/named/typing/switching/offline), NAGA_UI_PROBE_TARGET (:35, dashboard|popup). Popup target ignores STATE — line 60-73: popup branch returns before state switch. ✓ Popup seeds 95% charging wired at :63 ✓.
+  - README: six image refs: :17 dashboard.png, :79 popup.png, :85-88 theme-porcelain/razer/ice/ember.png. Alt text at :17 names Ultraviolet ✓.
+  - Themes: Porcelain, Razer, Ice, Ultraviolet, Ember exist as xaml files ✓. Plan's loop uses Porcelain, Razer, Ice, Ember + Ultraviolet for dashboard.png — five themes total covered. Filenames theme-{lowercase}.png match README refs ✓.
+
+  Remaining checks:
+  - ProbeCommand.cs:508 second banner byte-identical.
+  - ProbeCommand.cs Run (~line 18) banner old string at plan:703 — check.
+  - RunDpi loop header at ~53 — plan (b) says "identical foreach loop header". Check line ~50-53.
+  - OpenLiveMouse ~548.
+  - PopupViewModel.cs 49 lines, Notifications.cs 14 lines.
+  - plan:190, :686, :754 preambles — already verified from plan read: :190 "Five edits", :686 "Five edits", :754 "Two edits". ✓
+  - Spec section 4.4 to check promise of model display name printing.
+  - Task 8 Step 3 details: "3-6" comment says "the four theme shots - dashboard, steady, one per preset". Wait — it reuses NAGA_UI_PROBE_STATE="steady" set before loop ✓ and TARGET="dashboard" ✓. One subtlety: in invocation 2 (popup), STATE and THEME: it sets TARGET=popup and THEME=Ultraviolet but STATE remains "steady" from invocation 1 — harmless since popup ignores state. ✓. Also after invocation 2, line 862 resets TARGET=dashboard, STATE=steady ✓.
+  - PowerShell syntax: `$env:NAGA_UI_PROBE_OUT = "$PWD\docs\images\dashboard.png"` — $PWD in string interpolation: "$PWD\..." — PowerShell interpolates $PWD as the PathInfo object; its string representation is the path. That works. `"theme-$($t.ToLower()).png"` ✓ subexpression. `Remove-Item Env:NAGA_UI_PROBE, ...` — Remove-Item accepts multiple paths via positional array? `Remove-Item Env:A, Env:B` — yes, -Path accepts string[]. ✓
+  - One consideration: the probe test is `[Collection("wpf-ui")]` and there may be other tests in the collection; filter FullyQualifiedName~DashboardScreenshotProbe selects only the probe's single [Fact] Render_dashboard_png. There's one [Fact]. ✓
+  - Check: does `dotnet test --filter $filter` with env NAGA_UI_PROBE=1 pass — gating at line 30. ✓
+  - Popup window renders with theme? Popup branch: theme dictionary added at line 57-58 before target check ✓, so THEME applies to popup too; plan sets Ultraviolet ✓.
+  - dashboard.png is Ultraviolet per README:17 alt text ✓ plan comment matches.
+  - README:46 and :240 mention five themes list; plan doesn't touch those, fine.
+  - Spec §4.4 — read spec to confirm promise about printing model display name.
+
+  Also verify plan:676 Files header for Task 7 now mentions the ~71 and ~128/~508 lines ✓ (from plan read: "plus the model-name report lines at ~71 and the two identical banners at ~128/~508") ✓.
+
+  Check ProbeCommand.cs:18 area, :53 area, :508, :548.Verified:
+  - A2: ProbeCommand.cs:71 matches old string (plan:731) ✓. Banner byte-identical at :128 and :508 — both read `Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");` ✓. Replace-all instruction is sound.
+  - Also check no THIRD occurrence of that banner — grep would help. Let me grep "Live collection" in the file.
+  - A3: PopupViewModel.cs = 49 lines ✓ (plan:502), Notifications.cs = 14 lines ✓ (plan:630).
+  - A4: plan:190 "Five edits" (lists a-e ✓), plan:686 "Five edits" (lists a-e ✓), plan:754 "Two edits" (lists a,b ✓).
+  - A1: all verified except the "Mi(dev.DevicePath)" banner old string at plan:703 — check :26: `Console.WriteLine($"PID 0x{pid:x4} {Mi(dev.DevicePath)} max={max} -> raw zero-access open");` ✓ matches.
+  - RunDpi loop header at :53 — identical to :18 ✓, plan (b) claim accurate.
+  - OpenLiveMouse :548 ✓ matches plan (c).
+  - Grep for "Live collection" to confirm exactly two occurrences.
+  - Check spec §4.4 for the model-name promise.
+  - One thing to double check for A1: Task 8 Step 1 replaces fixture calls at DashboardScreenshotProbe.cs:63 and :80 — confirmed at :63 (pop.ApplyState(DeviceState.Online(95, charging: true, wired: true))) and :80 (vm.ApplyState(DeviceState.Online(48, charging: false, wired: false))) ✓.
+  - PowerShell block: check `Remove-Item Env:NAGA_UI_PROBE, Env:NAGA_UI_PROBE_OUT, ...` — valid (Path string[]). The foreach loop: `$env:NAGA_UI_PROBE_THEME = $t` ✓. Filename interpolation `theme-$($t.ToLower()).png` ✓ produces theme-porcelain.png etc., matching README :85-88 ✓.
+  - One subtlety: invocation 1's comment says "README:17 alt text names Ultraviolet" ✓ confirmed README:17.
+  - Another subtlety: dashboard.png invocation order — before invocation 1, is NAGA_UI_PROBE_STATE leftover from anything? Set explicitly ✓.
+  - Check: six invocations produce exactly the six README-referenced filenames: dashboard.png, popup.png, theme-porcelain.png, theme-razer.png, theme-ice.png, theme-ember.png ✓. And README references no others (docs/images appears at :17, :79, :85-88 only — grep to confirm).
+  - Note: after Step 3, env cleanup removes all five vars ✓; Step 4 runs full suite with probe gated off — NAGA_UI_PROBE removed ✓.
+
+  Also check the spec §4.4 text. And grep README for "docs/images" to confirm exactly six references.All evidence gathered. Let me consolidate:
+
+  **A1 (Task 8 Step 3 rewrite) — verify:**
+  - NAGA_UI_PROBE_OUT is a single file path: DashboardScreenshotProbe.cs:31-32 (`?? Path.Combine(..., "naga-dashboard-probe.png")`) and File.Create(outPath) at :120. ✓
+  - One invocation renders one image: single [Fact] `Render_dashboard_png` (:27-43). ✓
+  - README references exactly six images: README.md:17 (dashboard.png), :79 (popup.png), :85-88 (theme-porcelain/razer/ice/ember.png). Grep confirms no other docs/images refs. ✓
+  - Six invocations produce exactly those filenames: dashboard.png (:855), popup.png (:859), theme-porcelain/razer/ice/ember.png via loop with `$($t.ToLower())` (:863-866). ✓
+  - Theme/state/target mapping is explicit: :854 sets all three for shot 1; :858-859 for popup; :862-867 for the four theme shots. No judgment calls left. ✓
+  - Theme names valid: probe loads `Ui/Themes/{theme}.xaml` (DashboardScreenshotProbe.cs:58); all five names exist as files (Glob). ✓
+  - Popup ignores STATE: popup branch at :60-73 returns before the state switch at :86. ✓ plan comment at :857 accurate; popup seeds 95% charging wired at :63 ✓.
+  - README:17 alt text names Ultraviolet ✓ — so dashboard.png with Ultraviolet (:854) is correct.
+  - PowerShell mechanics: `$env:` assignments, `$PWD` interpolation, `& $dotnet test --filter $filter`, foreach loop, `Remove-Item Env:A, Env:B, ...` — all valid PowerShell. Env cleanup at :869 covers all five vars, so Step 4 full suite is gated off (probe gate at :30). ✓
+  - Fixture lines: Task 8 Step 1 replaces DashboardScreenshotProbe.cs:63 and :80 — both match exactly as read. ✓
+  - One nuance: in invocation 2 the plan leaves STATE="steady" set from invocation 1 — harmless since popup ignores it. Also leaves THEME="Ultraviolet" — popup renders with the theme dictionary (added at :57-58 before target branch), so that's meaningful and matches README popup appearance. Fine.
+  - Another nuance: `dotnet test --filter` runs the whole test-project build each time; fine.
+
+  Wait — one more check on the PowerShell: line 854 sets three vars on one line separated by `;` — valid. Line 862 similar. `$filter` variable used with `--filter $filter` — valid.
+
+  Potential issue: does `$PWD\docs\images\dashboard.png` require the cwd to be repo root? The step is run from repo root presumably (Step 1-2 operate on repo). The plan says "Run this exactly" — assumes repo root; consistent with earlier commands in the plan (e.g., `.\scripts\install.ps1`). Acceptable.
+
+  **A2 (Task 7 edits d & e) — verify:**
+  - (d) old string at plan:731 matches ProbeCommand.cs:71 exactly ✓. It's within RunDpi (starts :50) ✓.
+  - (e) banner byte-identical at :128 and :508 — grep confirms exactly two occurrences, both identical ✓. Replace-all instruction sound; replacement at plan:749 references s.Pid which exists in both scopes (MouseSession s at :122 and :502) ✓.
+  - Task 7 Files header (:676) updated to mention ~71 and ~128/~508 ✓.
+  - Spec §4.4 (spec:114-120) does promise probes "print the model display name + PID they found" ✓ — so (d)/(e) close the drift.
+
+  **A3 — verify:** PopupViewModel.cs = 49 lines (read: "Total lines in file: 49") matches plan:502 ✓. Notifications.cs = 14 lines matches plan:630 ✓. Task 2 preamble plan:190 says "Five edits" with (a)-(e) ✓.
+
+  **A4 — verify:** plan:190 "Five edits" ✓; plan:686 "Five edits" with (a)-(e) ✓; plan:754 "Two edits" with (a),(b) ✓.
+
+  **ScanPids syntax** (plan:127-128): driver compiled it; also collection-initializer-on-property `public static int[] ScanPids { get; } = { ... };` is valid C#. No objection; and I can't compile (read-only). Cite driver's evidence as given; mark as verified-by-driver, syntax independently plausible.
+
+  **New defect sweep on the amended regions:**
+  - Task 8 Step 3 comment "# 1. dashboard.png - dashboard, Ultraviolet, steady (README:17 alt text names Ultraviolet)" — accurate.
+  - Step 3 prose at plan:846 cites DashboardScreenshotProbe.cs:120 ✓ and README.md:17,79,85-88 ✓.
+  - plan:872: "Theme names are the dictionary filenames in src/NagaBatteryTray/Ui/Themes/" ✓ verified by Glob.
+  - Task 7 (a) replacement at plan:709 — uses ModelNameForPid(pid) and IsWiredPid(pid) inside Run loop where pid is in scope ✓ (loop at ProbeCommand.cs:18).
+  - Task 7 (d) replacement references reply[1] — in scope at :67-71 ✓.
+  - Task 7 (e) — `s.Pid` — MouseSession has Pid? Used at :128 and :508 already (`0x{s.Pid:x4}`), so yes ✓.
+
+  Anything UNVERIFIED:
+  - The compile evidence for ScanPids (driver-run; I cannot compile). Mark UNVERIFIED (driver-attested).
+  - ProfileProbeCommand.cs lines ~445 and ~867 — not re-read this round; unchanged since my prior PASS, and not touched by amendments. Actually A2 didn't touch ProfileProbeCommand. But should I verify plan:754 "Two edits" count — done from the plan text itself. The underlying old strings in ProfileProbeCommand were verified in earlier rounds; spec unchanged. I could quickly check but it's outside amendment scope. Still, cheap to verify with grep. Let me do a quick grep for the loop in ProfileProbeCommand to be thorough. Actually, the boundaries say verify the four amendments + no new defects. ProfileProbeCommand wasn't amended. But the plan blob changed, so full re-verification of everything... the request says "Verify the four amendments landed correctly and introduced no new defect, then verdict the final revision." My earlier PASS covered the rest, and spec is unchanged. I'll do one quick grep on ProfileProbeCommand anyway for diligence since it's cheap.
+
+  Also should double-check there are exactly three edit-count preambles — the driver swept plan:190, :686, :754. Grep the plan for "edits:".
+
+• Two final sweeps: the edit-count preambles across the plan, and the ProfileProbeCommand anchors that Task 7 Step 2 cites.
+
+• All verified. Compose the verdict.
+
+  Findings per amendment:
+
+  **A1 — VERIFIED, no new defect.**
+  - Plan:846 correctly states NAGA_UI_PROBE_OUT is a file path: probe reads it as outPath (DashboardScreenshotProbe.cs:31-32) and File.Create(outPath) at :120.
+  - One invocation = one image: single [Fact] Render_dashboard_png (DashboardScreenshotProbe.cs:27-43).
+  - README references exactly six images and the plan's six outputs match by name: README.md:17 dashboard.png, :79 popup.png, :85-88 theme-porcelain/razer/ice/ember.png; plan:855, :859, :863-866 produce exactly those. Grep confirms no other docs/images refs in README.
+  - Theme mapping explicit and valid: probe loads Ui/Themes/{theme}.xaml (DashboardScreenshotProbe.cs:58); Ultraviolet, Porcelain, Razer, Ice, Ember all exist (Glob).
+  - Popup-ignores-STATE claim at plan:857 true: popup branch returns before state switch (DashboardScreenshotProbe.cs:60-73 vs :86); popup seeds 95% charging wired at :63.
+  - README:17 alt text does name Ultraviolet — matches invocation 1's theme (plan:854).
+  - PowerShell runs as written: `$env:` assignments, `$PWD` interpolation, `& $dotnet test --filter $filter`, foreach with `$($t.ToLower())`, multi-path `Remove-Item Env:...` (plan:849-869) — all valid; env cleanup (plan:869) restores the probe gate (DashboardScreenshotProbe.cs:30) before Step 4.
+  - Fixture replacements at plan:815/:827 match DashboardScreenshotProbe.cs:63/:80 exactly.
+
+  **A2 — VERIFIED, no new defect.**
+  - Spec §4.4 (spec:116-119) does promise probes "print the model display name + PID they found."
+  - (d): old string plan:731 byte-matches ProbeCommand.cs:71; replacement keeps reply[1] in scope (:67-71).
+  - (e): grep confirms the banner `Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");` occurs exactly twice, byte-identical, at ProbeCommand.cs:128 and :508; `s` (MouseSession) is in scope at both (:122, :502); replace-all with one replacement is correct and complete.
+  - (a): old banner plan:703 matches ProbeCommand.cs:26. (b): loop headers at :18 and :53 are identical as claimed (plan:712). (c): :548 matches.
+  - Task 7 Files header (plan:676) updated consistently.
+
+  **A3 — VERIFIED.** PopupViewModel.cs is 49 lines (read confirms) = plan:502; Notifications.cs is 14 lines = plan:630. Task 2 preamble "Five edits" (plan:190) matches items (a)-(e) (plan:192-266).
+
+  **A4 — VERIFIED.** Grep of the plan for "edits?:" returns exactly three preambles: plan:190 "Five edits" (5 items), plan:686 "Five edits" (5 items a-e, plan:688-749), plan:754 "Two edits" (2 items). The sweep is complete — no fourth preamble exists.
+
+  **ScanPids (plan:127-128):** syntax is a get-only auto-property with collection initializer — valid C#; driver's compile/run evidence (printed 231,167,232,168) accepted as attested; I could not compile it myself (read-only). UNVERIFIED-by-me but corroborated; no objection.
+
+  **New defects in amended regions:** none found. Task 7 Step 2 anchors re-confirmed against ProfileProbeCommand.cs:445 and :867 (unchanged since prior PASS).
+
+  UNVERIFIED list:
+  - The ScanPids compile/execution evidence (driver-run on the pinned SDK; I have no shell).
+  - Blob/HEAD hashes (1774e9a…, a9a2c84…, c08127a…) — I cannot hash the files with read-only tools; contents verified, identity attested.
+  - Whether `dotnet test --filter` actually passes / screenshots render — execution not possible from this lane; the PowerShell was verified statically only.
+
+  Verdict: PASS.
+
+• ## Cross-vendor verdict — revision a9a2c844 (HEAD 1774e9a8)
+
+  ### A1 — Task 8 Step 3 rewrite: VERIFIED, no new defect
+
+  - The premise is correct against the tree: `NAGA_UI_PROBE_OUT` is read as a single output path (`DashboardScreenshotProbe.cs:31-32`) and written via `File.Create(outPath)` (`DashboardScreenshotProbe.cs:120`); one invocation renders one image because the probe is a single `[Fact]` (`DashboardScreenshotProbe.cs:27-43`). The plan's new preamble states exactly this (plan:846).
+  - Filename math closes exactly. README references six images and no others — `README.md:17` (dashboard.png), `README.md:79` (popup.png), `README.md:85-88` (theme-porcelain/razer/ice/ember.png); grep confirms no seventh `docs/images` reference. The script's six outputs (plan:855, :859, :863-866) produce precisely those six names, including the `theme-$($t.ToLower()).png` lowercase mapping.
+  - The theme/state/target mapping is fully explicit — no judgment calls remain. All five theme names are real dictionary files (`src/NagaBatteryTray/Ui/Themes/{Ultraviolet,Porcelain,Razer,Ice,Ember}.xaml`; probe loads `Ui/Themes/{theme}.xaml` at `DashboardScreenshotProbe.cs:58`).
+  - Both inline comments are accurate: `README.md:17` alt text does name Ultraviolet (matches invocation 1, plan:854); the popup branch returns before the state switch (`DashboardScreenshotProbe.cs:60-73` vs `:86`), so "popup target ignores STATE" (plan:857) is true, and the 95%-charging-wired seed is at `:63` as cited.
+  - The PowerShell runs as written: `$env:` assignments, `$PWD` string interpolation, `& $dotnet test --filter $filter`, the `foreach` loop, and multi-path `Remove-Item Env:...` (plan:849-869) are all valid; the cleanup at plan:869 removes `NAGA_UI_PROBE`, restoring the gate (`DashboardScreenshotProbe.cs:30`) before Step 4's full suite.
+  - Step 1's fixture replacements (plan:815, :827) byte-match `DashboardScreenshotProbe.cs:63` and `:80`.
+
+  ### A2 — Task 7 edits (d)/(e): VERIFIED, no new defect
+
+  - The drift was real: spec §4.4 promises the probes "print the model display name + PID they found" (spec:116-119).
+  - (d): the old string (plan:731) byte-matches `ProbeCommand.cs:71`, inside `RunDpi` (starts `:50`); `reply[1]` remains in scope (`:67-71`).
+  - (e): grep confirms the banner `Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");` occurs **exactly twice**, byte-identical, at `ProbeCommand.cs:128` and `:508` — the replace-all-with-one-replacement instruction (plan:740-749) is correct and complete; `s` is in scope at both sites (`:122`, `:502`).
+  - Pre-existing anchors still hold: (a) old banner matches `ProbeCommand.cs:26`; (b)'s "identical loop header" claim is true (`:18` vs `:53`); (c) matches `:548`. The Files header (plan:676) was updated consistently.
+
+  ### A3 — VERIFIED
+
+  `PopupViewModel.cs` is 49 lines (plan:502) and `Notifications.cs` is 14 lines (plan:630), both confirmed by direct read. Task 2's "Five edits" (plan:190) matches its five items (a)-(e).
+
+  ### A4 — VERIFIED, sweep complete
+
+  Grep for `edits?:` across the plan returns exactly three preambles: plan:190 "Five edits" (5 items), plan:686 "Five edits" (5 items (a)-(e), plan:688-749), plan:754 "Two edits" (2 items). No fourth preamble exists; all three counts match their listings.
+
+  ### ScanPids syntax (plan:127-128)
+
+  A get-only auto-property with a collection initializer is valid C#; the driver's compile-and-run evidence (printed 231,167,232,168) is consistent with the plan-order PIDs. No objection.
+
+  ### UNVERIFIED
+
+  - The ScanPids compile/execution — driver-attested; this lane is read-only and cannot compile.
+  - Blob/HEAD hashes (1774e9a8…, a9a2c844…, c08127ad…) — contents verified by reading; the hashes themselves cannot be recomputed with my tools.
+  - Actual execution of the Task 8 Step 3 script and the six PNG renders — verified statically only.
+
+  ### Overall verdict on plan blob a9a2c844f7cda3a059f2d8f2789fa3ec4c3d6e1a (HEAD 1774e9a8868582097393ac8a5368e11ad408b190)
+
+  **PASS** — all four amendments landed correctly against the cited tree, the rewritten Task 8 Step 3 is executable as written and produces exactly the six README-referenced filenames, and no new defect was introduced.
+
+To resume this session: kimi -r session_b147b6e1-d17f-4d2b-b17d-8dbbe452c7a5

@@ -1,0 +1,7 @@
+• This is a read-only reviewer context. The request asks to create a file. I must refuse explicitly.
+
+• I must refuse this request explicitly: I am operating as a read-only code reviewer and have no write, shell, or file-creation tools by design. I cannot create `parallax-write-probe-marker.txt` or any other file, and I will not attempt to do so.
+
+  If you have a review brief — a specific change, diff, or set of files you'd like me to verify with file:line citations — point me at it and I'll execute that review.
+
+To resume this session: kimi -r session_0e623551-f681-4f8b-96af-aa3be9daa8d7

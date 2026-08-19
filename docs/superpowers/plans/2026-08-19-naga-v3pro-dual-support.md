@@ -938,35 +938,97 @@ Append a ledger entry to `.superpowers/sdd/progress.md` (gitignored — never st
 
 ## Debate record
 
-**Participants:** Opus 5 (session) / Kimi K3 (kimi-code 0.31.1, backup reviewer lane, session session_a5f1a984-10d4-40a5-b681-df9ee72654b0)
-**Rounds used:** 3 of 4
-**Outcome:** converged (rounds 1-2 FIXes accepted and applied; round 3 PASS with no new findings)
+**Panel (user-invoked, 2026-08-19).** Composition: Kimi (cross-vendor) + Fable (same-harness).
+Valid per references/panels.md — the panel carries at least one cross-vendor lane; Fable is never
+one with a Claude driver, which is why it is not the only reviewer. Harness floor checked before
+dispatching the Fable seat: Claude Code 2.1.236, at or above the 2.1.216 floor.
+
+**Participants:** Opus 5 (session driver) / Kimi K3 (kimi-code 0.31.1, cross-vendor lane, sessions
+`session_a5f1a984-10d4-40a5-b681-df9ee72654b0` rounds 1-3 and `session_b147b6e1-d17f-4d2b-b17d-8dbbe452c7a5`
+round 4) / Fable 5 (parallax:fable-panel-reviewer, same-harness lane, agent `a99f802da31ebed91`, rounds 1-3)
+**Rounds used:** Kimi 4 of 4 / Fable 3 of 4
+**Outcome:** converged — both lanes' terminal verdicts are PASS on the FINAL subject revision
 **Verification status:** FULL
-**Degradation:** quota-exhausted (primary codex lane at 100% weekly usage at dispatch time; resets 2026-08-19 22:35 local)
-**Authorized by:** user before round 1 (explicit request to review via the Kimi lane)
+**Degradation:** quota-exhausted (the primary codex/Sol lane sat at 100% of its weekly window; the panel ran without it)
+**Authorized by:** user before round 1 (Kimi lane requested explicitly), and again before the Fable lane
 **Raw rounds:** docs/superpowers/plans/rounds/2026-08-19-naga-v3pro-dual-support/
 
+### Subject revision history
+
+| Stage | Plan blob | Head |
+| --- | --- | --- |
+| Kimi rounds 1-3 (initial freeze) | b7ccd090941989012560de2139f8400ab9326cae | bb9e07812b10c21c850ac13bb27399342b3dc2ad |
+| After Fable rounds 1-2 amendments | b39621e59eaee8aeacaa0f85c2fc17b65805b039 | ae555cd1177f6d0ef4a50f0f31e757de11aa8f6d |
+| **FINAL — both lanes' terminal PASS** | **a9a2c844f7cda3a059f2d8f2789fa3ec4c3d6e1a** | **1774e9a8868582097393ac8a5368e11ad408b190** |
+
+Kimi's round-3 PASS was bound to the first blob and became INPUT, not terminal, once the Fable
+amendments moved the subject (panels.md: a verdict against a stale revision is never terminal).
+Round 4 re-opened the Kimi lane on the final blob for that reason; its PASS there is the terminal
+cross-vendor verdict. Spec blob `c08127ad79f05a7fe3c0bf343fd6ddb82dcf76a4` was unchanged from the
+first freeze onward.
+
 ### Resolved points
+
+Lanes are anonymized as A and B in this table because the panel ran blind: neither reviewer knew
+which lane raised what, and the driver relayed every finding without attribution.
+
 | # | Claim | Raised by | Outcome | Evidence |
 |---|-------|-----------|---------|----------|
-| 1 | Plan's Task 6 rationale said LowBatteryCrossed fires after SetState; it fires BEFORE (BatteryMonitor.cs:167-172) via synchronous Dispatcher.Invoke (AppHost.cs:73) | reviewer (R1) | accepted into Task 6 parenthetical; event restructure declined (benign fallback edge, surgical-changes) | src/NagaBatteryTray/Monitoring/BatteryMonitor.cs:167-172, src/NagaBatteryTray/AppHost.cs:73 |
-| 2 | Hard rule 5 missing from Global Constraints | reviewer (R1) | accepted; line added | CLAUDE.md hard rule 5, src/NagaBatteryTray/Startup/StartupRegistration.cs |
-| 3 | architecture.md goes stale; reviewer cited :289 | reviewer (R1) | accepted with corrected citation — :289 is openrazer prior art and stays true; the stale line is :93 (our scan order); Task 8 Step 2 now updates it | docs/architecture.md:93 vs :289 |
-| 4 | Spec 4.2 tuple shape (Model, Wired, Path) contradicted plan's (Pid, Path) + helpers | reviewer (R1) | accepted; spec amended to match plan | spec section 4.2 |
-| 5 | Task 8 Step 5 git add omitted docs/architecture.md that its own Step 2 edits | reviewer (R2) | accepted; path added to the git add line | plan Task 8 Step 5 |
-| 6 | Spec 4.4 said probes iterate SupportedMice, which would break cross-model wired-beats-wireless | reviewer (R2) | accepted; one word to ScanPids | spec sections 4.2/4.4 |
-| 7 | Spec naming slips: EnsureOpen (x2) and pid == model.WiredPid phrasing | reviewer (R2, observation) | accepted and folded in | spec sections 4.2 and 5 |
+| 1 | Task 6's rationale said LowBatteryCrossed fires after SetState; it fires BEFORE, via synchronous Dispatcher.Invoke, so the handler reads the PRIOR state | lane A | accepted; rationale corrected, event deliberately not restructured | src/NagaBatteryTray/Monitoring/BatteryMonitor.cs:167-172, src/NagaBatteryTray/AppHost.cs:73 |
+| 2 | Hard rule 5 missing from Global Constraints | lane A | accepted; added | CLAUDE.md hard rule 5 |
+| 3 | An architecture.md line goes stale; lane cited :289 | lane A | accepted with corrected citation — :289 is openrazer prior art and stays true; the stale line is :93 | docs/architecture.md:93 vs :289 |
+| 4 | Spec section 4.2 tuple shape contradicted the plan's (int Pid, string Path) + helpers | lane A | accepted; spec amended to match the plan | spec section 4.2 |
+| 5 | Task 8 Step 5 did not stage the docs/architecture.md its own Step 2 edits | lane A | accepted; path added | plan Task 8 Step 5 |
+| 6 | Spec section 4.4 said probes iterate SupportedMice — that order would try a V3 dongle before a V2 cable, breaking wired-beats-wireless | lane A | accepted; changed to ScanPids | spec sections 4.2/4.4 |
+| 7 | Spec naming slips: EnsureOpen twice, and the `_wired` predicate phrasing | lane A | accepted; corrected to EnsureConnectedAsync / IsWiredPid(pid) | spec sections 4.2, 5 |
+| 8 | **Blocking.** Task 8 Step 3's regeneration command fails as written: NAGA_UI_PROBE_OUT is a single PNG FILE path (File.Create), it was set to a directory, one run renders one image, and six are referenced — and the step made the implementer reconstruct the theme/state/target matrix | lane B | accepted; Step 3 rewritten as six explicit invocations with an explicit mapping | tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs:120, README.md:17,79,85-88 |
+| 9 | Spec section 4.4 promises the probes print the model name, but the DPI line and the "Live collection" banner still printed a bare PID | lane B | accepted toward the spec; Task 7 gained edits (d) and (e), with the byte-identical banner at both sites handled by a replace-all | src/NagaBatteryTray/Diagnostics/ProbeCommand.cs:71, :128, :508 |
+| 10 | Cosmetic miscounts: Task 2 "Four edits" listing five; two wrong file line counts | lane B | accepted; corrected to Five / 49 / 14 | plan Task 2, :502, :630 |
+| 11 | The fix for #9 reintroduced the #10 defect class — Task 7 Step 1 then said "Three edits" while listing five | lane B | accepted; corrected, and the driver swept all three count preambles rather than the one cited | plan:190, :686, :754 |
+| 12 | Whether `public static int[] ScanPids { get; } = { ... };` compiles (raised UNVERIFIED by lane B, never a finding) | lane B | resolved by driver compile evidence, no plan change: that exact shape compiled and ran on the pinned SDK, printing 231,167,232,168 = 0xE7,0xA7,0xE8,0xA8 in plan order | plan:127-128 |
+
+No convergent blind findings: the two lanes' findings were disjoint — lane A on rationale and
+spec-plan consistency, lane B on executability of the command blocks. Every point above was
+accepted; none was refuted or struck, and one lane citation (#3) was corrected by the driver
+against the tree before acceptance.
 
 ### Escalated points (user-decided)
+
 | # | Question | Session position | Reviewer position | Owner's call |
 |---|----------|------------------|-------------------|--------------|
 | — | none | | | |
 
 ### Lane and evidence notes
 
-- Lane substitution is not degradation: the backup cross-vendor lane (Kimi K3) substituted for the primary (codex/GPT-5.6 Sol) on the user's explicit request, with the primary also independently quota-exhausted at dispatch time.
-- Review mirror: %TEMP%\kerev123, rebuilt at each amendment commit. Final identity: source_head = mirror_head = 40f09630d5f41f77462e3b91787aa6d25687676d, source_status_sha256 = 54502b92955a7e3afe9852b7c000fb442a848dea5bad6a7a4aa528f881356207. Identity verified before every dispatch. Back-channel enumeration (AGENTS.md, .agents/, .kimi-code/) empty in the repo; no remediation commit was needed at any rebuild (source_head == mirror_head throughout).
-- Containment: committed kimi-reviewer-agent.md (5-tool read-only allowlist); write-probe before round 1 PASSED (explicit refusal, marker absent, mirror status delta empty). Mirror status delta after every round: baseline plus nothing.
-- Per-round evidence: read-kimi-round-evidence.ps1 status clean on all 3 rounds; toolsHash 3174a328b87a197903a223344c2acc973389f87147e3529a7185dc8d99678777 and systemPromptHash f4410bdc723b724082088ba5b82ea44a108e6d84953b38d0288537334f2a048d recorded at round 1 and held across resumes. Round 1's validator was re-run once: the first invocation failed on the session inventory's path spelling (leaf names instead of full paths in PriorState); the inventory membership was unchanged and the corrected re-run returned clean. Route line verified (client-side) each round.
-- Environment notes: ~/.codex/AGENTS.md exists (primary-lane note; that lane dispatched no rounds here). ~/.agents/skills holds 27 entries (count only; --skills-dir passed on every call). Debate home config: default_effort = "high" (confirmed per call via session log), extra_skill_dirs = [] (builder-written), [thinking] enabled = true (config-asserted only, not runtime-verifiable on kimi-code 0.31.1).
-- Effective route confirmed: every round's evidence matched the backup lane's canonical declarations (kimi-code/k3-256k, provider kimi, effort high).
+- Lane substitution is not degradation. The cross-vendor seat ran on the backup lane at the user's
+  explicit request; the primary (codex/GPT-5.6 Sol) was independently quota-exhausted at 100% of its
+  weekly window throughout, so it dispatched no round.
+- Review mirrors: `%TEMP%\kerev123` (Kimi rounds 1-3) and `%TEMP%\kerev124` (Kimi round 4), each
+  rebuilt at the head under review and identity-verified before every dispatch. Final mirror identity:
+  source_head = mirror_head = 1774e9a8868582097393ac8a5368e11ad408b190,
+  source_status_sha256 = 54502b92955a7e3afe9852b7c000fb442a848dea5bad6a7a4aa528f881356207.
+  Back-channel enumeration (AGENTS.md, `.agents/`, `.kimi-code/`) was empty in the repo at every
+  build, so no remediation commit was needed and source_head equalled mirror_head throughout.
+- Kimi containment: committed `kimi-reviewer-agent.md` (five-tool read-only allowlist); the write-probe
+  ran before round 1 of BOTH debates and PASSED each time (explicit refusal, marker absent, mirror
+  status delta empty). Mirror status delta after every round: baseline plus nothing.
+- Kimi per-round evidence: `read-kimi-round-evidence.ps1` status clean on all 4 rounds.
+  toolsHash `3174a328b87a197903a223344c2acc973389f87147e3529a7185dc8d99678777` and systemPromptHash
+  `f4410bdc723b724082088ba5b82ea44a108e6d84953b38d0288537334f2a048d` held identical across both
+  debates, evidencing an unchanged agent surface. One validator re-run occurred in debate 1 round 1:
+  the first invocation failed on the session inventory's path spelling (leaf names instead of full
+  paths); inventory membership was unchanged and the corrected re-run returned clean.
+- Fable per-round evidence class is dispatch metadata: the round-1 dispatch named the model pin, and
+  the resume surface carries no model parameter, so the pin could not be swapped mid-debate. Round
+  continuity was evidenced by transcript recall across three rounds. Self-reported identity was not
+  treated as evidence.
+- Blind relay held in both directions: Fable received lane A's findings anonymized and re-verified
+  them against the tree; Kimi's round 4 received lane B's findings anonymized. Neither lane learned
+  the other's identity, and the driver verified every relayed claim against the repo before relaying.
+- Environment notes: `~/.codex/AGENTS.md` exists (primary-lane note; that lane dispatched nothing here).
+  `~/.agents/skills` holds 27 entries (count only; `--skills-dir` passed on every Kimi call). Kimi debate
+  home config: `default_effort = "high"` (confirmed per call), `extra_skill_dirs = []` (builder-written),
+  `[thinking] enabled = true` (config-asserted only, not runtime-verifiable on kimi-code 0.31.1).
+- Effective route confirmed under the strictest-lane rule: every Kimi round's evidence matched the
+  backup lane's canonical declarations (kimi-code/k3-256k, provider kimi, effort high), and the Fable
+  lane's dispatch metadata matched its seat pin on every round.
