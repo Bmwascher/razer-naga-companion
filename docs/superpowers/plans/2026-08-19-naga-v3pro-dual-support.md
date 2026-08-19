@@ -187,7 +187,7 @@ public readonly record struct BatteryReading(int Percent, bool IsCharging, bool 
 
 - [ ] **Step 2: Plumb the model through RazerDevice**
 
-Read `src/NagaBatteryTray/Hid/RazerDevice.cs` in full. Four edits:
+Read `src/NagaBatteryTray/Hid/RazerDevice.cs` in full. Five edits:
 
 (a) Class doc comment (line ~12): replace the first sentence
 
@@ -499,7 +499,7 @@ Expected: compile error — no `ModelName`.
 
 - [ ] **Step 3: Implement**
 
-Read `src/NagaBatteryTray/Ui/PopupViewModel.cs` in full (60 lines). Add beside the other backing fields:
+Read `src/NagaBatteryTray/Ui/PopupViewModel.cs` in full (49 lines). Add beside the other backing fields:
 
 ```csharp
     private string _modelName = "Razer Naga";
@@ -627,7 +627,7 @@ with
         : $"{s.Model ?? "Razer Naga"} - {s.Percent}%{(s.Charging ? " (charging)" : "")}";
 ```
 
-Read `src/NagaBatteryTray/Ui/Notifications.cs` in full (15 lines). Replace the method:
+Read `src/NagaBatteryTray/Ui/Notifications.cs` in full (14 lines). Replace the method:
 
 ```csharp
     public static void LowBattery(int percent, string? model)
@@ -673,7 +673,7 @@ git commit -m "feat(tray): tooltip and low-battery toast use the detected model 
 ### Task 7: Probe suite scans both models
 
 **Files:**
-- Modify: `src/NagaBatteryTray/Diagnostics/ProbeCommand.cs` (three PID loops: `Run` ~line 18, `RunDpi` ~line 53, `OpenLiveMouse` ~line 548)
+- Modify: `src/NagaBatteryTray/Diagnostics/ProbeCommand.cs` (three PID loops: `Run` ~line 18, `RunDpi` ~line 53, `OpenLiveMouse` ~line 548; plus the model-name report lines at ~71 and the two identical banners at ~128/~508)
 - Modify: `src/NagaBatteryTray/Diagnostics/ProfileProbeCommand.cs` (`ProfileSession.Open` ~line 445, `ProfileCapture` header ~line 867)
 - Test: none new (probe commands run against real hardware — the deliberate exception; `ProfileProbeCommandTests` covers the pure-logic layers and must stay green)
 
@@ -724,6 +724,30 @@ with
 ```
 
 The doc comment above `OpenLiveMouse` ("wired PID first, then wireless…") stays accurate — `ScanPids` preserves exactly that rule across both models.
+
+(d) Spec §4.4 requires the probes to print the model they found, so name it at the two remaining PID-only report lines. In `RunDpi` (~line 71), replace
+
+```csharp
+                Console.WriteLine($"PID 0x{pid:x4} status=0x{reply[1]:x2}");
+```
+
+with
+
+```csharp
+                Console.WriteLine($"PID 0x{pid:x4} ({RazerProtocol.ModelNameForPid(pid)}) status=0x{reply[1]:x2}");
+```
+
+(e) The "live collection" banner appears **twice**, byte-identical, at ~line 128 (`--probe-buttons`) and ~line 508 (the slot test). Both take the SAME replacement, so use a replace-all edit. Replace
+
+```csharp
+        Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");
+```
+
+with
+
+```csharp
+        Console.WriteLine($"Live collection: {RazerProtocol.ModelNameForPid(s.Pid) ?? "unknown"} PID 0x{s.Pid:x4} ({(RazerProtocol.IsWiredPid(s.Pid) ? "wired" : "wireless")})\n");
+```
 
 - [ ] **Step 2: Update ProfileProbeCommand**
 
@@ -819,14 +843,33 @@ Read `README.md` in full. Then:
 
 - [ ] **Step 3: Regenerate the screenshots**
 
+`NAGA_UI_PROBE_OUT` is a single PNG **file path**, not a directory (`File.Create(outPath)` at `tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs:120`), and one invocation renders one image. The README references six images (`README.md:17,79,85-88`), so the probe runs six times. Run this exactly:
+
 ```powershell
 $env:NAGA_UI_PROBE = "1"
-$env:NAGA_UI_PROBE_OUT = "docs/images"
-& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~DashboardScreenshotProbe"
-Remove-Item Env:NAGA_UI_PROBE; Remove-Item Env:NAGA_UI_PROBE_OUT
+$dotnet = "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe"
+$filter = "FullyQualifiedName~DashboardScreenshotProbe"
+
+# 1. dashboard.png - dashboard, Ultraviolet, steady (README:17 alt text names Ultraviolet)
+$env:NAGA_UI_PROBE_TARGET = "dashboard"; $env:NAGA_UI_PROBE_THEME = "Ultraviolet"; $env:NAGA_UI_PROBE_STATE = "steady"
+$env:NAGA_UI_PROBE_OUT = "$PWD\docs\images\dashboard.png"; & $dotnet test --filter $filter
+
+# 2. popup.png - popup target ignores STATE (it seeds its own 95% charging wired state at DashboardScreenshotProbe.cs:63)
+$env:NAGA_UI_PROBE_TARGET = "popup"; $env:NAGA_UI_PROBE_THEME = "Ultraviolet"
+$env:NAGA_UI_PROBE_OUT = "$PWD\docs\images\popup.png"; & $dotnet test --filter $filter
+
+# 3-6. the four theme shots - dashboard, steady, one per preset
+$env:NAGA_UI_PROBE_TARGET = "dashboard"; $env:NAGA_UI_PROBE_STATE = "steady"
+foreach ($t in "Porcelain", "Razer", "Ice", "Ember") {
+    $env:NAGA_UI_PROBE_THEME = $t
+    $env:NAGA_UI_PROBE_OUT = "$PWD\docs\images\theme-$($t.ToLower()).png"
+    & $dotnet test --filter $filter
+}
+
+Remove-Item Env:NAGA_UI_PROBE, Env:NAGA_UI_PROBE_OUT, Env:NAGA_UI_PROBE_THEME, Env:NAGA_UI_PROBE_STATE, Env:NAGA_UI_PROBE_TARGET
 ```
 
-Check `git status` — the images under `docs/images/` the README references must be regenerated (probe both targets/themes exactly as the existing images were produced: read the top of `DashboardScreenshotProbe.cs` for the `NAGA_UI_PROBE_THEME` / `NAGA_UI_PROBE_STATE` / `NAGA_UI_PROBE_TARGET` combinations that generated the current set, and reproduce each existing filename). Open one image to verify the header reads "Naga V3 Pro".
+Then check `git status`: all six files under `docs/images/` must show as modified. Open `docs/images/dashboard.png` and confirm the header card reads "Naga V3 Pro"; open `docs/images/popup.png` and confirm the same. Theme names are the dictionary filenames in `src/NagaBatteryTray/Ui/Themes/`; the lowercase `theme-*.png` names match the existing files.
 
 - [ ] **Step 4: Full suite (probe gated off)**
 
