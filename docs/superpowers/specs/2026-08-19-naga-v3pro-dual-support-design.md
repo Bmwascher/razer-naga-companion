@@ -129,7 +129,7 @@ untouched.
 ## 5. What does NOT change (hard-rule audit)
 
 - No new timers, threads, or polling paths; the scan-order change runs inside the existing
-  on-demand `EnsureOpen`. Idle CPU / memory / input-feel gates untouched (rule 1).
+  on-demand `EnsureConnectedAsync`. Idle CPU / memory / input-feel gates untouched (rule 1).
 - Button snapshot + raw-undo path untouched (rule 2) — and the V3's odd factory default is
   exactly why it must stay: undo restores raw bytes the app can't model.
 - No theming changes (rule 3).
