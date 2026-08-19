@@ -12,6 +12,7 @@ public sealed class PopupViewModel : ObservableObject
     private double _barFraction;
     private Media.Brush _accent = Media.Brushes.Gray;
     private bool _charging;
+    private string _modelName = "Razer Naga";
 
     public string PercentText { get => _percentText; private set => Set(ref _percentText, value); }
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -23,6 +24,7 @@ public sealed class PopupViewModel : ObservableObject
     public double BarPixelWidth => BarFraction * BarTrackWidth;
     public Media.Brush Accent { get => _accent; private set => Set(ref _accent, value); }
     public bool Charging { get => _charging; private set => Set(ref _charging, value); }
+    public string ModelName { get => _modelName; private set => Set(ref _modelName, value); }
 
     public void Apply(DeviceState s)
     {
@@ -33,10 +35,12 @@ public sealed class PopupViewModel : ObservableObject
             BarFraction = 0;
             Accent = Media.Brushes.Gray;
             Charging = false;
+            ModelName = "Razer Naga";
             return;
         }
 
         PercentText = $"{s.Percent}%";
+        ModelName = s.Model ?? "Razer Naga";
         // Top-right shows the active link (the charging pill already conveys charge state, so don't duplicate
         // it). Wired -> "Wired"; wireless on battery keeps "On battery"; wireless while charging (dock puck)
         // reads "Wireless" rather than the contradictory "On battery".
