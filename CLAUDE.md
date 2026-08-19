@@ -101,6 +101,11 @@ Shipped (spec links = the full story):
 
 Next:
 
+- [ ] **Naga V3 Pro migration — FIRST, before any other feature work** (user, 2026-08-19) —
+  probe the V3 Pro (discover its PIDs; V2 Pro constants live in `Hid/RazerProtocol.cs`), verify
+  battery / DPI / button-remap / profile protocol parity with the `--probe*` suite on real
+  hardware, then swap the device layer. Open user decisions: dual-support vs clean swap;
+  stage art (`naga-thumb.png` is a V2 Pro render), app naming, and README/screenshots follow.
 - [ ] **DPI stages + polling rate** — onboard 5-stage table (+ stage up/down), polling-rate
   get/set (openrazer-validated, write-on-action only). Carries two deferred riders: the preset
   row likely becomes the onboard stage table (user, 2026-07-17), and the right-rail relayout

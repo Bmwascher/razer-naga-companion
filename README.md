@@ -247,6 +247,8 @@ Full design and implementation notes live in [`docs/superpowers/`](docs/superpow
 - [x] **Dashboard polish**: slot renaming, a segmented DPI preset control with a
       click-to-type readout, failed-apply surfacing, and an off-screen screenshot probe for
       iterating on layout without installing.
+- [ ] **Razer Naga V3 Pro support** (next up): probe the V3 Pro's protocol with the existing
+      `--probe*` suite and migrate the device layer to it.
 - [ ] **DPI stages + polling rate**: program the onboard 5-stage DPI table (+ stage
       up/down) and the polling rate — the preset row likely becomes the onboard stage table.
 - [ ] **Lighting**: thumb-grid / scroll-wheel zone effects + brightness, theme-sync
