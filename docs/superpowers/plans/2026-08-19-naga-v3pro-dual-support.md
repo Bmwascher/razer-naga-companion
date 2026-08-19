@@ -683,7 +683,7 @@ git commit -m "feat(tray): tooltip and low-battery toast use the detected model 
 
 - [ ] **Step 1: Update ProbeCommand**
 
-Read `src/NagaBatteryTray/Diagnostics/ProbeCommand.cs` in full. Three edits:
+Read `src/NagaBatteryTray/Diagnostics/ProbeCommand.cs` in full. Five edits:
 
 (a) In `Run` (~line 18), replace
 
