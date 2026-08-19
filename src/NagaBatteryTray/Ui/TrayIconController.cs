@@ -65,9 +65,9 @@ public sealed class TrayIconController : IDisposable
         _current = next;
     }
 
-    private static string Tooltip(DeviceState s) => s.Status == DeviceStatus.Unknown
-        ? "Naga V2 Pro - no response"
-        : $"Naga V2 Pro - {s.Percent}%{(s.Charging ? " (charging)" : "")}";
+    internal static string Tooltip(DeviceState s) => s.Status == DeviceStatus.Unknown
+        ? $"{s.Model ?? "Razer Naga"} - no response"
+        : $"{s.Model ?? "Razer Naga"} - {s.Percent}%{(s.Charging ? " (charging)" : "")}";
 
     private static double GetDpiScale()
     {
