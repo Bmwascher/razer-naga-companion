@@ -1,0 +1,78 @@
+• Re-read the amended plan and spec, plus docs/architecture.md:289 and :93 to verify amendment 3.Verify the four amendments:
+
+  1. Task 6 parenthetical — plan line 654 now states prior-state mechanism, _armed reasoning, 4-miss edge, and decision not to restructure. Verify against BatteryMonitor.cs:167-172 (already read round 1, unchanged source presumably). ✓ Accurate: fires at 167-168 before SetState at 172; Dispatch synchronous at AppHost.cs:73. The amendment's line references are correct.
+
+  2. Hard rule 5 added at plan line 19. ✓ "run-at-login stays the delayed scheduled task (StartupRegistration.cs) — no task touches it". Verify StartupRegistration is a scheduled task — src/NagaBatteryTray/Startup/StartupRegistration.cs:24 had `taskName = "NagaBatteryTray", delay = "PT1M"` — consistent with "delayed scheduled task". ✓
+
+  3. Architecture.md — need to verify line 93 and 289 content. I should read docs/architecture.md around those lines to confirm the corrected citation: :93 says scan order "wired 0x00A7 first..." and :289 is openrazer prior-art. Round 1 grep showed :289: "0x04/0x05 VARSTORE. Naga V2 Pro supported (PID 0x00A7/0x00A8) with a hard-coded" — indeed mentions transaction id context (openrazer). Verify :93 exists and says what's claimed.
+
+  4. Spec §4.2 amended (spec lines 83-87): keeps (int Pid, string Path), resolves via ModelNameForPid/IsWiredPid at commit time, notes debate amendment. ✓ Matches plan Task 2. Note: spec line 97 still says "(_wired becomes pid == model.WiredPid)" — but plan Task 2(c) uses `RazerProtocol.IsWiredPid(pid)`. Functionally identical (IsWiredPid(pid) == (pid == model.WiredPid) for the winning model). Minor residual inconsistency in spec wording — is it worth flagging? It says "alongside the existing _wired flag (_wired becomes pid == model.WiredPid)". The plan implements `_wired = RazerProtocol.IsWiredPid(pid)`. Equivalent semantics. Could flag as trivial wording residue, not a defect — or a very minor FIX note. It's internally consistent enough; IsWiredPid is exactly pid == model.WiredPid for the matched model. I'll note as observation.
+
+  Also spec §4.2 line 92-93 references "EnsureOpen ... (RazerDevice.cs:74)" — the method is EnsureConnectedAsync, and :74 is the confirmation line. Pre-existing naming slip ("EnsureOpen" vs EnsureConnectedAsync), not introduced by amendment. Round 1 didn't flag; it's a doc naming slip in spec. Minor, mention as observation.
+
+  Also spec §4.4 line 116-117 says probes "iterate RazerProtocol.SupportedMice" — the plan actually iterates ScanPids. That's a discrepancy! Spec line 117: "iterate `RazerProtocol.SupportedMice` instead of the two V2 constants". Plan Task 7 replaces loops with `foreach (int pid in RazerProtocol.ScanPids)`. ScanPids is flat wired-first order; iterating SupportedMice would give per-model (wired, wireless) pairs — different order (V3 wired, V3 wireless, V2 wired, V2 wireless). For probes the order difference matters for which device wins in OpenLiveMouse/ProfileSession.Open: iterating SupportedMice naively would break wired-beats-wireless across models. The plan uses ScanPids, which is correct; the spec text says SupportedMice. This is a spec-vs-plan wording inconsistency — spec §4.2 (amended) correctly says ScanPids, but §4.4 still says SupportedMice. Was this in the original spec? Yes — round 1 spec line 115 said "iterate RazerProtocol.SupportedMice". Round 1 I missed it. It's a NEW finding: spec §4.4 wording inconsistent with amended §4.2 and plan Task 7. Minor doc fix: change "SupportedMice" to "ScanPids" in spec line 117. Severity: doc-level only; plan is correct. Verdict: FIX (minor, spec wording) — or PASS with note? The request: verify amendments landed, raise NEW findings with evidence. This is a genuine new finding with evidence. The verdict on the amended plan: the plan itself is correct; the spec has a residual wording inconsistency. Since the plan is what's being implemented and it's right, I'd say overall PASS for the plan with a recommended one-word spec fix — but verdict grammar is PASS/FIX/ESCALATE. A stale spec sentence that contradicts the plan's correct choice could mislead; mark FIX (one-word spec edit), noting the plan needs no change.
+
+  Let me verify architecture.md:93 first.
+
+• The four amendments are visible in the files. One verification remains: the corrected `architecture.md` citations.
+
+• Confirmed:
+  - architecture.md:93 is indeed our own scan-order description ("wired 0x00A7 first, then wireless 0x00A8") — the corrected locus. ✓
+  - architecture.md:286-293 is the openrazer prior-art bullet; :289-290 "Naga V2 Pro supported (PID 0x00A7/0x00A8) with a hard-coded transaction id 0x1f" describes openrazer's driver — stays true. The adjudication's correction is right; my round-1 locus was wrong. Acknowledge.
+
+  Now verify the four amendments:
+
+  1. Plan line 654 — matches my round-1 finding exactly (fires at :167-168 before SetState :172; synchronous dispatch; _armed; 4-miss edge; no restructure). Verified against BatteryMonitor.cs:167-172 and AppHost.cs:73 read in round 1. ✓ Landed.
+
+  2. Plan line 19 — hard rule 5 added; StartupRegistration.cs:24 uses scheduled-task with PT1M delay, consistent with "delayed scheduled task". ✓ Landed.
+
+  3. Plan line 818 — updates architecture.md:93, leaves :289. Verified both loci. ✓ Landed with correct citations. One nit: the amended sentence is placed under Task 8 Step 2 ("Update README wording") but the commit at plan line 842 (`git add ... README.md docs/images/`) doesn't include docs/architecture.md — Task 8 Step 5's git add would leave the architecture.md edit unstaged/uncommitted! Check: Step 5: `git add tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs README.md docs/images/`. The new bullet editing docs/architecture.md is in Step 2, but Step 5 doesn't stage it. NEW FINDING: task-internal commit omission. FIX: add docs/architecture.md to the git add in Task 8 Step 5.
+
+  4. Spec §4.2 (lines 83-87) amended to (int Pid, string Path) + ScanPids. ✓ Landed.
+
+  New findings:
+  A. Task 8 Step 5 commit omits docs/architecture.md (plan line 842 vs new edit at line 818). FIX.
+  B. Spec §4.4 line 117 still says probes "iterate RazerProtocol.SupportedMice" — plan Task 7 (plan lines 697, 712, 723, 741) iterates ScanPids. If someone implemented §4.4 literally per SupportedMice (per-model wired-then-wireless pairs), OpenLiveMouse would try V3 wired, then V3 wireless, then V2 wired — breaking the cross-model wired-beats-wireless rule that §4.2 (amended, line 84-85) mandates. Plan is correct; spec wording contradicts it. FIX: spec line 117 s/SupportedMice/ScanPids/. This is a spec fix, not a plan fix.
+  C. Minor residue: spec line 97 "(_wired becomes pid == model.WiredPid)" vs plan's `_wired = RazerProtocol.IsWiredPid(pid)` — semantically identical for the winning PID; observation only. Also spec line 92 says "EnsureOpen" where the method is EnsureConnectedAsync (RazerDevice.cs:60) — pre-existing naming slip, observation.
+
+  Verdict on amended plan: plan needs one-character-level fix (git add omission). That's a FIX. Also spec needs the §4.4 word fix, but verdict is on the plan. The git add omission is in the plan → FIX.
+
+• # Round 2 verification — amended plan + spec
+
+  ## Amendment 1 (claim 5 / false ordering rationale): **LANDED — PASS**
+
+  Plan line 654 now states the correct mechanism: `LowBatteryCrossed` fires at `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs:167-168` before `SetState` at :172, `AppHost.Dispatch` is a synchronous `Dispatcher.Invoke` (`src/NagaBatteryTray/AppHost.cs:73`), the handler reads the prior state, `_armed` guarantees that prior state is online, and the 4-miss edge (`BatteryMonitor.cs:153`) toasts the "Razer Naga" fallback. The pin not to restructure the event is recorded. Every line reference in the new parenthetical matches the source I read in round 1.
+
+  ## Amendment 2 (hard rule 5): **LANDED — PASS**
+
+  Plan line 19 adds "Hard rule 5: run-at-login stays the delayed scheduled task (`StartupRegistration.cs`) — no task touches it." Consistent with `src/NagaBatteryTray/Startup/StartupRegistration.cs:24` (`taskName = "NagaBatteryTray", delay = "PT1M"` — a delayed scheduled task) and with spec §5 line 138.
+
+  ## Amendment 3 (architecture.md locus): **LANDED — PASS; the adjudication's correction of my citation is right**
+
+  I accept the corrected citation. `docs/architecture.md:289-290` sits inside the openrazer prior-art bullet (begun at :286) and reads "Naga V2 Pro supported (PID `0x00A7`/`0x00A8`) with a **hard-coded transaction id `0x1f`**" — a statement about openrazer's driver that stays true after this pass. The sentence that actually goes stale is `docs/architecture.md:93`: "**wired `0x00A7` first, then wireless `0x00A8`**" describing our own `EnsureConnectedAsync` candidate order. Plan line 818 now targets :93 and explicitly exempts :289. Correct on both counts.
+
+  **However, the amendment introduced one new defect — see New finding 1.**
+
+  ## Amendment 4 (spec §4.2 tuple shape): **LANDED — PASS**
+
+  Spec lines 83-87 now specify `FindControlPaths` keeps `(int Pid, string Path)`, iterates `RazerProtocol.ScanPids`, and resolves name/link via `ModelNameForPid`/`IsWiredPid` at commit time, recorded as a debate amendment. This matches plan Task 2 (plan lines 228-230, 263-265) exactly.
+
+  ## New findings (with evidence)
+
+  1. **Task 8's commit omits the file its own Step 2 now edits — FIX.** Plan line 818 (added this round) instructs editing `docs/architecture.md:93` inside Task 8 Step 2, but Task 8 Step 5 (plan line 842) stages only `git add tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs README.md docs/images/`. The architecture.md edit would land in the working tree unstaged and never ride the branch, violating hard rule 4's spirit (docs on THIS branch, plan line 18). **Fix:** change plan line 842 to `git add tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs README.md docs/images/ docs/architecture.md`.
+
+  2. **Spec §4.4 still contradicts amended §4.4's own iteration source — FIX (spec, one word).** Spec line 117 says the probes "iterate `RazerProtocol.SupportedMice` instead of the two V2 constants." Amended §4.2 (spec lines 83-85) and every Task 7 edit (plan lines 697, 712, 723, 741) iterate the flat `RazerProtocol.ScanPids`. This is not cosmetic: `SupportedMice` is ordered per-model (V3 wired, V3 wireless, V2 wired, V2 wireless — spec lines 70-74), and a literal `SupportedMice` iteration in `OpenLiveMouse`/`ProfileSession.Open` would try the V3 *wireless* dongle before the V2 *wired* cable, breaking the cross-model wired-beats-wireless rule §4.2 mandates. The plan's `ScanPids` choice is correct; the spec sentence is stale. **Fix:** spec line 117, s/`SupportedMice`/`ScanPids`/ (and the following clause already covers deriving the label).
+
+  3. **Observation only, no action required:** spec line 97's parenthetical "(`_wired` becomes `pid == model.WiredPid`)" describes the same predicate the plan implements as `RazerProtocol.IsWiredPid(pid)` (plan line 229) — semantically identical for any PID drawn from `ScanPids`. Spec line 92 also says "`EnsureOpen`" where the method is `EnsureConnectedAsync` (`src/NagaBatteryTray/Hid/RazerDevice.cs:60`) — a pre-existing naming slip, not introduced by these amendments.
+
+  ## UNVERIFIED
+
+  - The "baseline was 256" test count (plan line 863) — still cannot run the suite.
+  - Hardware facts of spec §3 — taken as given per the brief; the amended files use them consistently (plan lines 109-110, 202-204).
+  - Source files (`BatteryMonitor.cs`, `AppHost.cs`, etc.) were not re-read this round; amendment 1's verification rests on round-1 reads of `BatteryMonitor.cs:167-172` and `AppHost.cs:73`, which the adjudication independently confirmed.
+
+  ## Verdict on the amended plan: **FIX**
+
+  All four adjudicated amendments landed as described, and the corrected `architecture.md` citation is verified right. Two small fixes remain before execution: stage `docs/architecture.md` in Task 8 Step 5 (plan line 842), and change one word in spec line 117 (`SupportedMice` → `ScanPids`) so the spec cannot be read to permit a probe scan order that violates its own §4.2. Neither touches the plan's architecture, task ordering, or any code snippet.
+
+To resume this session: kimi -r session_a5f1a984-10d4-40a5-b681-df9ee72654b0

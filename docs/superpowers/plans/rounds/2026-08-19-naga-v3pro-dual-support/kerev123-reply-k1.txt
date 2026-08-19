@@ -1,0 +1,291 @@
+• Let me read the plan, spec, and the cited repo files. Start with parallel reads.Now read the repo files: RazerDevice.cs, BatteryReading.cs, DeviceState.cs, BatteryMonitor.cs, AppHost.cs, TrayIconController.cs, Notifications.cs, DashboardWindow.xaml, PopupWindow.xaml, RazerProtocol.cs, ProbeCommand.cs, ProfileProbeCommand.cs, test files, InternalsVisibleTo.cs, DashboardScreenshotProbe.cs, DashboardViewModel.cs, PopupViewModel.cs.Now check: AppHost.cs:53 — the handler. BatteryMonitor.cs:167-168: LowBatteryCrossed is dispatched BEFORE SetState at line 172. Wait — order in ProcessReading: the crossing block at 158-170 dispatches LowBatteryCrossed, then line 172 SetState. So the handler reads _monitor.State.Model — but State isn't updated yet! The dispatched handler runs on the dispatcher thread, but _dispatch is `_app.Dispatcher.Invoke` — Invoke is synchronous. Wait: `_dispatch(() => LowBatteryCrossed?.Invoke(...))` — Dispatch uses Dispatcher.Invoke, synchronous, so it executes inline before SetState. So when the handler runs, `_monitor.State` is still the OLD state. Hmm — but actually if the mouse is online and crossing threshold, State was previously an Online state (since _armed requires percent > threshold earlier). So State.Model would be the model from a previous poll — correct model, presumably. But claim 5 says "event is raised via the monitor's dispatcher after SetState" — that's wrong; it's raised BEFORE SetState. The plan's parenthetical says "LowBatteryCrossed is dispatched, so State is already the online state that triggered it" — that's factually wrong about the immediate state, but practically State.Model would still be the model from the prior poll (which was also the same model, since threshold crossing implies mouse present). Edge case: armed across a model swap? Minor. But the plan's rationale is incorrect. The behavior is still safe: old State is online with correct model most of the time. Actually could State be Unknown when crossing? Crossing requires _armed, which is set on a present reading with percent > threshold, which also SetState Online. And crossing also SetState Online after dispatch. If between arming and crossing the state went Unknown (4 misses), _armed stays true... ProcessReading with !IsPresent returns early without disarming. So if the mouse disappears for 4+ polls (State → Unknown) then reappears at low percent with _armed still true: LowBatteryCrossed fires while State is Unknown → State.Model = null → toast says "Razer Naga - Battery at X%". Acceptable fallback, arguably. But the plan's stated justification ("State is already the online state that triggered it") is wrong since dispatch happens before SetState at line 172. This is a defect in plan accuracy but the outcome is benign-ish. Claim 5 asks to confirm or refute the actual order. The actual order: LowBatteryCrossed dispatched at BatteryMonitor.cs:167-168, SetState at :172 — so the event fires BEFORE the new state is set. Refute the claim's stated basis. The fallback covers it. Is this a FIX or PASS? Claim says "race-safe enough... check the actual order and confirm or refute." The claim's premise about order is wrong. The practical outcome: toast gets previous state's model, which in the normal path is identical (model doesn't change between polls). The model in State was set by the previous online poll, same model. Actually wait — the crossing reading r itself has r.Model; a cleaner fix would pass... the plan can't easily change. The claim should be FIX: correct the plan's comment, since State.Model at dispatch time is the prior poll's model (null only if never online). Actually is it even wrong in outcome? In the scenario where crossing happens, prior polls were online with same device — model same. Only the 4-misses-then-reappear scenario yields Unknown/null → fallback string. So functionally fine but the plan's justification is factually wrong. I'd mark claim 5: the mechanism holds in practice (State.Model equals the connected model from prior online polls), but the plan's stated ordering ("State is already the online state that triggered it") is false — LowBatteryCrossed dispatches at BatteryMonitor.cs:167-168 before SetState at :172. FIX: correct the comment; optionally pass r.Model through the event instead.
+
+  Now read the remaining files: DashboardWindow.xaml:21, PopupWindow.xaml:14, grep for "Naga V2 Pro" literals, ProbeCommand, ProfileProbeCommand, test files, InternalsVisibleTo, DashboardScreenshotProbe, DashboardViewModel, PopupViewModel.
+
+• Now the UI files, diagnostics, and test files.
+
+• The four literals check out: DashboardWindow.xaml:21, PopupWindow.xaml:14, TrayIconController.cs:69-70, Notifications.cs:10. Note: README.md:5, 30-31, 182 also have "V2 Pro" but Task 8 handles README. CLAUDE.md:4 and docs/architecture.md:289 mention V2 Pro — CLAUDE.md is user-settled, architecture.md not covered by plan; spec §4.5 says "README branding beyond..." — architecture.md isn't README. Is docs/architecture.md:289 a user-visible hardcoded model string? It's documentation. The claim says "no fifth user-visible literal exists" — user-visible UI literal; architecture.md is a doc. The plan doesn't update docs/architecture.md. Hmm — spec doesn't require it either. Claim 3 PASS with note.
+
+  Now read ProbeCommand.cs, ProfileProbeCommand.cs relevant lines, test files, InternalsVisibleTo, DashboardScreenshotProbe, DashboardViewModel, PopupViewModel.Good. Now check for other PID loops in diagnostics — grep for MousePidWired/MousePidWireless across repo. Also check test files and InternalsVisibleTo.Now check InternalsVisibleTo presence, DashboardScreenshotProbe, DashboardViewModel header region and ApplyState, PopupViewModel, and whether DashboardViewModelTests uses `ApplyState` public method. Also check DashboardScreenshotProbe for DeviceState.Online calls.Notes:
+
+  - InternalsVisibleTo.cs exists at src/NagaBatteryTray/InternalsVisibleTo.cs. Verify its content targets the test assembly.
+  - PopupWindow has ApplyState? The probe calls `pop.ApplyState(DeviceState.Online(...))` at DashboardScreenshotProbe.cs:63. PopupWindow.xaml.cs presumably has ApplyState that calls vm.Apply. Fine — plan says `pop.ApplyState(DeviceState.Online(95, charging: true, wired: true, model: "Naga V3 Pro"))`.
+  - Check DashboardViewModel header region (~100-113), ApplyState, Set method existence. Also check the DashboardViewModel constructor signature matches NewVm and probe usage.
+  - Check InternalsVisibleTo content.
+  - Check whether other tests call `Notifications.LowBattery(pct)` — Task 6 changes signature; only AppHost calls it? Grep.
+  - Check FakeRazerDevice and existing BatteryReading constructions.
+  - Check Task 9 claim "baseline was 256" tests.
+  - Check PopupWindow.xaml.cs ApplyState.Notes so far:
+
+  Claim 1: Scan-order. RazerDevice.cs:90 currently iterates wired 0x00A7 then wireless 0x00A8. Plan Task 1 ScanPids = [0x00E7, 0x00A7, 0x00E8, 0x00A8] — wired before wireless, V3 before V2. Battery confirmation at RazerDevice.cs:74. Claim cites :71-81 — the battery-query confirm is at line 74. Close enough; the claim said "71-81" range which includes it. PASS.
+
+  One subtlety: `_model` in RazerDevice — set in EnsureConnectedAsync, but never reset in CloseHandle. If device disconnects and reconnects to nothing, _model stays stale — but ReadAsync only uses _model when a reading is produced (IsPresent true), in which case EnsureConnectedAsync succeeded and set _model. OK. Also note plan sets `_model` field but never resets; harmless.
+
+  Also: BatteryMonitor ProcessReading uses r.Model → DeviceState. When !IsPresent → DeviceState.Unknown (Model null). Fine.
+
+  Claim 2: Record extensions non-breaking. All existing constructions positional with trailing optional params — check `DeviceState.Online(87, true, false)` positional — works with new optional 4th param. `new BatteryReading(pct, charging, true, now)` works. BatteryReading.Absent uses `new(0, false, false, now)`. PASS. Also check equality: DeviceState is record struct — adding Model field changes equality! SetState uses `if (next == State) return;` — adding Model to the record means state changes when model changes — fine, desirable. BatteryReading equality used anywhere in tests? Possibly. Minor.
+
+  Claim 3: four literals verified: DashboardWindow.xaml:21, PopupWindow.xaml:14, TrayIconController.cs:69-70, Notifications.cs:10. Note TrayIconController literals are at :69 and :70 (claim says 69-70 ✓). Any other user-visible? README is handled in Task 8. IconRenderer? Check IconRenderer for strings — grep showed no "Naga V2 Pro" in IconRenderer. What about "Naga" more broadly, e.g. tray icon initial text or window title? DashboardWindow Title="Razer Naga Companion" (settled app name). Also check PopupWindow.xaml.cs ApplyState exists — grep "ApplyState" in Ui. Also "no response" strings. Let me grep for "Naga" in src/Ui to be thorough.
+
+  Claim 4: PID loops verified at ProbeCommand.cs:18 (wireless,wired order), :53, :548, ProfileProbeCommand.cs:445, label :867. Dock loop at ProbeCommand.cs:86 untouched. But wait — plan Task 7 changes Run loop at :18 to ScanPids order [wired V3, wired V2, wireless V3, wireless V2], changing existing probe order from wireless-first to wired-first. Fine. Also are there other loops using literal PIDs like 0x00A7? Grep for 0x00A7/0x00A8 in src.
+
+  Claim 5: refuted ordering — LowBatteryCrossed dispatched at BatteryMonitor.cs:168 BEFORE SetState at :172. Note in tests dispatch is synchronous (a => a()), and in AppHost Dispatch = Dispatcher.Invoke (synchronous on UI thread, but Invoke from background thread blocks until UI executes — still before SetState executes). So `_monitor.State.Model` in the handler reads the PREVIOUS state. In the normal crossing path, previous state is Online with same model (armed requires a prior present poll above threshold → SetState Online ran). So the toast gets the right model from the prior poll. Edge: 4+ misses → State=Unknown (Model null) → then reappear at low % with _armed still true → toast "Razer Naga". Fallback covers. So mechanism is safe in practice, but the plan's justification "State is already the online state that triggered it" is factually false. Also note the claim said "event is raised ... after SetState (BatteryMonitor.cs:167-172)" — the line range actually shows dispatch at 168 before SetState at 172. So refute the premise; outcome still acceptable. Verdict for claim 5: the plumbing works but the plan's stated ordering is wrong — FIX the comment (or pass model via event). Since the toast will show correct model in all realistic paths, it's cosmetic. I'll say FIX (comment correction) — the instructions demand precision.
+
+  Claim 6: Test-code accuracy.
+  - RazerProtocolTests: class exists at :4 (claim says :3 — line 3 is blank; class declared at line 4). Minor.
+  - BatteryMonitorTests NewMonitor at :8-16 ✓, ProcessReading internal ✓ — accessible via InternalsVisibleTo ✓. Test uses `m.ProcessReading(new BatteryReading(...))` — BatteryReading constructor with named args IsWired:/Model: — named arguments must match parameter names exactly: `IsWired` and `Model` — record positional params are named IsWired, Model ✓. Also `m.State.Model` ✓.
+  - DashboardViewModelTests NewVm at :12-13 ✓ — `new(source ?? new AppSettings(), runAtStartup: false, NoWrite, NoRawWrite)` ✓. Test uses vm.ApplyState(DeviceState.Online(50, charging: false, wired: true, model: "Naga V3 Pro")) — DeviceState.Online signature (int percent, bool charging, bool wired = false, string? model = null) ✓. vm.ModelName produced ✓.
+  - PopupViewModelTests constructs `new PopupViewModel()` directly ✓ (line 10 existing). vm.Apply ✓.
+  - TrayTooltipTests: Tooltip becomes internal static; InternalsVisibleTo.cs exists at src/NagaBatteryTray/InternalsVisibleTo.cs targeting "NagaBatteryTray.Tests" ✓. But wait — test file asserts `TrayIconController.Tooltip(s)` returns "Naga V3 Pro - 72% (charging)". Tooltip is in TrayIconController which references System.Windows.Forms/Application? TrayIconController constructor takes BatteryMonitor, but Tooltip is static, fine. But does referencing TrayIconController from tests require WinForms? Test project — does it reference the WPF project and use WindowsDesktop SDK? Existing tests already use PopupViewModel (WPF) and DashboardWindow (DpiPillInteractionTests), so yes. Tooltip test calls static method only — but note `Tooltip(DeviceState.Unknown)` expects "Razer Naga - no response": DeviceState.Unknown has Model null → fallback ✓. And `DeviceState.Online(50, charging: false)` → model null → "Razer Naga - 50%" ✓ matches plan implementation.
+  - Claim says RazerProtocolTests class at :3 — actually class at :4, but "appends to an existing class" stands. Minor line nit, not a defect.
+
+  One check for Task 6 Step 2: "Expected: compile error — Tooltip is private." True, private static → test won't compile ✓.
+
+  Claim 7: spec coverage mapping. §2 decisions → Global Constraints ✓; §3 hardware baseline → Task 1 ✓; §4.1 → Task 1 ✓; §4.2 → Task 2 ✓; §4.3 → Tasks 2-6, 8 ✓; §4.4 → Task 7 ✓; §5 hard-rule audit → Global Constraints (rules 1,2,3,4,6 — rule 5 startup registration not mentioned in plan Global Constraints! Plan lists rules 1,2,3,4,6 but not rule 5. Spec §5 mentions "Startup registration untouched (rule 5)". Plan doesn't touch startup files, so it's satisfied by omission; minor.); §6 testing → tasks' TDD steps + Task 9 acceptance ✓; §7 rollout → Task 1 step 1 (branch) + Task 9 ✓. §4.5 out of scope ✓. PASS, noting rule 5 not explicitly listed but nothing touches startup.
+
+  Claim 8: DashboardScreenshotProbe — two online fixture calls at :63 and :80 ✓; offline at :95 uses DeviceState.Unknown ✓. Other probe fixtures building online DeviceState? DpiPillInteractionTests.cs:47 uses DeviceState.Online — but that's not the screenshot probe; claim says "no other probe fixture builds an online DeviceState" — within DashboardScreenshotProbe.cs, only :63, :80, :95. ✓. But DpiPillInteractionTests:47 — plan Task 4 step 4 says DpiPillInteractionTests must stay green; its online state has no model → ModelName "Razer Naga" — test asserts DPI pill behavior, not header. Should stay green ✓.
+
+  Wait — claim 8: "Verify no other probe fixture builds an online DeviceState." Within the probe file, confirmed. DpiPillInteractionTests is a different test file. PASS.
+
+  Now additional defects to check:
+
+  1. Task 4 test `Header_falls_back...`: after `vm.ApplyState(DeviceState.Unknown)`, ModelName = s.Model ?? "Razer Naga" → Unknown.Model is null → "Razer Naga" ✓. Then online without model → "Razer Naga" ✓.
+
+  2. DashboardViewModel ApplyState — plan adds `ModelName = s.Model ?? "Razer Naga";` after DeviceOnline line ✓. Compiles.
+
+  3. Task 5: PopupViewModel — plan says "in Apply, inside the Unknown early-return block add ModelName = "Razer Naga";" ✓ and online path after PercentText ✓. Compiles. Note PopupViewModel's Set — ObservableObject base, `Set(ref _modelName, value)` ✓ matches existing idiom.
+
+  4. Task 6 TrayTooltipTests: test for unknown expects "Razer Naga - no response" — but plan's Tooltip implementation for Unknown uses `$"{s.Model ?? "Razer Naga"} - no response"` — DeviceState.Unknown.Model null → ✓.
+
+  5. Task 2's doc comment edit (a): says "mi_00 on V2, mi_03 on V3" — spec §3 says V3 control collection on MI_03, V2 on MI_00 ✓ consistent.
+
+  6. Potential compile issue in Task 1: `ScanPids { get; } = { ... }` — collection initializer on a property with getter-only auto-property: `public static int[] ScanPids { get; } = { MousePidV3Wired, ... };` — is that valid C#? Collection initializer syntax on auto-property initializer: yes, `public static int[] ScanPids { get; } = { ... };` is valid C# 6+ (initializes the array via collection initializer, calling Add? No — for arrays, `{ get; } = { a, b }` ... hmm. Collection initializer requires the type to implement IEnumerable and have Add — arrays don't have an accessible Add method... Actually array initializer in a property initializer: `public static int[] P { get; } = { 1, 2, 3 };` — Is this legal? Collection initializers call Add on each element; arrays implement IList with Add that throws, but for array creation the compiler special-cases: `int[] a = { 1, 2, 3 }` is an array initializer, allowed where an array is created. In `= { 1, 2, 3 }` for a property of array type, this is treated as array creation initializer (spec: an array initializer can be used in a variable/property initializer where the type is an array type). Yes — C# allows `int[] P { get; } = { 1, 2, 3 };`? Let me think. Array initializer syntax `{ 1, 2, 3 }` without `new int[]` is permitted in array variable declarations: `int[] a = { 1, 2, 3 };`. For property initializers... I believe it's also allowed since C# treats the initializer as an array creation expression context. Actually, yes: C# spec section on array initializers — "An array initializer may be specified in a field declaration, local variable declaration, ... or as part of an array creation expression." Property initializers? I recall that `public int[] P { get; } = { 1, 2, 3 };` does compile in modern C# (it's equivalent to a field-like initializer context). Hmm, I want to be careful. Let me recall: the spec says an array initializer can occur in "variable initializers" which include field initializers and... Property initializers were added in C# 6, and `= { 1, 2, 3 }` for array-typed auto-property — I'm fairly confident this compiles. E.g., `public static int[] Foo { get; } = { 1, 2, 3 };` — yes, I've seen this compile. Actually there's a subtlety: collection initializer vs array initializer. For a property of type `int[]`, `= { 1, 2, 3 }` is parsed as an array initializer (only valid for array types in initializer context). Roslyn accepts this. Yes, it compiles. Also the existing test asserts `Assert.Equal(new[] {0x00E7,...}, RazerProtocol.ScanPids)` — xUnit Assert.Equal for arrays: `Assert.Equal<T>(IEnumerable<T>, IEnumerable<T>)` works ✓.
+
+  7. Task 7 (a): the replacement banner line references `max` variable — exists at ProbeCommand.cs:22-23 ✓, `Mi(dev.DevicePath)` ✓ exists. OK.
+
+  8. Plan Task 7 says "The doc comment above OpenLiveMouse ... stays accurate" — comment at :543-545 says "wired PID first, then wireless" — accurate with ScanPids ✓.
+
+  9. Task 3's test: `m.ProcessReading(new BatteryReading(70, false, true, DateTimeOffset.Now, IsWired: true, Model: "Naga V3 Pro"))` — positional then named args; C# allows named after positional if in correct position ✓ (named args in position). Fine.
+
+  10. BatteryMonitor dispatch order for LowBatteryCrossed — addressed in claim 5.
+
+  11. Missing: spec §4.3 says "The UI screenshot probe's fake states carry a model name" — Task 8 ✓. Spec §1 success criterion: "--probe, --probe-dpi, --probe-buttons, --probe-profile find whichever supported mouse" — --probe-buttons uses OpenLiveMouse (ProbeCommand.cs:548) ✓ covered; --probe uses Run :18 ✓; --probe-dpi RunDpi :53 ✓; --probe-profile ProfileSession.Open :445 ✓.
+
+  12. What about `--probe-buttons` tid: ButtonsTid fixed? Not relevant.
+
+  13. Check whether anything else hardcodes model-specific UI: MouseStageView? Tooltip binding? TrayIcon initial Text? TrayIcon class — check for hardcoded tooltip default. Grep "Naga" in src.
+
+  14. Task 9 Step 1: "baseline was 256 + ~10 added" — count new tests: 3 (Task1) + 1 (Task3) + 2 (Task4) + 2 (Task5) + 3 (Task6) = 11. "~10" fine.
+
+  15. DeviceState equality change: `SetState` `if (next == State) return;` — with Model added, going from V2 to V3 at same percent triggers StateChanged ✓ desired.
+
+  16. IconRendererTests use DeviceState.Online(percent, charging, false) — still compile ✓.
+
+  17. Task 6 also: TrayIconController.Tooltip test expects for charging online: "Naga V3 Pro - 72% (charging)" — implementation `$"{s.Model ?? "Razer Naga"} - {s.Percent}%{(s.Charging ? " (charging)" : "")}"` ✓.
+
+  18. Does any other caller of `Tooltip` exist? It's private→internal; used at :63 `_icon.Update(next, Tooltip(state))` ✓.
+
+  19. Notifications.LowBattery signature change — only AppHost:53 calls it ✓ (grep confirmed).
+
+  20. Check PopupWindow.xaml.cs has ApplyState and its DataContext = vm (so {Binding ModelName} works). Read PopupWindow.xaml.cs quickly.
+
+  21. Check DashboardWindow DataContext: constructor DashboardWindow(vm) presumably sets DataContext — sibling bindings exist ✓.
+
+  22. Check FakeRazerDevice — Task tests: NewMonitor uses FakeRazerDevice, fine.
+
+  23. One more potential issue: plan Task 2 edit (c) replaces `_wired = pid == RazerProtocol.MousePidWired;` — that line is at RazerDevice.cs:77 within the `if (tid != 0 && ...)` block ✓ matches.
+
+  24. Task 2 (e) replacement of FindControlPaths loop header: plan replaces `foreach (int pid in new[] { RazerProtocol.MousePidWired, RazerProtocol.MousePidWireless })` at :90 with ScanPids ✓.
+
+  25. Grep for other "Naga V2 Pro" user-visible in src — ButtonBinding.cs:29 is a code comment (not user-visible), csproj:29 comment. RazerDevice.cs:12 comment (plan updates). So claim 3's "user-visible" holds. PASS.
+
+  26. Check "Razer Naga" occurrences already existing: DashboardWindow Title "Razer Naga Companion" (settled). Any place where "Razer Naga" fallback would conflict? no.
+
+  Now check PopupWindow.xaml.cs and grep for hardcoded PIDs 0x00A7/0x00A8 literals elsewhere in src (e.g., Program.cs arg routing, DeviceChangeWatcher).All user-visible "Naga V2 Pro" occurrences are exactly the four enumerated. The rest are app-name "Razer Naga Companion" (settled) or "Naga Battery Tray" probe banners (app name-ish, not model) or comments.
+
+  Now check a couple more things:
+  - FakeRazerDevice — does it implement IRazerDevice and produce BatteryReading with IsWired? Not needed.
+  - BatteryMonitorTests: uses `m.ProcessReading` internal ✓.
+  - Check tests csproj references the main project and whether Tooltip test would need `using` — plan's TrayTooltipTests has usings NagaBatteryTray.Monitoring, NagaBatteryTray.Ui, Xunit ✓. DeviceState in Monitoring ✓, TrayIconController in Ui ✓.
+
+  - Claim 5 details: BatteryMonitor.cs:167-168 dispatches LowBatteryCrossed; line 172 SetState. In production, Dispatch = _app.Dispatcher.Invoke (AppHost.cs:73) — synchronous. So handler at AppHost.cs:53 executes before SetState(:172). Therefore _monitor.State is the previous state. Previous state at crossing time: armed implies earlier present poll > threshold → SetState(Online) executed then (BatteryMonitor.cs:172). So State.Model holds the model from the previous poll — same physical mouse, correct in all realistic paths. Only after 4+ consecutive misses (State → Unknown with Model null, BatteryMonitor.cs:153) followed by a low reading while _armed is still true does the toast read null → "Razer Naga". So claim 5's premise ("raised after SetState") is REFUTED, but the mechanism is safe enough in practice. Verdict: claim 5 — the claim says "race-safe enough... check the actual order and confirm or refute." I refute the stated order; the safety conclusion survives via prior-state model + null fallback, but the plan's parenthetical justification at plan:653 is factually wrong. I'll mark FIX (correct the plan's comment; no code change required) — or ESCALATE? It's a documentation inaccuracy with benign behavior; FIX with the specific fix.
+
+  Wait — actually, is there a subtle real bug? Since crossing is dispatched before SetState, if this is the FIRST online state ever (can't be — crossing requires _armed, set only on a present reading which also sets Online state). So State is never Unknown-with-null at crossing unless the 4-miss scenario. Fine.
+
+  - Claim 2: also verify BatteryReading.Absent unchanged and record equality impacts. Check BatteryMonitorTests use of equality on BatteryReading? Also FakeRazerDevice — does it produce readings with Model? FakeRazerDevice returns readings without model → DeviceState.Model null → UI falls back "Razer Naga" in tests — consistent with tests.
+
+  - One more thing: Task 6 changes Tooltip to internal static — test class TrayTooltipTests in global namespace ✓ consistent with other test files (no namespace).
+
+  - Claim 6 subpoint: "RazerProtocolTests appends to an existing class (tests/.../RazerProtocolTests.cs:3)" — class declared at line 4; claim cites :3. Minor citation slip, not a plan defect. The test snippet compiles: uses Assert.Equal(new[]{...}, RazerProtocol.ScanPids) ✓.
+
+  - Claim 6: "BatteryMonitorTests uses the existing NewMonitor/ProcessReading idiom (:8-16)" ✓ verified.
+
+  - DashboardViewModelTests NewVm (:12-13) ✓.
+
+  - PopupViewModelTests constructs directly (:8-10 claim; actual :10) ✓.
+
+  - InternalsVisibleTo present at src/NagaBatteryTray/InternalsVisibleTo.cs:3 ✓.
+
+  Now, defects not covered by claims:
+
+  D1. Plan Task 9 Step 1 expects "baseline was 256 + ~10 added" — new tests: 3+1+2+2+3 = 11 → ~267. Can't verify baseline 256 without running; note as unverifiable but "~10" ≈ 11 fine. Not a defect.
+
+  D2. Task 4 test `Header_falls_back...` uses `vm.ApplyState(DeviceState.Unknown)` — DeviceState.Unknown is a property ✓.
+
+  D3. Task 2 (d) — plan replaces ReadAsync return at RazerDevice.cs:45 ✓ matches exactly.
+
+  D4. Task 2 (c) — line 77 ✓ matches.
+
+  D5. Task 2 (b) — field comment at :22 matches plan's old text ✓. Plan adds `_model` field. Note: `_model` is never cleared in CloseHandle(); stale value used only when IsPresent readings are produced, which requires a successful EnsureConnectedAsync that sets _model. No defect. Actually wait — subtle: `BatteryReading.Absent` returns Model null ✓.
+
+  D6. Task 1 code: `public static int[] ScanPids { get; } = { ... };` — array initializer in property initializer. Is this valid C#? Let me think hard. Spec (C# 6+): array_initializer can appear in a variable initializer. Property initializers: grammar for property_declaration with initializer: `PropertyDeclaration ... { get; } = expression;` — hmm, actually the initializer after an auto-property is a variable_initializer? The grammar: `property_initializer: '=' variable_initializer ';'` — I believe C# spec defines it as variable_initializer, which permits array_initializer. Testing memory: `public int[] Numbers { get; } = { 1, 2, 3 };` — I'm fairly certain this compiles (Roslyn treats property initializers like field initializers, and field initializers accept array initializer syntax). Yes, this is valid. Not a defect. Also `SupportedMice` uses `{ new(...), new(...) }` collection/array initializer for MouseModel[] ✓.
+
+  D7. Task 7 (a) banner: uses `max` — declared at :22 ✓; `Mi(dev.DevicePath)` — Mi method exists (used at :26) ✓. `RazerProtocol.ModelNameForPid(pid)` returns string? — interpolated fine.
+
+  D8. Task 7 (b): RunDpi loop — after changing to ScanPids, order changes wireless-first→wired-first; harmless for a probe.
+
+  D9. Task 7 (b) label: ProfileCapture uses `RazerProtocol.ModelNameForPid(pid) ?? "unknown"` — pid comes from ProfileSession.Pid which is from ScanPids, so never unknown; fine.
+
+  D10. Spec §4.2 says `FindControlPaths` yields `(MouseModel Model, bool Wired, string Path)` — plan instead yields (Pid, Path) and resolves via IsWiredPid/ModelNameForPid. Deviation from spec but functionally equivalent; plan internal consistency fine. Not a defect worth flagging? The spec is a design doc; plan may adapt. Mention as observation, not FIX.
+
+  D11. Task 3: DeviceState replacement — plan replaces entire record. Note `DeviceState.Unknown` remains ✓. Record equality: SetState guard `next == State` now includes Model — a model swap at same percent triggers StateChanged → UI updates ✓ good.
+
+  D12. Missing test coverage: no test that BatteryMonitor passes Model through when reading is absent→Unknown (trivial). Spec §6 lists "tooltip text builder" — TrayTooltipTests ✓. Dashboard fallback ✓ popup ✓. Model-table lookup ✓ scan-order property ✓. BatteryReading/DeviceState plumbing through BatteryMonitor ✓ (Task 3 test). All spec §6 unit items covered.
+
+  D13. Task 8 Step 3: regenerating screenshots — probe gated; fine. README line addition fine.
+
+  D14. Global Constraints omit hard rule 5 (startup registration untouched) — spec §5 lists it. The plan doesn't touch StartupRegistration, so the invariant is preserved by omission; flag as a minor gap in the Global Constraints list (not a task defect). I'll note it.
+
+  D15. Claim 5 residual: AppHost Dispatch is Dispatcher.Invoke — synchronous; handler runs inline. If called from UI thread already? ProcessReading runs on poll thread (timer) or read-lock paths; Invoke is fine.
+
+  D16. One more: Task 6 test expects `Tooltip(DeviceState.Unknown)` == "Razer Naga - no response". Current behavior for Unknown shows "Naga V2 Pro - no response"; new uses Model fallback ✓.
+
+  D17. Task 4: plan adds backing field `_modelName` "beside the other header fields" — header fields at DashboardViewModel.cs:43 area; property in header region :100-104 ✓; `ModelName = s.Model ?? "Razer Naga";` after `DeviceOnline = ...` line (:108) ✓.
+
+  D18. Check IconRenderer.Render doesn't embed model name — grep showed no "Naga" in IconRenderer ✓ (grep for "Naga" in src showed none in IconRenderer.cs).
+
+  D19. TrayIcon initial tooltip at creation (before first Update)? TrayIcon.cs — Show() calls Update(_monitor.State) which sets tooltip ✓.
+
+  D20. Tests project: does `TrayTooltipTests` need `[Collection("wpf-ui")]`? Tooltip is a pure static string builder — no WPF. TrayIconController static method references only DeviceState — no WPF init needed. But loading the TrayIconController type — its assembly references WinForms; fine, other tests already touch Ui types.
+
+  Hmm — one potential issue: calling a static method on TrayIconController triggers the type's static cctor — none. Fine.
+
+  D21. Plan Task 2 Step 3 expects "PASS — no existing test knew about the trailing optional parameter". Check existing tests construct BatteryReading with positional args (BatteryMonitorTests.cs:18-19 `new(pct, charging, true, DateTimeOffset.Now)`) ✓ compiles.
+
+  D22. Record equality of BatteryReading — tests compare readings? Possibly FakeRazerDevice tests use Assert.Equal on readings — if any test compares a reading constructed without Model to one from device... device (fake) also null. Fine.
+
+  Also check FakeRazerDevice quickly? It's used with Enqueue; readings built in tests. Not needed.
+
+  D23. Spec §4.3 fallback: "offline or model unknown: Razer Naga" — Task 4/5/6 implement ✓. Notifications toast fallback ✓.
+
+  D24. Task 6's handler `_monitor.State.Model` — covered in claim 5.
+
+  D25. Task ordering: Task 1 before 2 (consumes ScanPids) ✓; 2 before 3 (BatteryReading.Model) ✓; 3 before 4-6 (DeviceState.Model) ✓; 4-6 before 8 (ModelName bindings for screenshots) ✓; 7 independent ✓; 9 last ✓. No ordering breaks.
+
+  D26. One more check: Task 1 test `IsWiredPid(0x00A4)` — dock — implementation iterates SupportedMice wired pids {0x00E7, 0x00A7} ✓ false for dock ✓.
+
+  D27. Verify plan Task 1's "Consumes: existing constants" — SupportedMice V3 row uses literal `MousePidV3Wired` constants ✓ defined.
+
+  D28. Plan's task 1 step 2 test references RazerProtocol.ScanPids as int[] — Assert.Equal(new[]{...}, ScanPids) — xUnit generic Assert.Equal<T>(IEnumerable<T> expected, IEnumerable<T> actual) ✓.
+
+  Now, is there anything about DashboardViewModelTests line 434 `vm.ApplyState(DeviceState.Online(87, true, false))` — still compiles with optional model ✓.
+
+  DpiPillInteractionTests:47 — compiles ✓; stays green because header binding not asserted. But — wait: DpiPillInteractionTests creates a real DashboardWindow? It renders real window (collection "wpf-ui"). After Task 4, the header TextBlock binds ModelName. DataContext set? DashboardWindow(vm) constructor presumably sets DataContext. Sibling bindings already work (HeaderSubtitle). So binding resolves ✓.
+
+  One more possible defect: Task 4's XAML replacement — the TextBlock previously had no x:Name; binding needs DataContext — DashboardWindow.xaml.cs sets DataContext = vm presumably. Sibling HeaderSubtitle binding proves it (plan note) ✓.
+
+  Claim-by-claim verdicts:
+
+  1. PASS. RazerDevice.cs:90 wired-then-wireless; plan ScanPids [E7,A7,E8,A8] wired-first both models, V3 first. Confirmation query at RazerDevice.cs:74 (claim cited 71-81, includes it). Plan:267 correctly says no new logic. Minor: claim cites FindControlPaths at :88-97 ✓ accurate.
+
+  2. PASS. Trailing optional params; existing call sites (BatteryMonitorTests.cs:19, DashboardViewModelTests.cs:434,445,447, IconRendererTests, DpiPillInteractionTests.cs:47, PopupViewModelTests.cs:11,21, DashboardScreenshotProbe.cs:63,80,95) all compile unchanged. Only edits needed: BatteryMonitor.cs:172 and UI tasks ✓.
+
+  3. PASS. Grep confirms exactly four user-visible literals. Note: README.md:5,30-31,182 and docs/architecture.md:289 also say "V2 Pro"; README handled by Task 8 Step 2; architecture.md not covered by plan — spec §5/rule 4 only requires README + screenshots. docs/architecture.md:289 describes PID support "Naga V2 Pro supported... hard-coded" — after this change that doc becomes stale. Is that a defect? Spec doesn't require architecture.md update. I could raise as a minor observation (ESCALATE? no). I'll note as an observation under claim 3 or as additional defect — minor, optional. The instructions: "raise any plan defect the claims miss". A stale architecture doc is a real but minor doc-drift; plan's Global Constraint rule 4 says README + screenshots only. I'll flag as a minor FIX-optional note, or just note it. I'll list it as a minor defect: docs/architecture.md:289 will be stale; recommend a line edit in Task 8. Not required by spec — I'll mark it as an observation, verdict FIX (optional one-line addition to Task 8). Hmm, careful not to manufacture objections. The spec §4.5 says "README branding beyond..." out of scope; architecture.md isn't branding, it's technical doc that will be factually wrong ("hard-coded PID"). I'll flag it as a minor FIX suggestion.
+
+  4. PASS. Grep over src confirms the five sites enumerated are all MousePid loops; dock loop ProbeCommand.cs:86 untouched ✓ (plan:21 "Do not touch DockPid"; Task 7 edits listed don't include it).
+
+  5. Refute the ordering premise: LowBatteryCrossed dispatches at BatteryMonitor.cs:167-168, SetState runs after at :172. AppHost Dispatch is synchronous Dispatcher.Invoke (AppHost.cs:73), so the handler at AppHost.cs:53 (post-change) reads the PREVIOUS State. In practice safe: crossing requires _armed (set at :162 on a present reading that already ran SetState(Online) at :172), so State.Model holds the connected model; only after 4+ misses (State → Unknown, :153) with _armed still true does it yield null → "Razer Naga" fallback. FIX: correct the plan's parenthetical (plan:653) — State is the PRIOR online state, not "already the online state that triggered it"; optionally pass r.Model through the event instead of reading State.
+
+  6. PASS with a line nit (RazerProtocolTests class at :4 not :3; trivial). All idioms verified; InternalsVisibleTo at src/NagaBatteryTray/InternalsVisibleTo.cs:3 targets NagaBatteryTray.Tests ✓; Tooltip internal reachable ✓. Also verify test compile: BatteryMonitorTests.cs:11 shows dispatch is synchronous `a => a()` so ProcessReading asserts immediate ✓.
+
+  Wait — one compile check on Task 3 test: `new BatteryReading(70, false, true, DateTimeOffset.Now, IsWired: true, Model: "Naga V3 Pro")` — named args after positional ✓. And `m.State.Model` ✓.
+
+  Also Task 6 test: `TrayIconController.Tooltip(DeviceState.Unknown)` — expects "Razer Naga - no response" ✓ per implementation.
+
+  7. PASS. Mapping verified; note rule 5 absent from plan Global Constraints (spec §5 includes it) — preserved by omission since no task touches StartupRegistration; minor gap.
+
+  8. PASS. DashboardScreenshotProbe.cs:63, :80, :95 verified; no other fixture in that file builds online DeviceState. (DpiPillInteractionTests.cs:47 builds one but is not the screenshot probe and asserts DPI, not header.)
+
+  Overall verdict: FIX — due to claim 5's factually wrong justification (comment fix only) and optionally the architecture.md staleness. Hmm — is claim 5's issue enough for overall FIX? The claim itself is "race-safe enough" — I confirm safety, refute stated order. The plan would produce correct behavior; the plan's explanatory comment is wrong. A plan with a wrong rationale comment is a defect worth fixing (the reviewer brief says code in plan that breaks tests etc.). I'll give overall FIX with the specific small fixes: (a) correct plan:653 parenthetical; (b) optionally add docs/architecture.md:289 update to Task 8; (c) add hard rule 5 to Global Constraints for completeness. All minor.
+
+  Also double-check claim 1's assertion that plan preserves "wired-beats-wireless": ScanPids order [V3W, V2W, V3wireless, V2wireless] ✓.
+
+  And claim 4: "the loops ... are all the mouse-PID iteration sites" — grep for GetHidDevices to be thorough? There could be loops over TransactionIdProbeSet, but those aren't PID loops. Also check ProfileProbeCommand for other GetHidDevices uses. Grep GetHidDevices.
+
+• One more sweep for any missed PID-enumeration sites before finalizing.
+
+• I have all evidence. Write the review. (TodoList not needed; work is done — final answer now.)
+
+• All evidence gathered. Here is the review.
+
+  # Review: 2026-08-19 Naga V3 Pro dual-support plan
+
+  ## Claim 1 — Scan-order correctness: **PASS**
+
+  Verified. `src/NagaBatteryTray/Hid/RazerDevice.cs:90` currently iterates `new[] { RazerProtocol.MousePidWired, RazerProtocol.MousePidWireless }` (0x00A7 then 0x00A8), and the plan's `ScanPids = [0x00E7, 0x00A7, 0x00E8, 0x00A8]` (plan line 39, implemented at plan lines 126-127) keeps every wired PID ahead of every wireless PID with V3 before V2 within each link. The battery-query confirmation exists at `src/NagaBatteryTray/Hid/RazerDevice.cs:74` (`if (tid != 0 && await QueryAsync(tid, RazerProtocol.CommandIdBattery, ct) is not null)`), inside the cited :71-81 range, and correctly rejects a stale receiver — so plan line 267's "do not add any new logic" is sound. The 91-byte selector (`RazerDevice.cs:95`, `GetMaxFeatureReportLength() == BufferLength`) matches spec §3's "never key on interface number" (spec lines 40-42).
+
+  ## Claim 2 — Record extensions are non-breaking: **PASS**
+
+  Verified. `src/NagaBatteryTray/Hid/BatteryReading.cs:3` and `src/NagaBatteryTray/Monitoring/DeviceState.cs:5` both gain a trailing `string? Model = null`. Every existing construction is positional and compiles unchanged: `tests/NagaBatteryTray.Tests/BatteryMonitorTests.cs:18-19`, `tests/NagaBatteryTray.Tests/DashboardViewModelTests.cs:434,445,447`, `tests/NagaBatteryTray.Tests/IconRendererTests.cs:14,32,50,68,99,118`, `tests/NagaBatteryTray.Tests/DpiPillInteractionTests.cs:47`, `tests/NagaBatteryTray.Tests/PopupViewModelTests.cs:11,21`, `tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs:63,80,95`. The only production call site needing an edit is `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs:172` (Task 3). Side benefit the plan doesn't mention: `SetState`'s equality guard (`BatteryMonitor.cs:177`) will now fire `StateChanged` on a same-percent model swap — desirable, not a break.
+
+  ## Claim 3 — Hardcoded model strings: **PASS** (with one doc-drift note, below)
+
+  Repo-wide grep confirms exactly four user-visible "Naga V2 Pro" literals: `src/NagaBatteryTray/Ui/Dashboard/DashboardWindow.xaml:21`, `src/NagaBatteryTray/Ui/PopupWindow.xaml:14`, `src/NagaBatteryTray/Ui/TrayIconController.cs:69-70`, `src/NagaBatteryTray/Ui/Notifications.cs:10`. All other hits are code comments (`src/NagaBatteryTray/Hid/ButtonBinding.cs:29`, `src/NagaBatteryTray/Hid/RazerDevice.cs:12` — the latter updated by Task 2a), the settled app name "Razer Naga Companion" (`DashboardWindow.xaml:6,14`, `SettingsView.xaml:76-77`), or probe banners ("Naga Battery Tray", e.g. `src/NagaBatteryTray/Diagnostics/ProbeCommand.cs:16`). No fifth UI literal exists.
+
+  ## Claim 4 — V2-PID scan loops in diagnostics: **PASS**
+
+  Grep for `MousePidWired|MousePidWireless` and `GetHidDevices` across `src/` confirms the complete set: `src/NagaBatteryTray/Diagnostics/ProbeCommand.cs:18` (`Run`), `:53` (`RunDpi`), `:548` (`OpenLiveMouse`), `src/NagaBatteryTray/Diagnostics/ProfileProbeCommand.cs:445` (`ProfileSession.Open`), and the label at `ProfileProbeCommand.cs:867`. The dock loop at `ProbeCommand.cs:86` uses `DockPid` directly and is untouched per Task 7 and spec §4.4. The `OpenLiveMouse` doc comment (`ProbeCommand.cs:543-545`) stays literally true under `ScanPids` — plan line 725's claim is accurate.
+
+  ## Claim 5 — Toast plumbing: **FIX**
+
+  The claim's premise — and the plan's parenthetical at plan line 653 ("`LowBatteryCrossed` is dispatched, so `State` is already the online state that triggered it") — is **refuted by the code**. In `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs`, the crossing fires at :167-168 (`_dispatch(() => LowBatteryCrossed?.Invoke(this, r.Percent))`) **before** `SetState(DeviceState.Online(...))` at :172. Since `AppHost.Dispatch` is a synchronous `Dispatcher.Invoke` (`src/NagaBatteryTray/AppHost.cs:73`), the handler reads the **previous** state, not the triggering one.
+
+  The safety conclusion nonetheless survives in practice: crossing requires `_armed`, which is set only on a present reading (`BatteryMonitor.cs:160-162`) that already ran `SetState(Online)` — so `State.Model` holds the connected model from the prior poll. The one hole: after 4+ consecutive misses `State` becomes `Unknown` (Model null, `BatteryMonitor.cs:153`) while `_armed` stays true; a reappearance below threshold then toasts the "Razer Naga" fallback instead of the detected name. Benign, covered by the null fallback — but the plan's stated mechanism is wrong.
+
+  **Fix:** correct plan line 653 to say State is the *prior* online state (same model on any realistic path; null fallback covers the drop-and-reappear case). Optionally cleaner: extend `LowBatteryCrossed` to carry the model from the crossing reading itself, since `r.Model` is in scope at `BatteryMonitor.cs:167`.
+
+  ## Claim 6 — Test-code accuracy: **PASS**
+
+  - `tests/NagaBatteryTray.Tests/RazerProtocolTests.cs:4` declares the existing class (claim cites :3; the class keyword is on line 4 — cosmetic slip, no consequence). Appended tests use `Assert.Equal(new[]{...}, RazerProtocol.ScanPids)`, valid against the `int[]` property.
+  - `tests/NagaBatteryTray.Tests/BatteryMonitorTests.cs:8-16` — `NewMonitor`/`ProcessReading` idiom confirmed; dispatch is synchronous (`a => a()`, line 11), so `m.State.Model` is set when asserted. The Task 3 snippet's named args `IsWired:`/`Model:` match the record's parameter names.
+  - `tests/NagaBatteryTray.Tests/DashboardViewModelTests.cs:12-13` — `NewVm` factory matches the plan's quoted signature and the real constructor at `src/NagaBatteryTray/Ui/Dashboard/DashboardViewModel.cs:46-47`.
+  - `tests/NagaBatteryTray.Tests/PopupViewModelTests.cs:10` — `new PopupViewModel()` direct construction confirmed; `Apply(DeviceState)` exists at `src/NagaBatteryTray/Ui/PopupViewModel.cs:27`.
+  - `src/NagaBatteryTray/InternalsVisibleTo.cs:3` exists and targets `NagaBatteryTray.Tests`, so the new `internal static Tooltip` (Task 6) and the existing `internal ProcessReading` are reachable. Task 6's "fails because `Tooltip` is private" is accurate (`TrayIconController.cs:68`).
+
+  ## Claim 7 — Spec coverage: **PASS** (one omission noted)
+
+  §2 → Global Constraints (plan lines 20-21); §3 → Task 1; §4.1 → Task 1; §4.2 → Task 2; §4.3 → Tasks 2-6 + Task 8 fixtures (spec line 109-110); §4.4 → Task 7; §5 → Global Constraints; §6 unit items all map to task test steps, hardware acceptance → Task 9; §7 → Task 1 Step 1 + Task 9 Step 4. §4.5 correctly has no task. One gap: spec §5 (spec line 136) audits hard rule 5 (startup registration untouched), but the plan's Global Constraints list rules 1, 2, 3, 4, 6 only (plan lines 15-19). No task touches `src/NagaBatteryTray/Startup/StartupRegistration.cs`, so the invariant holds by omission — add rule 5 to the list for completeness.
+
+  ## Claim 8 — Screenshot-probe edits: **PASS**
+
+  `tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs:63` (popup fixture) and `:80` (dashboard fixture) are the only `DeviceState.Online` calls in that file; `:95` is `DeviceState.Unknown`, which exercises the "Razer Naga" fallback. `PopupWindow.ApplyState` exists (`src/NagaBatteryTray/Ui/PopupWindow.xaml.cs:34`) and the window's DataContext is the VM (`PopupWindow.xaml.cs:18`), so the `{Binding ModelName}` from Task 5 will render. `DpiPillInteractionTests.cs:47` builds an online state but is not a probe fixture and asserts DPI-pill behavior only — it stays green as Task 4 Step 4 requires.
+
+  ## Plan defects the claims miss
+
+  1. **`docs/architecture.md:289` goes stale** (minor, FIX-optional): it states "Naga V2 Pro supported (PID `0x00A7`/`0x00A8`) with a **hard-coded**…" PID model. After Task 1-2 that is factually wrong. Spec §5/rule 4 mandates README + screenshots only, so this is not a spec violation, but one line in Task 8 Step 2 would prevent doc drift.
+  2. **Hard rule 5 missing from Global Constraints** — see claim 7.
+  3. **Plan line 653's race rationale is factually wrong** — see claim 5. No code change required; behavior is safe.
+  4. Spec §4.2 specifies `FindControlPaths` yielding `(MouseModel Model, bool Wired, string Path)`; the plan instead keeps `(Pid, Path)` and resolves via `IsWiredPid`/`ModelNameForPid` (plan lines 262-264, 228-229). Functionally equivalent and arguably cleaner — noted as a deliberate deviation, not a defect.
+
+  No task-ordering breaks: 1→2 (ScanPids), 2→3 (`BatteryReading.Model`), 3→4-6 (`DeviceState.Model`), 4-5→8 (screenshot bindings), 9 last. All plan code snippets compile against the files as they exist.
+
+  ## UNVERIFIED
+
+  - The "baseline was 256" test count (plan line 861) — cannot run the suite; the ~10/11 added-test arithmetic (3+1+2+2+3) is consistent.
+  - Hardware facts of spec §3 (PIDs, MI_03, tid 0x1f) — taken as given per the brief; the plan uses them consistently (plan lines 108-109, 202-203).
+
+  ## Overall verdict: **FIX**
+
+  All eight claims survive substantively, but three corrections should land before execution: (a) fix the false ordering rationale at plan line 653 (claim 5); (b) add hard rule 5 to Global Constraints; (c) optionally fold the `docs/architecture.md:289` line into Task 8. None blocks the architecture, the scan order, or any test snippet — the plan is sound once these are amended.
+
+To resume this session: kimi -r session_a5f1a984-10d4-40a5-b681-df9ee72654b0

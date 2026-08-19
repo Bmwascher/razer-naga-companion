@@ -1,0 +1,49 @@
+• Re-read plan Task 8 Step 5 (around line 840) and spec §4.2, §4.4, §5.All three fixes verified:
+
+  1. Plan line 842: `git add ... docs/architecture.md` ✓
+  2. Spec §4.4 line 117: "iterate `RazerProtocol.ScanPids`" ✓ — and consistent with §4.2's ScanPids order.
+  3. Spec §4.2 line 92: "EnsureConnectedAsync" ✓; line 97: "(_wired becomes RazerProtocol.IsWiredPid(pid))" ✓; §5 line 132: "on-demand `EnsureConnectedAsync`" ✓.
+
+  Any new findings? Check residual: spec §4.4 says "print the model display name + PID they found" — plan Task 7 (a) banner prints model + wired/wireless ✓, ProfileCapture label ✓. Spec line 118-119 "wired/wireless label derives from the matched model's pids" — plan implements via IsWiredPid ✓ equivalent.
+
+  Spec §4.2 line 96-97: "records the winning model's DisplayName alongside the existing _wired flag" — plan adds _model field ✓.
+
+  One thing: spec line 93 cites "RazerDevice.cs:74" — accurate (the confirmation line). ✓
+
+  Any other "EnsureOpen" remnants? Could grep spec for EnsureOpen to be thorough. Let me do a quick grep to confirm no remaining instances in spec/plan. Also confirm no other SupportedMice-iteration phrasing remains elsewhere in spec. Quick grep.The remaining `EnsureOpen` hits are all in older (June 2026) docs — historical records, not the reviewed artifacts; the method was genuinely named EnsureOpen back then presumably, or it's historical. Not in scope. Remaining `SupportedMice` hits in the current spec/plan are all legitimate (model-table definition, helpers, doc comment), none prescribe probe iteration over SupportedMice.
+
+  All three fixes landed. No new findings. Verdict: PASS.
+
+• # Round 3 verification — final fixes
+
+  ## Fix 1 (Task 8 Step 5 stages architecture.md): **LANDED — PASS**
+
+  Plan line 842 now reads `git add tests/NagaBatteryTray.Tests/DashboardScreenshotProbe.cs README.md docs/images/ docs/architecture.md`. The `docs/architecture.md:93` edit instructed at plan line 818 will now ride the branch commit. Closed.
+
+  ## Fix 2 (spec §4.4 iteration source): **LANDED — PASS**
+
+  Spec line 117 now reads "iterate `RazerProtocol.ScanPids` instead of the two V2 constants" — `SupportedMice` is gone from that sentence. This is now consistent with amended §4.2 (spec lines 83-85) and with every Task 7 edit (plan lines 697, 712, 723, 741), so no reading of the spec can produce the cross-model wired-beats-wireless violation I flagged. A repo-wide grep confirms the only remaining `SupportedMice` mentions in the current spec/plan are the legitimate ones: the table definition itself (spec line 70, plan lines 119, 39), the `IsWiredPid`/`ModelNameForPid` helper loops (plan lines 132, 139), the no-LINQ note (plan line 145), and the Task 2 doc comment (plan line 202). Closed.
+
+  ## Fix 3 (naming slips): **LANDED — PASS**
+
+  - Spec line 92: "`EnsureConnectedAsync` already confirms a candidate collection…" — matches the real method at `src/NagaBatteryTray/Hid/RazerDevice.cs:60`, and its cited confirmation line `RazerDevice.cs:74` is accurate.
+  - Spec line 97: "(`_wired` becomes `RazerProtocol.IsWiredPid(pid)`)" — matches plan Task 2(c) at plan line 229 exactly.
+  - Spec line 132 (§5): "runs inside the existing on-demand `EnsureConnectedAsync`" — the second instance is fixed as adjudicated.
+
+  Grep shows the only surviving `EnsureOpen` occurrences are in the June-2026 plan/spec documents (`docs/superpowers/plans/2026-06-19-naga-v2-pro-battery-tray.md:665,688`, `docs/superpowers/specs/2026-06-20-naga-settings-dpi-design.md:147,149,236`, etc.) — historical artifacts describing the method's name at that time, outside the reviewed documents and correctly left alone.
+
+  ## New findings
+
+  None. I re-checked the amended neighborhoods for side effects: spec §4.4's "print the model display name + PID" (line 118) is satisfied by plan lines 709 and 753; the label-derivation sentence (lines 118-119) matches the plan's `IsWiredPid` implementation. Nothing regressed.
+
+  ## UNVERIFIED
+
+  - The "baseline was 256" test count (plan line 863) — cannot run the suite; unchanged from prior rounds.
+  - Hardware facts of spec §3 — session-attested inputs per the brief; used consistently throughout.
+  - Production source files were not re-read this round; rounds 1-2 reads plus the session adjudication cover every citation the amendments depend on.
+
+  ## Verdict on the amended plan: **PASS**
+
+  All round-1 and round-2 findings are resolved in the tree as adjudicated, the amendments introduced no new defects, and the plan is internally consistent, spec-complete (§2-§7 mapped, §4.5 deliberately taskless), compile-accurate in every code snippet I checked against the real sources, and correctly ordered. The plan is ready for execution.
+
+To resume this session: kimi -r session_a5f1a984-10d4-40a5-b681-df9ee72654b0
