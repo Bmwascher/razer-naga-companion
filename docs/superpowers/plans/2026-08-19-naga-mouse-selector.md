@@ -20,6 +20,7 @@
 - Build: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build`
 - Test: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test` — single class: `--filter "FullyQualifiedName~<Class>"`
 - Existing style in `RazerProtocol.cs` deliberately avoids LINQ. Keep it that way in that file.
+- Hard rule 6's HID-transport test exemption now covers only `HidControlCollection` / `HidControlCollectionSource` (the two Win32 wrappers) and the WPF windows. The connection state machine above them is tested (product-owner decision, 2026-08-19).
 - Branch: `feature/mouse-selector`. Commit after every task. Do not push.
 
 ---
@@ -31,9 +32,13 @@
 | `src/NagaBatteryTray/Settings/AppSettings.cs` | new `PreferredMouse`, new `ProfileNamesByMouse`, retire `ProfileNames` |
 | `src/NagaBatteryTray/Settings/JsonSettingsStore.cs` | one-time migration of legacy profile names |
 | `src/NagaBatteryTray/Hid/RazerProtocol.cs` | preference-aware scan order helpers (pure, testable) |
-| `src/NagaBatteryTray/Hid/ConnectionPolicy.cs` | **new** — the reselect decision, extracted so it is testable without Win32 |
+| `src/NagaBatteryTray/Hid/ConnectionPolicy.cs` | **new** — the reselect decision, pure and testable |
+| `src/NagaBatteryTray/Hid/IControlCollection.cs` | **new** — the transport seam: the only place Win32 appears in the connection path |
+| `src/NagaBatteryTray/Hid/IControlCollectionSource.cs` | **new** — finds and opens candidate collections |
+| `src/NagaBatteryTray/Hid/HidControlCollection.cs` | **new** — the real seam: `CreateFile` + `HidD_*`, moved out of `RazerDevice` |
+| `src/NagaBatteryTray/Hid/MouseConnection.cs` | **new** — the connection state machine: preference order, reselect, rollback, `ConnectionId` |
 | `src/NagaBatteryTray/Hid/IRazerDevice.cs` | `PreferredModel`, `DiscoverReachableAsync` |
-| `src/NagaBatteryTray/Hid/RazerDevice.cs` | preference-ordered connect, reselect on the battery path, discovery |
+| `src/NagaBatteryTray/Hid/RazerDevice.cs` | protocol only now; all handle bookkeeping delegates to `MouseConnection` |
 | `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs` | lock-serialized preference, discovery, and the atomic resolve-write-verify |
 | `src/NagaBatteryTray/Monitoring/DeviceScopedState.cs` | **new** — per-mouse cache that clears on model change |
 | `src/NagaBatteryTray/AppHost.cs` | wire the state object, the write-slot guard, the selector handler |
@@ -363,52 +368,27 @@ git commit -m "feat(hid): preference-aware scan order helpers"
 
 ---
 
-## Task 3: Device layer — preference, reselect on the battery path, discovery
+## Task 3: The transport seam and the connection state machine
 
 **Files:**
-- Modify: `src/NagaBatteryTray/Hid/IRazerDevice.cs`
-- Modify: `src/NagaBatteryTray/Hid/RazerDevice.cs:62-101` (`EnsureConnectedAsync`, `FindControlPaths`)
-- Modify: `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`
+- Create: `src/NagaBatteryTray/Hid/IControlCollection.cs`
+- Create: `src/NagaBatteryTray/Hid/IControlCollectionSource.cs`
+- Create: `src/NagaBatteryTray/Hid/HidControlCollection.cs`
+- Create: `src/NagaBatteryTray/Hid/MouseConnection.cs`
+- Create: `src/NagaBatteryTray/Hid/ConnectionPolicy.cs`
+- Test: `tests/NagaBatteryTray.Tests/ConnectionPolicyTests.cs` (create)
+- Test: `tests/NagaBatteryTray.Tests/MouseConnectionTests.cs` (create)
+- Test: `tests/NagaBatteryTray.Tests/Fakes/FakeControlCollectionSource.cs` (create)
 
 **Interfaces:**
-- Consumes: `RazerProtocol.ScanPidsFor`, `RazerProtocol.PidsForModel` (Task 2).
-- Produces on `IRazerDevice`: `string? PreferredModel { get; set; }` and `Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct)`. Tasks 4 and 7 consume both.
+- Consumes: `RazerProtocol.ScanPidsFor`, `PidsForModel`, `NormalizeModelName`, `SupportedMice` (Task 2).
+- Produces: `IControlCollection`, `IControlCollectionSource`, `MouseConnection` (with `EnsureAsync`, `DiscoverAsync`, `Close`, `Current`, `TransactionId`, `Wired`, `Model`, `ConnectionId`, `PreferredModel`), `ConnectionPolicy.Decide`. Task 3b rewires `RazerDevice` onto them.
 
-`RazerDevice` wraps real Win32 HID calls and is a deliberate no-unit-test exception (hard rule 6). That exception covers the transport, not the decision of which mouse to talk to. This task therefore splits the two: the **decision** moves into a pure `ConnectionPolicy` that Step 1 tests exhaustively, and the **rollback** is made structural with `try/finally` rather than left to a test that cannot reach it. Only "return to the preferred mouse on the next battery read" remains acceptance-only (acceptance step 2).
+**Why this task exists.** The connection state machine decides which mouse the whole app talks to, and it had no automated coverage because it was tangled with `CreateFile` and `HidD_*`. This task separates them: every Win32 call moves behind `IControlCollection`, and everything else — preference ordering, when a live handle may be reselected, rollback, disposing exactly the losing handle, and the `ConnectionId` increment — becomes ordinary testable code. The project rule that keeps HID transport out of the unit suite (hard rule 6) still holds, and it now covers only the two thin Win32 wrappers. Product-owner decision, 2026-08-19, overriding the session's recommendation to defer it.
 
-- [ ] **Step 1: Extract and test the connection decision**
+**Do not change protocol behaviour in this task.** Buffer layout, transaction-id probing, the busy retry, and the fast-read ladder all stay exactly as they are; only where the bytes are handed to Windows moves.
 
-Create `src/NagaBatteryTray/Hid/ConnectionPolicy.cs`:
-
-```csharp
-namespace NagaBatteryTray.Hid;
-
-/// <summary>What a device call should do with the connection it already has. Pure decision, no
-/// handles and no Win32, so the rule that fixed the sticky-selection defect is testable while the
-/// transport stays a no-unit-test exception (spec 2026-08-19 §4.3).</summary>
-internal enum ConnectionDecision
-{
-    /// <summary>Keep the live handle untouched. Every non-battery call lands here.</summary>
-    KeepLive,
-    /// <summary>Live, but on the wrong mouse and the caller may reselect: probe the preferred model
-    /// only, and keep the live connection if it does not answer.</summary>
-    ProbePreferred,
-    /// <summary>No usable handle: scan every candidate in preference order.</summary>
-    FullScan,
-}
-
-internal static class ConnectionPolicy
-{
-    internal static ConnectionDecision Decide(bool hasLiveHandle, string? currentModel, string? preferredModel, bool reselect)
-    {
-        if (!hasLiveHandle) return ConnectionDecision.FullScan;
-        if (!reselect || preferredModel is null) return ConnectionDecision.KeepLive;
-        return string.Equals(currentModel, preferredModel, StringComparison.OrdinalIgnoreCase)
-            ? ConnectionDecision.KeepLive
-            : ConnectionDecision.ProbePreferred;
-    }
-}
-```
+- [ ] **Step 1: Write the failing policy tests**
 
 Create `tests/NagaBatteryTray.Tests/ConnectionPolicyTests.cs`:
 
@@ -457,8 +437,8 @@ public sealed class ConnectionPolicyTests
             ConnectionPolicy.Decide(true, "Naga V2 Pro", null, reselect: true));
     }
 
-    // the policy takes an ALREADY-NORMALIZED name; RazerDevice.PreferredModel normalizes on set, so
-    // an unknown settings value arrives here as null and cannot cause a probe on every battery read
+    // MouseConnection.PreferredModel normalizes on set, so an unknown settings value arrives here as
+    // null and cannot cause a detach-and-rollback on every battery read
     [Fact]
     public void AnUnknownPreferenceNormalisesToNoPreference()
     {
@@ -469,10 +449,625 @@ public sealed class ConnectionPolicyTests
 }
 ```
 
-Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~ConnectionPolicyTests"`
-Expected: fails to compile first, then 5 passing once `ConnectionPolicy.cs` exists.
+- [ ] **Step 2: Implement the policy**
 
-- [ ] **Step 2: Extend the interface**
+Create `src/NagaBatteryTray/Hid/ConnectionPolicy.cs`:
+
+```csharp
+namespace NagaBatteryTray.Hid;
+
+/// <summary>What a device call should do with the connection it already has.</summary>
+internal enum ConnectionDecision
+{
+    /// <summary>Keep the live collection untouched. Every non-battery call lands here.</summary>
+    KeepLive,
+    /// <summary>Live, but on the wrong mouse and the caller may reselect: probe the preferred model
+    /// only, and keep the live connection if it does not answer.</summary>
+    ProbePreferred,
+    /// <summary>No usable collection: scan every candidate in preference order.</summary>
+    FullScan,
+}
+
+/// <summary>The reselect rule, with no handles and no Win32 in sight (spec 2026-08-19 §4.3).</summary>
+internal static class ConnectionPolicy
+{
+    internal static ConnectionDecision Decide(bool hasLiveCollection, string? currentModel, string? preferredModel, bool reselect)
+    {
+        if (!hasLiveCollection) return ConnectionDecision.FullScan;
+        if (!reselect || preferredModel is null) return ConnectionDecision.KeepLive;
+        return string.Equals(currentModel, preferredModel, StringComparison.OrdinalIgnoreCase)
+            ? ConnectionDecision.KeepLive
+            : ConnectionDecision.ProbePreferred;
+    }
+}
+```
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~ConnectionPolicyTests"`
+Expected: 6 passing.
+
+- [ ] **Step 3: Define the seam**
+
+Create `src/NagaBatteryTray/Hid/IControlCollection.cs`:
+
+```csharp
+namespace NagaBatteryTray.Hid;
+
+/// <summary>One open Razer control collection: the 90+1 byte feature-report endpoint, and the ONLY
+/// place Win32 appears in the connection path. Everything above this interface — preference order,
+/// reselect rules, rollback, disposal, connection identity — is ordinary testable code
+/// (spec 2026-08-19 §6, product-owner decision 2026-08-19).</summary>
+internal interface IControlCollection : IDisposable
+{
+    /// <summary>USB product id this collection was opened from; identifies model and link.</summary>
+    int Pid { get; }
+
+    /// <summary>HidD_SetFeature. False = the call failed and this collection is finished.</summary>
+    bool SetFeature(byte[] buffer);
+
+    /// <summary>HidD_GetFeature. False = the call failed and this collection is finished.</summary>
+    bool GetFeature(byte[] buffer);
+}
+```
+
+Create `src/NagaBatteryTray/Hid/IControlCollectionSource.cs`:
+
+```csharp
+using System.Collections.Generic;
+
+namespace NagaBatteryTray.Hid;
+
+/// <summary>Finds and opens control collections. The real implementation enumerates with HidSharp
+/// and opens with CreateFile; tests substitute a fake so the selection logic runs with no hardware.</summary>
+internal interface IControlCollectionSource
+{
+    /// <summary>Open each candidate collection exposing the 91-byte feature report, in the given PID
+    /// order. Lazy: the caller stops at the first that verifies, so later candidates are never opened.
+    /// A candidate that cannot be opened is skipped, not yielded.</summary>
+    IEnumerable<IControlCollection> Open(int[] pids);
+}
+```
+
+- [ ] **Step 4: Move the Win32 code behind it**
+
+Create `src/NagaBatteryTray/Hid/HidControlCollection.cs`, holding the `CreateFile` / `HidD_SetFeature` / `HidD_GetFeature` declarations moved verbatim out of `RazerDevice` (same signatures, same `FileShareReadWrite`/`OpenExisting` constants), plus the source:
+
+```csharp
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using HidSharp;
+using Microsoft.Win32.SafeHandles;
+
+namespace NagaBatteryTray.Hid;
+
+/// <summary>The real collection: a Windows HID handle. The 90-byte Razer feature report lives on the
+/// mouse HID collection (mi_00 on the V2, mi_03 on the V3 — never key on interface number;
+/// GetMaxFeatureReportLength == 91 is the selector), which Windows owns, so it must be opened with
+/// CreateFile(dwDesiredAccess = 0) and exchanged via HidD_SetFeature/HidD_GetFeature.</summary>
+internal sealed class HidControlCollection : IControlCollection
+{
+    private readonly SafeFileHandle _handle;
+
+    internal HidControlCollection(int pid, SafeFileHandle handle) { Pid = pid; _handle = handle; }
+
+    public int Pid { get; }
+    public bool SetFeature(byte[] buffer) => HidD_SetFeature(_handle, buffer, buffer.Length);
+    public bool GetFeature(byte[] buffer) => HidD_GetFeature(_handle, buffer, buffer.Length);
+    public void Dispose() => _handle.Dispose();
+
+    [DllImport("hid.dll", SetLastError = true)]
+    private static extern bool HidD_SetFeature(SafeFileHandle h, byte[] buffer, int length);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    private static extern bool HidD_GetFeature(SafeFileHandle h, byte[] buffer, int length);
+}
+
+/// <summary>The real source: HidSharp enumeration plus CreateFile.</summary>
+internal sealed class HidControlCollectionSource : IControlCollectionSource
+{
+    public IEnumerable<IControlCollection> Open(int[] pids)
+    {
+        foreach (int pid in pids)
+            foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
+            {
+                int max;
+                try { max = dev.GetMaxFeatureReportLength(); } catch { continue; }
+                if (max != RazerProtocol.BufferLength) continue;
+
+                var h = CreateFile(dev.DevicePath, 0, FileShareReadWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+                if (h.IsInvalid) { h.Dispose(); continue; }
+                yield return new HidControlCollection(pid, h);
+            }
+    }
+
+    private const uint FileShareReadWrite = 0x3; // FILE_SHARE_READ | FILE_SHARE_WRITE
+    private const uint OpenExisting = 0x3;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateFile(string path, uint access, uint share,
+        IntPtr security, uint disposition, uint flags, IntPtr template);
+}
+```
+
+- [ ] **Step 5: Write the failing state-machine tests**
+
+Create `tests/NagaBatteryTray.Tests/Fakes/FakeControlCollectionSource.cs`:
+
+```csharp
+using NagaBatteryTray.Hid;
+
+/// <summary>A scriptable stand-in for the Windows HID layer: which PIDs exist, which of them answer,
+/// and which blow up. Records every collection it hands out so a test can assert disposal.</summary>
+public sealed class FakeControlCollectionSource : IControlCollectionSource
+{
+    public sealed class FakeCollection : IControlCollection
+    {
+        public FakeCollection(int pid) => Pid = pid;
+        public int Pid { get; }
+        public bool Disposed { get; private set; }
+        public bool SetFeature(byte[] buffer) => true;
+        public bool GetFeature(byte[] buffer) => true;
+        public void Dispose() => Disposed = true;
+    }
+
+    /// <summary>PIDs present on the machine. Order here does not matter: Open honours the caller's.</summary>
+    public HashSet<int> Present { get; } = new();
+
+    /// <summary>PIDs whose collection verifies (i.e. the mouse is awake and answering).</summary>
+    public HashSet<int> Answering { get; } = new();
+
+    /// <summary>Thrown from Open when set, to exercise the rollback path.</summary>
+    public Exception? ThrowOnOpen { get; set; }
+
+    public List<FakeCollection> Handed { get; } = new();
+    public List<int> OpenedPidOrder { get; } = new();
+
+    public IEnumerable<IControlCollection> Open(int[] pids)
+    {
+        if (ThrowOnOpen is { } ex) throw ex;
+        foreach (int pid in pids)
+        {
+            if (!Present.Contains(pid)) continue;
+            OpenedPidOrder.Add(pid);
+            var c = new FakeCollection(pid);
+            Handed.Add(c);
+            yield return c;
+        }
+    }
+}
+```
+
+Create `tests/NagaBatteryTray.Tests/MouseConnectionTests.cs`:
+
+```csharp
+using NagaBatteryTray.Hid;
+
+public sealed class MouseConnectionTests
+{
+    private const int V3Wired = 0x00E7, V3Wireless = 0x00E8, V2Wired = 0x0085, V2Wireless = 0x0086;
+
+    private static MouseConnection Build(FakeControlCollectionSource source, Func<int, bool>? answers = null)
+    {
+        answers ??= pid => source.Answering.Contains(pid);
+        return new MouseConnection(source,
+            (c, ct) => Task.FromResult(answers(c.Pid) ? (byte)0x1f : (byte)0));
+    }
+
+    [Fact]
+    public async Task ItAdoptsTheFirstCollectionThatAnswers()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V3Wireless); source.Answering.Add(V3Wireless);
+        var conn = Build(source);
+
+        Assert.Equal((byte)0x1f, await conn.EnsureAsync(CancellationToken.None));
+        Assert.Equal("Naga V3 Pro", conn.Model);
+        Assert.False(conn.Wired);
+        Assert.Equal(1, conn.ConnectionId);
+    }
+
+    [Fact]
+    public async Task ACollectionThatDoesNotAnswerIsDisposedAndSkipped()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V3Wireless);                 // present but asleep
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        var conn = Build(source);
+
+        await conn.EnsureAsync(CancellationToken.None);
+
+        Assert.Equal("Naga V2 Pro", conn.Model);
+        Assert.True(source.Handed.Single(c => c.Pid == V3Wireless).Disposed);
+        Assert.False(source.Handed.Single(c => c.Pid == V2Wireless).Disposed);
+    }
+
+    [Fact]
+    public async Task ALiveConnectionIsReusedWithoutOpeningAnything()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V3Wireless); source.Answering.Add(V3Wireless);
+        var conn = Build(source);
+        await conn.EnsureAsync(CancellationToken.None);
+        source.OpenedPidOrder.Clear();
+
+        await conn.EnsureAsync(CancellationToken.None);
+
+        Assert.Empty(source.OpenedPidOrder);
+        Assert.Equal(1, conn.ConnectionId);   // no adoption, so no increment
+    }
+
+    // the sticky-selection defect, as a test
+    [Fact]
+    public async Task TheBatteryPathHopsBackToThePreferredMouse()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        var conn = Build(source);
+        conn.PreferredModel = "Naga V3 Pro";
+        await conn.EnsureAsync(CancellationToken.None);
+        Assert.Equal("Naga V2 Pro", conn.Model);
+
+        source.Present.Add(V3Wireless); source.Answering.Add(V3Wireless);   // the V3 wakes up
+        await conn.EnsureAsync(CancellationToken.None, reselect: true);
+
+        Assert.Equal("Naga V3 Pro", conn.Model);
+        Assert.Equal(2, conn.ConnectionId);
+    }
+
+    [Fact]
+    public async Task ANonBatteryCallDoesNotHopBack()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        var conn = Build(source);
+        conn.PreferredModel = "Naga V3 Pro";
+        await conn.EnsureAsync(CancellationToken.None);
+        source.Present.Add(V3Wireless); source.Answering.Add(V3Wireless);
+
+        await conn.EnsureAsync(CancellationToken.None);   // reselect defaults to false
+
+        Assert.Equal("Naga V2 Pro", conn.Model);
+    }
+
+    [Fact]
+    public async Task AFailedHopKeepsTheLiveConnection()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        source.Present.Add(V3Wireless);                  // present but asleep
+        var conn = Build(source);
+        conn.PreferredModel = "Naga V3 Pro";
+        await conn.EnsureAsync(CancellationToken.None);
+        var live = source.Handed.Single(c => c.Pid == V2Wireless);
+
+        byte tid = await conn.EnsureAsync(CancellationToken.None, reselect: true);
+
+        Assert.Equal((byte)0x1f, tid);
+        Assert.Equal("Naga V2 Pro", conn.Model);
+        Assert.False(live.Disposed);      // the live handle survived the failed probe
+        Assert.Equal(1, conn.ConnectionId);
+    }
+
+    [Fact]
+    public async Task AThrowingHopKeepsTheLiveConnection()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        var conn = Build(source);
+        conn.PreferredModel = "Naga V3 Pro";
+        await conn.EnsureAsync(CancellationToken.None);
+        var live = source.Handed.Single(c => c.Pid == V2Wireless);
+        source.ThrowOnOpen = new InvalidOperationException("enumeration blew up");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => conn.EnsureAsync(CancellationToken.None, reselect: true));
+
+        Assert.Equal("Naga V2 Pro", conn.Model);
+        Assert.Equal((byte)0x1f, conn.TransactionId);
+        Assert.False(live.Disposed);      // rolled back, not leaked
+    }
+
+    [Fact]
+    public async Task ACancelledHopKeepsTheLiveConnection()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        source.Present.Add(V3Wireless); source.Answering.Add(V3Wireless);
+        var conn = new MouseConnection(source, (c, ct) =>
+            c.Pid == V3Wireless ? Task.FromCanceled<byte>(new CancellationToken(true)) : Task.FromResult((byte)0x1f));
+        conn.PreferredModel = "Naga V3 Pro";
+        await conn.EnsureAsync(CancellationToken.None);
+        var live = source.Handed.Single(c => c.Pid == V2Wireless);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => conn.EnsureAsync(CancellationToken.None, reselect: true));
+
+        Assert.Equal("Naga V2 Pro", conn.Model);
+        Assert.False(live.Disposed);
+    }
+
+    [Fact]
+    public async Task AWinningHopDisposesExactlyTheLoser()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        var conn = Build(source);
+        conn.PreferredModel = "Naga V3 Pro";
+        await conn.EnsureAsync(CancellationToken.None);
+        var old = source.Handed.Single(c => c.Pid == V2Wireless);
+        source.Present.Add(V3Wireless); source.Answering.Add(V3Wireless);
+
+        await conn.EnsureAsync(CancellationToken.None, reselect: true);
+
+        Assert.True(old.Disposed);
+        Assert.False(source.Handed.Single(c => c.Pid == V3Wireless).Disposed);
+    }
+
+    [Fact]
+    public async Task ThePreferredModelIsTriedFirstWiredBeforeWireless()
+    {
+        var source = new FakeControlCollectionSource();
+        foreach (int pid in new[] { V2Wired, V2Wireless, V3Wired, V3Wireless }) source.Present.Add(pid);
+        source.Answering.Add(V2Wireless);
+        var conn = Build(source);
+        conn.PreferredModel = "Naga V2 Pro";
+
+        await conn.EnsureAsync(CancellationToken.None);
+
+        Assert.Equal(new[] { V2Wired, V2Wireless }, source.OpenedPidOrder);
+    }
+
+    [Fact]
+    public async Task AnUnknownPreferenceBehavesLikeNoPreference()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        var conn = Build(source);
+        conn.PreferredModel = "Naga Imaginary";
+
+        Assert.Null(conn.PreferredModel);
+
+        await conn.EnsureAsync(CancellationToken.None);
+        source.OpenedPidOrder.Clear();
+        await conn.EnsureAsync(CancellationToken.None, reselect: true);
+
+        Assert.Empty(source.OpenedPidOrder);   // no pointless probe on every battery read
+    }
+
+    [Fact]
+    public async Task DiscoverListsOnlyMiceThatAnswerAndLeavesAWorkingConnection()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V3Wireless);                                  // present but asleep
+        source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
+        var conn = Build(source);
+
+        var found = await conn.DiscoverAsync(CancellationToken.None);
+
+        Assert.Equal(new[] { "Naga V2 Pro" }, found);
+        Assert.Equal("Naga V2 Pro", conn.Model);
+        Assert.Equal((byte)0x1f, conn.TransactionId);
+    }
+
+    [Fact]
+    public async Task CloseDisposesTheLiveCollectionAndForcesARescan()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(V3Wireless); source.Answering.Add(V3Wireless);
+        var conn = Build(source);
+        await conn.EnsureAsync(CancellationToken.None);
+        var first = source.Handed.Single();
+
+        conn.Close();
+        Assert.True(first.Disposed);
+        Assert.Equal((byte)0, conn.TransactionId);
+
+        await conn.EnsureAsync(CancellationToken.None);
+        Assert.Equal(2, conn.ConnectionId);   // a reconnect is an adoption, even to the same model
+    }
+}
+```
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~MouseConnectionTests"`
+Expected: compile error — `MouseConnection` does not exist.
+
+- [ ] **Step 6: Implement the state machine**
+
+Create `src/NagaBatteryTray/Hid/MouseConnection.cs`:
+
+```csharp
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace NagaBatteryTray.Hid;
+
+/// <summary>Owns which mouse the app is connected to. Every Win32 call it makes goes through
+/// IControlCollection, so the parts that used to be untestable — preference order, when a live
+/// connection may be reselected, rollback, disposing exactly the losing handle, and connection
+/// identity — are ordinary code with tests (spec 2026-08-19 §4.1-§4.4, §4.10).
+/// <para>Protocol stays out of here: the caller supplies <see cref="Verify"/>, which resolves a
+/// transaction id on a candidate and confirms it answers. 0 = it does not.</para></summary>
+internal sealed class MouseConnection : IDisposable
+{
+    /// <summary>Resolve + confirm a candidate. Returns the working transaction id, or 0.</summary>
+    internal delegate Task<byte> Verify(IControlCollection collection, CancellationToken ct);
+
+    private readonly IControlCollectionSource _source;
+    private readonly Verify _verify;
+    private IControlCollection? _current;
+    private string? _preferred;
+
+    internal MouseConnection(IControlCollectionSource source, Verify verify)
+    {
+        _source = source;
+        _verify = verify;
+    }
+
+    /// <summary>The live collection, or null. Callers exchange bytes through it.</summary>
+    internal IControlCollection? Current => _current;
+
+    /// <summary>Working transaction id on the live collection; 0 = not connected.</summary>
+    internal byte TransactionId { get; private set; }
+
+    /// <summary>True when the live collection is a wired PID.</summary>
+    internal bool Wired { get; private set; }
+
+    /// <summary>Display name of the connected model, or null. Deliberately NOT cleared by
+    /// <see cref="Close"/>: after a dropped handle it is still the best answer to "which mouse was
+    /// this", which the write path compares against (spec §4.10).</summary>
+    internal string? Model { get; private set; }
+
+    /// <summary>Increases on every adoption, including a reconnect to the same model.</summary>
+    internal int ConnectionId { get; private set; }
+
+    /// <summary>Preferred model, normalized on set: a name matching no supported mouse must behave
+    /// EXACTLY like no preference, or every battery read detaches and rolls back chasing a mouse
+    /// that cannot exist.</summary>
+    internal string? PreferredModel
+    {
+        get => _preferred;
+        set => _preferred = RazerProtocol.NormalizeModelName(value);
+    }
+
+    /// <summary>Ensure a collection that actually answers, and return its transaction id (0 = none
+    /// reachable). reselect is passed ONLY by the battery path: it is what lets the app hop back to
+    /// the preferred mouse, and what every other call must not do (spec §4.3).</summary>
+    internal async Task<byte> EnsureAsync(CancellationToken ct, bool reselect = false)
+    {
+        switch (ConnectionPolicy.Decide(_current is not null && TransactionId != 0, Model, _preferred, reselect))
+        {
+            case ConnectionDecision.KeepLive:
+                return TransactionId;
+            case ConnectionDecision.ProbePreferred:
+                return await AdoptPreferredAsync(ct);
+            default:
+                Close();
+                return await ConnectAsync(RazerProtocol.ScanPidsFor(_preferred), ct);
+        }
+    }
+
+    /// <summary>Which supported mice answer right now, in SupportedMice order, leaving a normal
+    /// connection behind (spec §4.4).</summary>
+    internal async Task<IReadOnlyList<string>> DiscoverAsync(CancellationToken ct)
+    {
+        var reachable = new List<string>();
+        Close();
+        foreach (var m in RazerProtocol.SupportedMice)
+        {
+            if (await ConnectAsync(new[] { m.WiredPid, m.WirelessPid }, ct) != 0) reachable.Add(m.DisplayName);
+            Close();
+        }
+        await EnsureAsync(ct);
+        return reachable;
+    }
+
+    /// <summary>Drop the live collection so the next EnsureAsync re-selects.</summary>
+    internal void Close()
+    {
+        _current?.Dispose();
+        _current = null;
+        TransactionId = 0;
+    }
+
+    public void Dispose() => Close();
+
+    /// <summary>Running on a non-preferred mouse: probe ONLY the preferred model. Adopt it if it
+    /// answers, otherwise put the live connection back untouched — a sleeping preference must never
+    /// cost the user the mouse that is actually awake.
+    /// <para>The rollback is a finally, not an if: an exception or a cancellation between the detach
+    /// and the adoption would otherwise leave the app with no connection AND leak the detached
+    /// collection.</para></summary>
+    private async Task<byte> AdoptPreferredAsync(CancellationToken ct)
+    {
+        var live = _current;
+        byte liveTid = TransactionId;
+        bool liveWired = Wired;
+        string? liveModel = Model;
+        bool adopted = false;
+
+        _current = null;   // detach so ConnectAsync's failure path cannot dispose the live collection
+        TransactionId = 0;
+        try
+        {
+            byte tid = await ConnectAsync(RazerProtocol.PidsForModel(_preferred), ct);
+            adopted = tid != 0;
+            return adopted ? tid : liveTid;
+        }
+        finally
+        {
+            if (adopted)
+            {
+                live?.Dispose();   // the loser, and only the loser
+            }
+            else
+            {
+                Close();           // drop anything a partial attempt left behind
+                _current = live;
+                TransactionId = liveTid;
+                Wired = liveWired;
+                Model = liveModel;
+            }
+        }
+    }
+
+    /// <summary>Open and verify the first candidate among <paramref name="pids"/> that answers.
+    /// 0 = none did, and nothing is left open. The verify step is essential: the wireless receiver
+    /// stays enumerated when the mouse switches to wired, so picking by enumeration order alone
+    /// would lock onto a collection that can no longer reach the mouse.</summary>
+    private async Task<byte> ConnectAsync(int[] pids, CancellationToken ct)
+    {
+        foreach (var candidate in _source.Open(pids))
+        {
+            byte tid;
+            try { tid = await _verify(candidate, ct); }
+            catch { candidate.Dispose(); throw; }
+
+            if (tid != 0)
+            {
+                _current = candidate;
+                TransactionId = tid;
+                Wired = RazerProtocol.IsWiredPid(candidate.Pid);
+                Model = RazerProtocol.ModelNameForPid(candidate.Pid);
+                ConnectionId++;
+                return tid;
+            }
+            candidate.Dispose();
+        }
+        return 0;
+    }
+}
+```
+
+- [ ] **Step 7: Run the state-machine tests**
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~MouseConnectionTests"`
+Expected: 13 passing.
+
+`InternalsVisibleTo.cs` already exposes internals to the test assembly (hard rule 6) — do not change it.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/NagaBatteryTray/Hid tests/NagaBatteryTray.Tests
+git commit -m "feat(hid): transport seam + tested connection state machine"
+```
+
+---
+
+## Task 3b: RazerDevice adopts the connection
+
+**Files:**
+- Modify: `src/NagaBatteryTray/Hid/IRazerDevice.cs`
+- Modify: `src/NagaBatteryTray/Hid/RazerDevice.cs`
+- Modify: `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`
+
+**Interfaces:**
+- Consumes: `MouseConnection`, `IControlCollection` (Task 3).
+- Produces on `IRazerDevice`: `string? PreferredModel { get; set; }`, `Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct)`, `int ConnectionId { get; }`. Tasks 4, 4b and 6 consume them.
+
+`RazerDevice` keeps every byte of protocol behaviour and loses all of its handle bookkeeping.
+
+- [ ] **Step 1: Extend the interface**
 
 In `IRazerDevice.cs`, add above `void Reset();`:
 
@@ -490,189 +1085,101 @@ In `IRazerDevice.cs`, add above `void Reset();`:
     /// <summary>Increases every time a collection is adopted, including a reconnect to the same
     /// model. The app's only reliable "am I still talking to the same mouse": a non-battery call can
     /// reconnect onto a different mouse after a dropped handle, and nothing publishes that
-    /// (spec 2026-08-19 §4.10).</summary>
+    /// (spec §4.10).</summary>
     int ConnectionId { get; }
 ```
 
-- [ ] **Step 3: Implement in RazerDevice — split connect out of EnsureConnectedAsync**
+- [ ] **Step 2: Replace the handle fields with the connection**
 
-Replace `EnsureConnectedAsync` and `FindControlPaths` in `RazerDevice.cs` with:
+In `RazerDevice.cs`, delete the `_handle`, `_tid`, `_wired`, `_model` fields, the `CloseHandle` method, the `CreateFile` / `HidD_SetFeature` / `HidD_GetFeature` declarations and the `FileShareReadWrite` / `OpenExisting` constants (they now live in `HidControlCollection.cs`), and `FindControlPaths`. Add:
 
 ```csharp
-    /// <summary>Which model to prefer (spec 2026-08-19 §4.1). Null = scan order. Normalized on set:
-    /// a name matching no supported mouse must behave EXACTLY like no preference, or every battery
-    /// read detaches and rolls back chasing a mouse that cannot exist.</summary>
+    private readonly MouseConnection _conn;
+
+    public RazerDevice(ISettingsStore settings)
+        : this(settings, new HidControlCollectionSource()) { }
+
+    internal RazerDevice(ISettingsStore settings, IControlCollectionSource source)
+    {
+        _settings = settings;
+        _conn = new MouseConnection(source, VerifyCollectionAsync);
+    }
+
     public string? PreferredModel
     {
-        get => _preferred;
-        set => _preferred = RazerProtocol.NormalizeModelName(value);
-    }
-    private string? _preferred;
-
-    /// <summary>Bumped on every adoption — see IRazerDevice.ConnectionId (spec §4.10).</summary>
-    public int ConnectionId { get; private set; }
-
-    /// <summary>Ensures <see cref="_handle"/> points at a collection that actually answers, and returns its
-    /// working transaction id (0 = none reachable). Reuses a live connection cheaply; on (re)connect it tries
-    /// each candidate collection — preferred model first, wired before wireless — and keeps the first that
-    /// replies to a battery query. The verify step is essential: the wireless receiver stays enumerated when
-    /// the mouse switches to wired, so picking by enumeration order alone would lock onto a collection that
-    /// can no longer reach the mouse.
-    /// <para>reselect (battery path only) re-checks the preference on a LIVE handle — the fix for the
-    /// sticky-selection defect, which was this method returning early forever. Every other caller leaves it
-    /// false, so button/DPI/profile calls never RESELECT a live handle; they still reconnect when the
-    /// handle has dropped, which is what ConnectionId exists to expose (spec §4.3, §4.10).</para></summary>
-    private async Task<byte> EnsureConnectedAsync(CancellationToken ct, bool reselect = false)
-    {
-        bool live = _handle is { IsInvalid: false } && _tid != 0;
-        switch (ConnectionPolicy.Decide(live, _model, PreferredModel, reselect))
-        {
-            case ConnectionDecision.KeepLive:
-                return _tid;
-            case ConnectionDecision.ProbePreferred:
-                return await AdoptPreferredAsync(ct);
-            default:
-                CloseHandle();
-                return await ConnectAsync(RazerProtocol.ScanPidsFor(PreferredModel), ct);
-        }
+        get => _conn.PreferredModel;
+        set => _conn.PreferredModel = value;
     }
 
-    /// <summary>Running on a non-preferred mouse: probe ONLY the preferred model. Adopt it if it answers,
-    /// otherwise put the live connection back untouched — a sleeping preference must never cost the user
-    /// the mouse that is actually awake (spec §4.3).
-    /// <para>The rollback is a finally, not an if: an exception or a cancellation between the detach and
-    /// the adoption would otherwise leave the app with no connection AND leak the detached handle.</para></summary>
-    private async Task<byte> AdoptPreferredAsync(CancellationToken ct)
+    public int ConnectionId => _conn.ConnectionId;
+
+    /// <summary>MouseConnection's protocol hook: resolve a transaction id on a candidate and confirm
+    /// it answers a battery query. Runs against the candidate directly, because it is not the live
+    /// collection yet.</summary>
+    private async Task<byte> VerifyCollectionAsync(IControlCollection candidate, CancellationToken ct)
     {
-        var liveHandle = _handle;
-        byte liveTid = _tid;
-        bool liveWired = _wired;
-        string? liveModel = _model;
-        bool adopted = false;
-
-        _handle = null; // detach so ConnectAsync's failure path can't dispose the live handle
-        _tid = 0;
-        try
-        {
-            byte tid = await ConnectAsync(RazerProtocol.PidsForModel(PreferredModel), ct);
-            adopted = tid != 0;
-            return adopted ? tid : liveTid;
-        }
-        finally
-        {
-            if (adopted)
-            {
-                liveHandle?.Dispose(); // the loser, and only the loser
-            }
-            else
-            {
-                CloseHandle();          // drop anything a partial attempt left behind
-                _handle = liveHandle;
-                _tid = liveTid;
-                _wired = liveWired;
-                _model = liveModel;
-            }
-        }
-    }
-
-    /// <summary>Open and verify the first collection among <paramref name="pids"/> that answers.
-    /// 0 = none did; the handle is left closed.</summary>
-    private async Task<byte> ConnectAsync(int[] pids, CancellationToken ct)
-    {
-        foreach (var (pid, path) in FindControlPaths(pids))
-        {
-            var h = CreateFile(path, 0, FileShareReadWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
-            if (h.IsInvalid) { h.Dispose(); continue; }
-            _handle = h;
-
-            byte tid = await ResolveTransactionIdAsync(ct);
-            // ResolveTransactionIdAsync short-circuits on a cached id without touching this handle, so confirm
-            // this collection truly answers before committing to it; otherwise fall through to the next.
-            if (tid != 0 && await QueryAsync(tid, RazerProtocol.CommandIdBattery, ct) is not null)
-            {
-                _tid = tid;
-                _wired = RazerProtocol.IsWiredPid(pid);
-                _model = RazerProtocol.ModelNameForPid(pid);
-                ConnectionId++; // every adoption, same model or not (spec §4.10)
-                return tid;
-            }
-            CloseHandle();
-        }
-        return 0;
-    }
-
-    /// <summary>Mouse HID collections exposing the 90+1 byte feature report (with their PID), in the
-    /// given PID order. The PID is returned so the caller can report the active link and model.</summary>
-    private static IEnumerable<(int Pid, string Path)> FindControlPaths(int[] pids)
-    {
-        foreach (int pid in pids)
-            foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
-            {
-                int max;
-                try { max = dev.GetMaxFeatureReportLength(); } catch { continue; }
-                if (max == RazerProtocol.BufferLength) yield return (pid, dev.DevicePath);
-            }
-    }
-
-    /// <summary>Reachability probe for the dashboard's mouse selector (spec §4.4). A HID enumeration
-    /// cannot answer this: the receiver stays enumerated while the mouse is asleep, so each model has
-    /// to be asked. Ends by restoring the normal connection.</summary>
-    public async Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct)
-    {
-        var reachable = new List<string>();
-        try
-        {
-            CloseHandle();
-            foreach (var m in RazerProtocol.SupportedMice)
-            {
-                if (await ConnectAsync(new[] { m.WiredPid, m.WirelessPid }, ct) != 0) reachable.Add(m.DisplayName);
-                CloseHandle();
-            }
-            await EnsureConnectedAsync(ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            CloseHandle();
-            LogOnce(ex);
-        }
-        return reachable;
+        byte tid = await ResolveTransactionIdAsync(candidate, ct);
+        if (tid == 0) return 0;
+        return await QueryAsync(candidate, tid, RazerProtocol.CommandIdBattery, ct) is not null ? tid : (byte)0;
     }
 ```
 
-- [ ] **Step 4: Make the battery path the one reselect trigger**
+- [ ] **Step 3: Point the exchanges at a collection**
 
-In `RazerDevice.ReadAsync`, change the single line:
+`ExchangeAsync`, `FastReadAsync`, `QueryAsync` and `ResolveTransactionIdAsync` take an `IControlCollection` instead of reading the field, and their bodies change only in how the bytes are handed over:
+
+- `if (_handle is null || _handle.IsInvalid) return null;` becomes nothing — the caller passes a live collection.
+- `HidD_SetFeature(_handle, request, request.Length)` becomes `collection.SetFeature(request)`.
+- `HidD_GetFeature(_handle, reply, reply.Length)` becomes `collection.GetFeature(reply)`.
+- `CloseHandle()` on a failed call becomes `_conn.Close()`.
+
+Every public method gains the same two lines at the top of its `try`, replacing `byte tid = await EnsureConnectedAsync(ct);`:
 
 ```csharp
-            byte tid = await EnsureConnectedAsync(ct);
+            byte tid = await _conn.EnsureAsync(ct);          // ReadAsync passes reselect: true
+            if (tid == 0 || _conn.Current is not { } c) return <the method's failure value>;
 ```
 
-to:
+and then pass `c` to the exchange. Delays, the busy retry, the fast-read ladder, the echo checks and every parse stay byte-for-byte as they are.
+
+- [ ] **Step 4: The battery path is the one reselect trigger**
+
+In `ReadAsync` only:
 
 ```csharp
-            byte tid = await EnsureConnectedAsync(ct, reselect: true);
+            byte tid = await _conn.EnsureAsync(ct, reselect: true);
 ```
 
-Leave `GetDpiAsync`, `SetDpiAsync`, `SetButtonAsync`, `GetButtonAsync`, and every profile call exactly as they are.
+Every other method keeps the default. Be precise about what that buys: those calls never **reselect a live connection**, but they can still **reconnect** a dropped one, and that reconnect uses preference order, so a button read mid-sweep can land on a different mouse with no battery read to announce it. `ConnectionId` is what makes that detectable; Tasks 4b and 6 act on it.
 
-Then make the write itself refuse a connection that moved. In `RazerDevice.SetButtonAsync`, around the existing `EnsureConnectedAsync` call:
+Also make the write refuse a connection that moved. In `SetButtonAsync`:
 
 ```csharp
-            string? before = _model;
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return false;
+            string? before = _conn.Model;
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return false;
             // a reconnect inside this call may have landed on ANOTHER mouse, and the caller's profile
-            // number was computed for the previous one. Refuse rather than write it there. CloseHandle
-            // leaves _model set, so a dropped handle still leaves a name to compare against.
-            if (before is not null && !string.Equals(before, _model, StringComparison.OrdinalIgnoreCase))
+            // number was computed for the previous one. Refuse rather than write it there. Close()
+            // leaves Model set, so a dropped handle still leaves a name to compare against.
+            if (before is not null && !string.Equals(before, _conn.Model, StringComparison.OrdinalIgnoreCase))
                 return false;
 ```
 
-That is the structural belt. The braces are Task 4b's always-resolve rule, which is the half that carries automated tests.
+That is the structural belt. Task 4b's always-resolve rule is the half that carries automated tests.
 
-Be precise about what the reselect split buys, because the loose version of this claim hides a real hazard. Those calls never **reselect a live handle**. They can still **reconnect** when the handle has dropped — existing, wanted behaviour — and that reconnect uses preference order, so a button read mid-sweep can land on a different mouse with no battery read to announce it. `ConnectionId` is what makes that detectable; Tasks 4b and 6 are what act on it.
+- [ ] **Step 5: The remaining public members**
 
-- [ ] **Step 5: Extend the fake**
+```csharp
+    public Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct) => _conn.DiscoverAsync(ct);
+
+    public void Reset() => _conn.Close();
+
+    public void Dispose() => _conn.Dispose();
+```
+
+`ReadAsync` keeps reporting `_conn.Wired` and `_conn.Model` in its `BatteryReading`.
+
+- [ ] **Step 6: Extend the fake**
 
 In `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`, add before `Reset()`:
 
@@ -693,16 +1200,40 @@ In `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`, add before `Reset()`:
     public int ConnectionId { get; set; }
 ```
 
-- [ ] **Step 6: Build and run the whole suite**
+and, in `GetButtonAsync`, as the first line of the method body:
+
+```csharp
+        BeforeGetButton?.Invoke();
+```
+
+with, beside `GetButtonCount`:
+
+```csharp
+    /// <summary>Runs just before a button read — lets a test simulate the connection changing
+    /// in the middle of a multi-step operation.</summary>
+    public Action? BeforeGetButton { get; set; }
+```
+
+- [ ] **Step 7: Run the whole suite**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
-Expected: all green. A red build here means a caller of `FindControlPaths()` was missed — it now takes a PID array.
+Expected: all green.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Verify on hardware before going further**
+
+This task rewrote the transport's plumbing, so prove it against a real mouse before any UI work builds on it. With the V3 connected, run the probe suite from a fresh build and confirm each still reports what it did before:
+
+```powershell
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build
+```
+
+then run `--probe`, `--probe-dpi`, `--probe-buttons` and `--probe-profile` against the built binary. A difference in any of them means the plumbing move changed behaviour and must be fixed here, not later.
+
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/NagaBatteryTray/Hid tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs
-git commit -m "feat(hid): preferred-mouse selection, battery-path reselect, reachability probe"
+git commit -m "refactor(hid): RazerDevice drives MouseConnection; protocol unchanged"
 ```
 
 ---
@@ -1876,7 +2407,7 @@ Add the mouse selector to the feature list and refresh any caption that describe
 
 - [ ] **Step 3: Update docs/architecture.md**
 
-Add a short subsection covering: the preference-ordered scan (`ScanPidsFor`), the battery-path-only reselect and why no other call may reselect a live handle (while any call may still reconnect a dropped one), the reachability probe and why HID enumeration cannot replace it, `DeviceScopedState` and the defect it fixes, and the firmware's 1-byte stub for uncreated slots (with the slot table from the spec's §1.1).
+Add a short subsection covering: the connection layering (`IControlCollection` as the Win32 boundary, `ConnectionPolicy` as the reselect rule, `MouseConnection` as the state machine) and why the transport exemption now covers only the two Win32 wrappers, the preference-ordered scan (`ScanPidsFor`), the battery-path-only reselect and why no other call may reselect a live handle (while any call may still reconnect a dropped one), `ConnectionId` and the unannounced-reconnect problem it solves, the reachability probe and why HID enumeration cannot replace it, `DeviceScopedState` and the defect it fixes, and the firmware's 1-byte stub for uncreated slots (with the slot table from the spec's §1.1).
 
 - [ ] **Step 4: Update CLAUDE.md**
 
@@ -1970,13 +2501,19 @@ single assignment site, and that discovery could re-enter the model-change handl
 Nothing here is verified code. The plan remains unexecuted, and hardware acceptance (spec §7) is
 still the gate.
 
-### Open question for the product owner
+### The escalated question, and how it was settled
 
-The reviewer recommends isolating the Win32 handle lifecycle behind an injectable connector so that
-adoption, rollback, disposal of the losing handle, and `ConnectionId` increments get automated
-tests. The session declined it for this pass: `RazerDevice` is proven on real hardware, and hard
-rule 6 makes the HID transport a deliberate no-unit-test exception. The concrete defect the reviewer
-cited to justify the seam — reconnect-before-SET — is now closed by the always-resolve rule, which
-IS covered by tests through the existing fake. What a seam would still add is coverage of
-wrong-loser disposal and missing adoption increments. Undecided; it is a risk-versus-refactor call,
-not something evidence settles.
+The reviewer recommended isolating the Win32 handle lifecycle behind an injectable connector so that
+adoption, rollback, disposal of the losing handle, and `ConnectionId` increments get automated tests.
+The session recommended deferring it: `RazerDevice` is proven on real hardware, and hard rule 6 makes
+the HID transport a deliberate no-unit-test exception.
+
+**The product owner decided for the reviewer (2026-08-19): do the restructure first.** Tasks 3 and 3b
+carry it. `IControlCollection` is now the only place Win32 appears in the connection path;
+`MouseConnection` holds the state machine with thirteen tests covering adoption, skip-and-dispose,
+live reuse, hopping back, refusing to hop on a non-battery call, and rollback on failure, on an
+exception and on cancellation, plus wrong-loser disposal and the `ConnectionId` increment. Hard rule
+6's exemption now covers only the two Win32 wrappers and the WPF windows.
+
+Because this rewrites plumbing the hardware depends on, Task 3b ends with a probe-suite run against
+a real mouse before any UI work builds on it.

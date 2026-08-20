@@ -249,20 +249,23 @@ Old settings files load unchanged: absent fields take their defaults and the mig
 
 Through the `IRazerDevice` seam with `FakeRazerDevice` (hard rule 6):
 
-The connection **decision** (which PIDs to try, and whether a live handle may be reselected) is
-extracted into a pure `ConnectionPolicy` and tested directly. The handle **lifecycle** around it
-stays inside `RazerDevice`, where rollback is structural (`try/finally`) rather than conditional,
-and is covered by hardware acceptance. Whether that lifecycle should also move behind an injectable
-connector is an open risk-versus-refactor question recorded in the plan's debate record; the
-reviewer recommends it, this spec does not yet require it.
+The connection path is split so that only Win32 stays untested. `IControlCollection` and
+`IControlCollectionSource` wrap `CreateFile` and `HidD_SetFeature`/`HidD_GetFeature` and nothing
+else; `ConnectionPolicy` holds the reselect decision; `MouseConnection` holds the state machine —
+preference order, adoption, rollback, disposal and `ConnectionId`. Tests substitute a fake source, so
+all of that runs with no hardware. Hard rule 6's transport exemption then covers only the two Win32
+wrappers and the WPF windows. (Product-owner decision, 2026-08-19, taking the reviewer's
+recommendation over the session's advice to defer.)
 
 - preference honoured when the preferred mouse is reachable
 - fallback to another mouse when the preferred one is not
 - a live handle is reselected only on the battery path, never by a button, DPI or profile call
 - an unknown preferred-mouse name normalizes to "no preference" and never causes a probe
 - adoption of the preferred mouse rolls back on failure, on an exception, and on cancellation,
-  restoring handle, transaction id, link state and model together, and disposing exactly the
-  losing handle (structural, verified by acceptance rather than by unit test)
+  restoring collection, transaction id, link state and model together, and disposing exactly the
+  losing collection
+- a candidate that does not answer is disposed and skipped; a live connection is reused without
+  opening anything
 - `ConnectionId` increases on every adoption, including a reconnect to the same model
 - the atomic write reads the active slot from the mouse it is about to write to, writes and
   verifies, all under one lock, and reports the connection it ran under
