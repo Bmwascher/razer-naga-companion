@@ -8,8 +8,8 @@ public sealed class MouseSelectorTests
 {
     private static DashboardViewModel Build(AppSettings? settings = null) =>
         new(settings ?? new AppSettings(), false,
-            (_, _, _, _) => Task.FromResult(true),
-            (_, _) => Task.FromResult(true));
+            (_, _, _, _) => Task.FromResult(WriteOutcome.Applied),
+            (_, _) => Task.FromResult(WriteOutcome.Applied));
 
     [Fact]
     public void SetMiceFillsTheListAndSelectsTheConnectedMouse()

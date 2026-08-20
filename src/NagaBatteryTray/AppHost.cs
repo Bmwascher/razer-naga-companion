@@ -503,9 +503,9 @@ public sealed class AppHost
 
     /// <summary>The dashboard's instant-apply write: one modeled binding into the ACTIVE slot
     /// (resolve slot → write → read-back verify). Kind=Default writes the factory action. The
-    /// firmware holds every binding — nothing is persisted app-side (spec §13.2). Returns false
-    /// on any failure.</summary>
-    private async Task<bool> WriteBindingAsync(int position, ButtonActionKind kind, byte modifiers, byte usage)
+    /// firmware holds every binding — nothing is persisted app-side (spec §13.2). Returns the
+    /// outcome, so a refusal can be told from a failure.</summary>
+    private async Task<WriteOutcome> WriteBindingAsync(int position, ButtonActionKind kind, byte modifiers, byte usage)
     {
         var binding = kind == ButtonActionKind.Default
             ? NagaV2ProButtons.FactoryBindingForPosition(position)
@@ -516,10 +516,10 @@ public sealed class AppHost
 
     /// <summary>The undo path (spec §13.2): restore a pre-overwrite snapshot byte-for-byte —
     /// including Synapse actions the app can't model. Same verified pipeline as any write.</summary>
-    private Task<bool> RestoreRawAsync(int position, RawButtonAction raw) =>
+    private Task<WriteOutcome> RestoreRawAsync(int position, RawButtonAction raw) =>
         WriteVerifiedAsync(NagaV2ProButtons.IdForPosition(position), raw.Category, raw.Data);
 
-    private async Task<bool> WriteVerifiedAsync(byte buttonId, byte category, byte[] data)
+    private async Task<WriteOutcome> WriteVerifiedAsync(byte buttonId, byte category, byte[] data)
     {
         bool resolvedOnDemand = _scoped.ActiveSlot is null;
         // SeededModel goes DOWN with the write: it is the mouse the cache and every chip's undo
@@ -533,9 +533,14 @@ public sealed class AppHost
         // Two ways the write's result can be untrustworthy, and both land in the same branch. This
         // is the REPORTING half — by the time it runs the device work is over, so its job is to
         // clean up: drop the cache, void the undo snapshots, and hand off to recovery.
+        // r.Refused: the monitor compared the expected model against the mouse answering — on BOTH
+        // sides of its slot read — and issued nothing. Read from the flag rather than inferred from
+        // r.Model, because the model-change handler can null SeededModel between the write and this
+        // line, and the arm below would then miss it and report a refusal as a plain failure.
         // r.ConnectionChanged: the mouse was adopted DURING the write, inside the lock — the
-        // WITHIN-operation question, where the connection id is the right answer, and the one case
-        // no pre-write check can prevent.
+        // WITHIN-operation question, where the connection id is the right answer. An adoption caught
+        // before any byte leaves is refused above instead; what reaches here is one that landed once
+        // the write was already on the wire, which no pre-write check can undo.
         // r.Model != SeededModel: a hop onto the OTHER mouse landed BEFORE the lock, between the
         // grid sweep that armed the undo snapshots and this click. The monitor refuses that write
         // rather than issuing it, so this arm is the same verdict read from the outside — and it
@@ -543,7 +548,7 @@ public sealed class AppHost
         // the ACROSS-TIME question, so it is asked of the MODEL: comparing ids here failed landed
         // writes whenever any unrelated USB event bumped the id. A null SeededModel means nothing
         // was seeded, so there is no snapshot to be wrong about.
-        bool stale = r.ConnectionChanged
+        bool stale = r.Refused || r.ConnectionChanged
             || (_scoped.SeededModel is { } seeded && !string.Equals(r.Model, seeded, StringComparison.Ordinal));
         if (stale)
         {
@@ -554,24 +559,37 @@ public sealed class AppHost
             // NEW mouse's active slot and report it applied (hard rule 2, review round 1).
             if (_dashboardVm is { } changedVm)
             {
-                Dispatch(() => changedVm.ResetForNewMouse());
+                Dispatch(() =>
+                {
+                    changedVm.ResetForNewMouse();
+                    // ResetForNewMouse blanks the card; this says WHY, on the one status line the
+                    // compact chip row does not have. Nothing failed and nothing was written, so the
+                    // user must not be told to wiggle a mouse that is working. The reseed's own
+                    // inventory read clears it again.
+                    changedVm.SetProfileNote(CalloutViewModel.MouseChangedText);
+                });
                 _ = RecoverFromReconnectAsync(changedVm);
             }
-            return false;
+            return WriteOutcome.MouseChanged;
         }
         // the slot was only just learned (the card said "state unknown"): let the card + grid
         // catch up so the other chips stop showing placeholders and gain undo snapshots
         if (r.Verified && resolvedOnDemand && _dashboardVm is { } dvm) _ = RefreshProfileAsync(dvm);
-        return r.Verified;
+        return r.Verified ? WriteOutcome.Applied : WriteOutcome.Failed;
     }
 
     /// <summary>Settings-overlay "Reset all to factory": runs the counted reset (each chip shows its
     /// own verified result too) and reports the outcome via SetResetNote, since the overlay/scrim
-    /// hides the chips for the several seconds of HID I/O this takes.</summary>
+    /// hides the chips for the several seconds of HID I/O this takes.
+    /// <para>An aborted run gets its own note: the mouse changed partway, so the run STOPPED, and the
+    /// user is owed what did and did not change rather than a tally that reads like a full pass.</para></summary>
     private static async Task RunResetAllAsync(SettingsView view, DashboardViewModel vm)
     {
-        var (ok, failed) = await vm.ResetAllAsync();
-        view.SetResetNote(failed == 0 ? $"All {ok} buttons reset" : $"{failed} failed — retry from the chips");
+        var (ok, failed, skipped) = await vm.ResetAllAsync();
+        view.SetResetNote(
+            skipped > 0 ? $"Mouse changed — stopped: {ok} reset, {failed + skipped} not applied"
+            : failed == 0 ? $"All {ok} buttons reset"
+            : $"{failed} failed — retry from the chips");
     }
 
     private void SetStartup(bool enable)

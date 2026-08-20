@@ -125,7 +125,52 @@ public sealed class AtomicButtonWriteTests
 
         Assert.Empty(device.ButtonWrites);        // nothing landed on the mouse that IS here
         Assert.False(r.Verified);
+        Assert.True(r.Refused);                   // stated outright, not left to be inferred
         Assert.Equal("Naga V3 Pro", r.Model);     // and the caller is told which mouse it is really on
+    }
+
+    /// <summary>The check before the slot read cannot cover the slot read itself: that read IS the
+    /// device call a dropped handle re-scans on, and the re-scan can adopt the other mouse. Without a
+    /// second comparison after it the bytes still land on the V3 and only the ConnectionChanged flag
+    /// reports it — a verdict about damage already done, which is no protection for the undo path
+    /// (hard rule 2). Remove that second comparison and the Empty assertion below goes red.</summary>
+    [Fact]
+    public async Task AMouseAdoptedByTheSlotReadIsRefusedBeforeAnyByteIsWritten()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2, ConnectedModel = "Naga V2 Pro" };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        // the slot read forces the pending reconnect, and it lands on the OTHER mouse — the exact
+        // window the pre-read check has already passed through
+        device.BeforeGetActiveProfile = () =>
+        {
+            device.ConnectedModel = "Naga V3 Pro";
+            device.ConnectionId++;
+        };
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(null, "Naga V2 Pro", 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.Empty(device.ButtonWrites);        // nothing reached the mouse that was adopted
+        Assert.True(r.Refused);                   // and the caller is told it was refused, not that it failed
+        Assert.False(r.Verified);
+        Assert.Equal("Naga V3 Pro", r.Model);     // reported as the mouse actually there
+    }
+
+    /// <summary>The same reconnect onto the SAME model is not a reason to refuse: every byte the
+    /// caller holds is still about this mouse. Guards the second comparison against becoming an
+    /// id check by accident.</summary>
+    [Fact]
+    public async Task ASameModelReconnectDuringTheSlotReadStillWrites()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2, ConnectedModel = "Naga V2 Pro" };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        device.BeforeGetActiveProfile = () => device.ConnectionId++;
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(null, "Naga V2 Pro", 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.Single(device.ButtonWrites);
+        Assert.False(r.Refused);
     }
 
     /// <summary>The refusal is not a blanket "no writes while an expectation is set": the mouse

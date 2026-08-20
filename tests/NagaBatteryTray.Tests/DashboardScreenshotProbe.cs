@@ -73,7 +73,7 @@ public class DashboardScreenshotProbe
         }
 
         var vm = new DashboardViewModel(new AppSettings(), runAtStartup: false,
-            (p, k, m, u) => Task.FromResult(true), (p, r) => Task.FromResult(true));
+            (p, k, m, u) => Task.FromResult(WriteOutcome.Applied), (p, r) => Task.FromResult(WriteOutcome.Applied));
 
         // seeded online state ≈ the user's real dashboard: 48% wireless, 1600 DPI, slot 1 of 3,
         // grid = F1..F12 (keyboard category 0x02, data [modifiers, usage], F1 = usage 0x3A)

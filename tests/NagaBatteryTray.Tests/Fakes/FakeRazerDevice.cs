@@ -82,7 +82,16 @@ public sealed class FakeRazerDevice : IRazerDevice
     public bool SetActiveProfileResult { get; set; } = true;
     public List<byte> ActiveProfileSets { get; } = new();
 
-    public Task<byte?> GetActiveProfileAsync(CancellationToken ct) => Task.FromResult(ActiveProfile);
+    /// <summary>Runs just before the active-slot read — the same device-call-boundary hook as
+    /// BeforeSetButton/BeforeGetButton. That read is the call a dropped handle re-scans on, so this
+    /// is where a test makes the mouse change underneath a write in progress.</summary>
+    public Action? BeforeGetActiveProfile { get; set; }
+
+    public Task<byte?> GetActiveProfileAsync(CancellationToken ct)
+    {
+        BeforeGetActiveProfile?.Invoke();
+        return Task.FromResult(ActiveProfile);
+    }
 
     public Task<bool> SetActiveProfileAsync(byte slot, CancellationToken ct)
     {

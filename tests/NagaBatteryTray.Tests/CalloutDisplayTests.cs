@@ -5,7 +5,7 @@ using Xunit;
 public sealed class CalloutDisplayTests
 {
     private static CalloutViewModel Build() =>
-        new(1, (_, _, _, _) => Task.FromResult(true), (_, _) => Task.FromResult(true));
+        new(1, (_, _, _, _) => Task.FromResult(WriteOutcome.Applied), (_, _) => Task.FromResult(WriteOutcome.Applied));
 
     [Fact]
     public void TheOneByteStubReadsAsNotSet()

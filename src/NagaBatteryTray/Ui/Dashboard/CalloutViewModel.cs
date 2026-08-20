@@ -2,6 +2,19 @@ using NagaBatteryTray.Hid;
 
 namespace NagaBatteryTray.Ui.Dashboard;
 
+/// <summary>What one write attempt actually did, as the chip and any bulk run need to tell them
+/// apart (spec 2026-08-19 §4.10).
+/// <list type="bullet">
+/// <item>Applied — verified on the mouse (or already identical).</item>
+/// <item>Failed — the write was issued and did not verify. The user's retry case, and the only one
+/// that may show as a failure.</item>
+/// <item>MouseChanged — NOTHING was written, because the mouse underneath is not the one the caller
+/// was seeded from (or it moved mid-write, voiding the verdict). Not a failure: the mouse is fine,
+/// the dashboard is already reseeding onto the one that IS there, and a bulk run must STOP rather
+/// than write its remaining buttons into it.</item>
+/// </list></summary>
+public enum WriteOutcome { Applied, Failed, MouseChanged }
+
 /// <summary>One thumb-grid button chip: instant-apply state machine
 /// (Idle → Capturing → Writing → Confirmed | Failed) with a one-shot undo window after each
 /// verified write. The write delegates are AppHost's active-slot pipeline; Kind=Default means
@@ -10,8 +23,8 @@ namespace NagaBatteryTray.Ui.Dashboard;
 /// there — including Synapse macros/mouse functions the app can't otherwise model.</summary>
 public sealed class CalloutViewModel : ObservableObject
 {
-    public delegate Task<bool> WriteBinding(int position, ButtonActionKind kind, byte modifiers, byte usage);
-    public delegate Task<bool> WriteRaw(int position, RawButtonAction raw);
+    public delegate Task<WriteOutcome> WriteBinding(int position, ButtonActionKind kind, byte modifiers, byte usage);
+    public delegate Task<WriteOutcome> WriteRaw(int position, RawButtonAction raw);
 
     private readonly WriteBinding _write;
     private readonly WriteRaw _writeRaw;
@@ -20,6 +33,13 @@ public sealed class CalloutViewModel : ObservableObject
     private const string PendingText = "…";
     private const string UnsetText = "Not set";
     private const string ReadFailedText = "—";
+    /// <summary>A real failure: the write went out and did not verify, so wiggling is the fix.</summary>
+    private const string WriteFailedText = "Not applied — wiggle the mouse and retry";
+    /// <summary>A refusal: nothing was written and nothing is wrong with the mouse, so it must not
+    /// borrow the failure copy — telling the user to wiggle a working mouse is the false-failure this
+    /// pass exists to remove. AppHost puts the same words on the profile card, which is the one status
+    /// line the compact chip row does not have.</summary>
+    internal const string MouseChangedText = "Mouse changed — reloading";
 
     private ButtonActionKind _kind = ButtonActionKind.Default;
     private byte _mods, _usage;
@@ -158,8 +178,8 @@ public sealed class CalloutViewModel : ObservableObject
         return ApplyAsync(ButtonActionKind.Key, modifiers, usage, offerUndo: true);
     }
 
-    public Task<bool> DisableAsync() => ApplyAsync(ButtonActionKind.Disabled, 0, 0, offerUndo: true);
-    public Task<bool> DefaultAsync() => ApplyAsync(ButtonActionKind.Default, 0, 0, offerUndo: true);
+    public Task<WriteOutcome> DisableAsync() => ApplyAsync(ButtonActionKind.Disabled, 0, 0, offerUndo: true);
+    public Task<WriteOutcome> DefaultAsync() => ApplyAsync(ButtonActionKind.Default, 0, 0, offerUndo: true);
 
     /// <summary>Raw restore (spec §13.2): write the pre-overwrite snapshot back verbatim —
     /// works for actions the app can't model. One-shot; busy guard BEFORE consuming CanUndo:
@@ -173,18 +193,21 @@ public sealed class CalloutViewModel : ObservableObject
         IsBusy = true;
         Failed = false;
         Status = "Writing…";
-        bool ok = await _writeRaw(Position, prev);
+        var outcome = await _writeRaw(Position, prev);
         IsBusy = false;
-        if (!ok)
+        if (outcome != WriteOutcome.Applied)
         {
-            Status = "Not applied — wiggle the mouse and retry";
-            Failed = true;
+            bool moved = outcome == WriteOutcome.MouseChanged;
+            Status = moved ? MouseChangedText : WriteFailedText;
+            Failed = !moved; // a refusal is not a failure: nothing was written and nothing is wrong
             // reopen rather than burn: the snapshot may be the only copy of an unmodelable
             // Synapse action, and it's still valid — the mouse still holds the new binding
             // (review find). One transient failure must not lose the restore forever. A
             // SUPERSEDED window (slot changed mid-restore) must NOT reopen, though — its
-            // snapshot no longer belongs to the displayed slot (review find).
-            if (gen == _snapshotGen) _ = OpenUndoWindowAsync();
+            // snapshot no longer belongs to the displayed slot (review find). Nor may a MOUSE
+            // CHANGE reopen it: the snapshot describes the mouse that left, so ↶ would write one
+            // mouse's raw bytes into another — exactly what hard rule 2 exists to stop.
+            if (!moved && gen == _snapshotGen) _ = OpenUndoWindowAsync();
             return;
         }
         if (gen == _snapshotGen)
@@ -198,12 +221,12 @@ public sealed class CalloutViewModel : ObservableObject
         Status = "Applied";
     }
 
-    /// <summary>True = the binding is verified on the mouse (written, or already identical).
-    /// False = busy-skipped or the write failed — callers counting outcomes (reset-all) use
-    /// this, never the display Status string.</summary>
-    private async Task<bool> ApplyAsync(ButtonActionKind kind, byte modifiers, byte usage, bool offerUndo)
+    /// <summary>Applied = the binding is verified on the mouse (written, or already identical).
+    /// Failed = busy-skipped or the write failed. MouseChanged = it was refused because the mouse
+    /// moved. Callers counting outcomes (reset-all) use this, never the display Status string.</summary>
+    private async Task<WriteOutcome> ApplyAsync(ButtonActionKind kind, byte modifiers, byte usage, bool offerUndo)
     {
-        if (IsBusy) return false;
+        if (IsBusy) return WriteOutcome.Failed;
         // no-op suppression (ported from the staged model): re-applying the exact current
         // binding skips the HID round-trip — no false "Not applied" when the mouse naps.
         // Default stays exempt: it's the always-available repair path. Requires a clean display
@@ -212,15 +235,21 @@ public sealed class CalloutViewModel : ObservableObject
         // reach the mouse (review find).
         if (kind != ButtonActionKind.Default && _deviceText is null
             && kind == _kind && modifiers == _mods && usage == _usage)
-        { Status = "Applied"; return true; }
+        { Status = "Applied"; return WriteOutcome.Applied; }
         var snapshot = _currentRaw; // what's on the mouse right now; null = not yet known
         int gen = _snapshotGen;     // if a new sweep starts mid-write, this snapshot is void
         IsBusy = true;
         Failed = false;
         Status = "Writing…";
-        bool ok = await _write(Position, kind, modifiers, usage);
+        var outcome = await _write(Position, kind, modifiers, usage);
         IsBusy = false;
-        if (!ok) { Status = "Not applied — wiggle the mouse and retry"; Failed = true; return false; }
+        if (outcome != WriteOutcome.Applied)
+        {
+            bool moved = outcome == WriteOutcome.MouseChanged;
+            Status = moved ? MouseChangedText : WriteFailedText;
+            Failed = !moved; // a refusal is not a failure: nothing was written and nothing is wrong
+            return outcome;
+        }
 
         if (gen == _snapshotGen)
         {
@@ -236,7 +265,7 @@ public sealed class CalloutViewModel : ObservableObject
         // no snapshot (write landed before this chip's first sweep read) or a superseded one
         // (sweep/slot change mid-write) → no undo window: ↶ must never write a guess (§13.2)
         if (offerUndo && snapshot is not null && gen == _snapshotGen) _ = OpenUndoWindowAsync();
-        return true;
+        return WriteOutcome.Applied;
     }
 
     /// <summary>The wire form of a modeled action — what the mouse holds after a verified write

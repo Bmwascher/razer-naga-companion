@@ -86,19 +86,28 @@ public sealed class DashboardViewModel : ObservableObject
     private bool _anyCapturing;
 
     /// <summary>Settings-overlay "Reset all to factory": Default-write every grid button in position
-    /// order via each chip's own instant-apply pipeline, counting verified successes (Status ==
-    /// "Applied") vs failures — so the caller can report a countable outcome instead of silence
-    /// while the several seconds of HID I/O run behind the overlay/scrim.</summary>
-    public async Task<(int Ok, int Failed)> ResetAllAsync()
+    /// order via each chip's own instant-apply pipeline, counting verified successes vs failures — so
+    /// the caller can report a countable outcome instead of silence while the several seconds of HID
+    /// I/O run behind the overlay/scrim.
+    /// <para>Skipped &gt; 0 means the run ABORTED partway because the mouse changed underneath it; the
+    /// caller must say so rather than report a tally as if the whole grid had been attempted.</para></summary>
+    public async Task<(int Ok, int Failed, int Skipped)> ResetAllAsync()
     {
         int ok = 0, failed = 0;
-        foreach (var c in Callouts)
+        for (int i = 0; i < Callouts.Count; i++)
         {
             // count the write's own verdict, not the display Status string — a busy chip's
             // in-flight write would otherwise leave a stale "Applied"/"Writing…" miscount
-            if (await c.DefaultAsync()) ok++; else failed++;
+            var outcome = await Callouts[i].DefaultAsync();
+            // A refused write ABORTS the run, it does not merely score zero. By the time the refusal
+            // is reported the host has already cleared the scoped state, so the expected model is
+            // null again — and a null expectation is deliberately permissive. Carrying on would
+            // therefore write factory defaults onto the mouse that was just adopted, one button at a
+            // time, with every later write reported as applied (review find).
+            if (outcome == WriteOutcome.MouseChanged) return (ok, failed, Callouts.Count - i);
+            if (outcome == WriteOutcome.Applied) ok++; else failed++;
         }
-        return (ok, failed);
+        return (ok, failed, 0);
     }
 
     // ---- header ----

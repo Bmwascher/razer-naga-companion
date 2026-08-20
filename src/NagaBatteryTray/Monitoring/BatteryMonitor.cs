@@ -134,9 +134,14 @@ public sealed class BatteryMonitor : IDisposable
     /// It is the identity a caller compares ACROSS TIME (is this undo snapshot still about the mouse
     /// in front of me), because Connection increases on every adoption including a reconnect to the
     /// same mouse - comparing ids across time reds a landed write over an unrelated USB event
-    /// (spec 4.10 point 3).</para></summary>
+    /// (spec 4.10 point 3).</para>
+    /// <para>Refused = the expected mouse was not the mouse answering, so NOTHING was written. It is
+    /// stated outright rather than left to be inferred from Model, because the caller's copy of the
+    /// expectation can be cleared by an unrelated model-change handler between issuing the write and
+    /// reading this result - and a refusal that then reads as an ordinary failure tells the user to
+    /// retry on a mouse that is working perfectly.</para></summary>
     public readonly record struct ButtonWriteResult(
-        bool Verified, byte? Slot, bool ConnectionChanged, int Connection, string? Model);
+        bool Verified, byte? Slot, bool ConnectionChanged, int Connection, string? Model, bool Refused = false);
 
     /// <summary>Read the active slot, write, and read back to verify - all inside ONE read-lock
     /// acquisition. Split across three acquisitions (as it was before 2026-08-19) a reselect can land
@@ -155,7 +160,9 @@ public sealed class BatteryMonitor : IDisposable
     /// no protection at all for a raw undo restore (hard rule 2, spec §4.10 points 3-4). Refusing on
     /// the MODEL cannot fire on an ordinary same-model reconnect - that is why the id may not be
     /// used here. Null expectedModel never blocks, the same rule the unknown-inventory case follows:
-    /// nothing was seeded, so there is no snapshot to protect.</para>
+    /// nothing was seeded, so there is no snapshot to protect. The comparison is made TWICE, once on
+    /// each side of the slot read, because that read is itself a device call that can adopt the other
+    /// mouse - a single check before it guarantees nothing about the mouse the write lands on.</para>
     /// <para>On the path where the lock was never entered (the WaitAsync failure) Connection is a
     /// best-effort read of whatever mouse is current, tied to nothing this operation did; Verified is
     /// false there, so no caller acts on it.</para></summary>
@@ -180,9 +187,18 @@ public sealed class BatteryMonitor : IDisposable
             // means the caller's snapshots describe the other mouse, so nothing may be written at
             // all. Inside the try so the lock is still released on the refusal path.
             if (expectedModel is { } want && !string.Equals(entryModel, want, StringComparison.Ordinal))
-                return new(false, null, false, entry, entryModel);
+                return new(false, null, false, entry, entryModel, Refused: true);
             if (await _device.GetActiveProfileAsync(_cts.Token) is not { } slot)
                 return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, entryModel);
+            // ...and AGAIN, because the check above cannot cover the read that has just run. The slot
+            // read is the device call that forces a pending reconnect, and a reconnect can adopt the
+            // OTHER mouse; without this second look the bytes still land there and only the
+            // ConnectionChanged flag reports it afterwards - a verdict, not a protection. Asking the
+            // same question one call later, still inside the lock and still before SetButtonAsync,
+            // costs nothing and closes it. The displacing model is reported, not the entry one, so
+            // the caller is told which mouse it is really on.
+            if (expectedModel is { } still && !string.Equals(_device.ConnectedModel, still, StringComparison.Ordinal))
+                return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, _device.ConnectedModel, Refused: true);
             if (createdSlots is not null && Array.IndexOf(createdSlots, slot) < 0)
                 return new(false, slot, _device.ConnectionId != entry, _device.ConnectionId, entryModel);
 
