@@ -181,10 +181,18 @@ public sealed class AppHost
     }
 
     // 0 = idle. One recovery at a time: a write-stale hand-off and a sweep abort can fire together,
-    // and each Reset()s under the other. A second call is DROPPED, never queued — no timer, no
-    // thread, no retry loop, no backoff (hard rule 1). Recovery's own nested reseed is dropped by
-    // the same flag, which is what stops a guard that keeps firing from recursing.
+    // and each Reset()s under the other. No timer, no thread, no retry loop, no backoff (hard rule 1).
     private int _recovering;
+
+    // A recovery that arrives while one is already running is COALESCED, not dropped: it sets this
+    // bit and the holder runs one more pass for it. Dropping it re-opened the very mid-state the
+    // hand-off exists to prevent — recovery calls ReseedDeviceAsync while holding the flag, so that
+    // nested reseed's own guard could fire and lose its request with the UI already reset to blank
+    // and nothing left to retry (review round 2). Many drops collapse into ONE follow-up pass, never
+    // a queue: it is a single bit, cleared at the TOP of each pass, so a request arriving during a
+    // pass earns one further round instead of being swallowed by that pass's own clear. It is not
+    // cleared on exit, so a request landing in the release window is picked up by the next holder.
+    private int _recoveryRequested;
 
     /// <summary>Recover from a reconnect that nothing announced. A lock-waiting battery read
     /// republishes the connection's identity FIRST; only then is it safe to reload anything, because
@@ -192,13 +200,24 @@ public sealed class AppHost
     /// OnDeviceStateChanged has already reset and reseeded, so this does not do it twice.</summary>
     private async Task RecoverFromReconnectAsync(DashboardViewModel vm)
     {
-        if (Interlocked.CompareExchange(ref _recovering, 1, 0) != 0) return;
+        if (Interlocked.CompareExchange(ref _recovering, 1, 0) != 0)
+        {
+            Volatile.Write(ref _recoveryRequested, 1); // the holder will run one more pass for this
+            return;
+        }
         try
         {
-            string? before = _monitor.State.Model;
-            await Task.Run(() => _monitor.RefreshNowWaitingAsync());
-            if (!ReferenceEquals(_dashboardVm, vm)) return;
-            if (string.Equals(_monitor.State.Model, before, StringComparison.Ordinal)) await ReseedDeviceAsync(vm);
+            do
+            {
+                // cleared BEFORE the pass runs, so this pass answers every request made so far and a
+                // request made DURING it survives into the loop check below (no spin, no loss)
+                Volatile.Write(ref _recoveryRequested, 0);
+                string? before = _monitor.State.Model;
+                await Task.Run(() => _monitor.RefreshNowWaitingAsync());
+                if (!ReferenceEquals(_dashboardVm, vm)) return;
+                if (string.Equals(_monitor.State.Model, before, StringComparison.Ordinal)) await ReseedDeviceAsync(vm);
+            }
+            while (Volatile.Read(ref _recoveryRequested) == 1);
         }
         finally { Volatile.Write(ref _recovering, 0); }
     }
@@ -267,11 +286,13 @@ public sealed class AppHost
         // the handle) leaves every byte read so far still true, and throwing the sweep away for it
         // would red the grid over a plugged-in headset (spec §4.10 point 3).
         string? model = _monitor.ConnectedModel;
+        bool landed = false; // did ANY read come back — i.e. does a chip hold a snapshot to be wrong about
         for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
         {
             if (gen != Volatile.Read(ref _gridSweep) || !ReferenceEquals(_dashboardVm, vm)) return;
             int p = pos;
             var raw = await Task.Run(() => _monitor.GetButtonAsync(slot, NagaV2ProButtons.IdForPosition(p)));
+            landed |= raw is not null;
             if (gen != Volatile.Read(ref _gridSweep) || !ReferenceEquals(_dashboardVm, vm)) return;
             if (!string.Equals(_monitor.ConnectedModel, model, StringComparison.Ordinal))
             {
@@ -285,8 +306,11 @@ public sealed class AppHost
             Dispatch(() => vm.Callout(p).SetFromDevice(raw));
         }
         // the whole grid was read off one mouse: stamp it, so a write that arrives after a later hop
-        // can tell that these snapshots belong to a mouse that is no longer here
-        _scoped.SeededModel = model;
+        // can tell that these snapshots belong to a mouse that is no longer here. Only a sweep that
+        // actually LANDED may stamp: twelve null reads leave no snapshot anywhere, and stamping for
+        // them would tell the write path "the snapshots are current" when there are none — the same
+        // rule RefreshProfileAsync applies to its own seed (review round 2).
+        if (landed) _scoped.SeededModel = model;
     }
 
     /// <summary>Dropdown pick: switch the mouse to ANY listed onboard slot (0x05/0x04,

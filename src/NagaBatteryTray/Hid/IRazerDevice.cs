@@ -56,9 +56,10 @@ public interface IRazerDevice : IDisposable
     /// of me". <see cref="ConnectionId"/> cannot answer that — it increases on every adoption,
     /// including a reconnect to the same mouse, so any unrelated WM_DEVICECHANGE would fail a
     /// landed write. The model survives a dropped handle, so it still answers afterwards
-    /// (spec §4.10 point 3). Default null: a test double with no modelled connection has no answer.
-    /// </summary>
-    string? ConnectedModel => null;
+    /// (spec §4.10 point 3). REQUIRED of every implementation, test doubles included: a default
+    /// returning null let the fake inherit "no mouse", which made the identity comparison the whole
+    /// guard rests on untestable through this seam (hard rule 6, review round 2).</summary>
+    string? ConnectedModel { get; }
 
     /// <summary>Drop any cached connection so the next call re-selects the active interface. Used after a
     /// device-change (e.g. USB-C plug flips wireless&lt;-&gt;wired) where the cached handle would read stale.</summary>

@@ -78,6 +78,39 @@ public sealed class AtomicButtonWriteTests
         Assert.False(r.Verified);   // a changed connection is never a verified write
     }
 
+    /// <summary>The across-time identity the caller compares its undo snapshots against: the write
+    /// must report the MODEL it ran under, not nothing.</summary>
+    [Fact]
+    public async Task TheWriteReportsTheModelItRanUnder()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2, ConnectedModel = "Naga V3 Pro" };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.True(r.Verified);
+        Assert.Equal("Naga V3 Pro", r.Model);
+    }
+
+    /// <summary>And it reports the mouse actually there, not a constant: hop the device onto the
+    /// other model between two writes and the reported identity follows it — which is what lets the
+    /// caller tell a snapshot taken on one mouse from a write that landed on another.</summary>
+    [Fact]
+    public async Task TheReportedModelFollowsTheDevice()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2, ConnectedModel = "Naga V2 Pro" };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var first = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        device.ConnectedModel = "Naga V3 Pro";   // the other mouse is what answers now
+        var second = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.Equal("Naga V2 Pro", first.Model);
+        Assert.Equal("Naga V3 Pro", second.Model);
+    }
+
     /// <summary>The point of the single lock acquisition: nothing can run between the write's own
     /// steps. Two battery polls are queued on the read lock — one before the write's first step
     /// (covering the resolve-to-write boundary) and one from inside the write itself (covering the

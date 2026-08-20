@@ -106,6 +106,11 @@ public sealed class FakeRazerDevice : IRazerDevice
     /// <summary>Settable so a test can simulate the mouse changing underneath an operation.</summary>
     public int ConnectionId { get; set; }
 
+    /// <summary>The connected mouse's display name. Settable so a test can simulate a hop onto the
+    /// OTHER model — the across-time identity the write path compares. Defaults to a real supported
+    /// model so a test that never touches it still runs "on a mouse".</summary>
+    public string? ConnectedModel { get; set; } = "Naga V2 Pro";
+
     public int ResetCount { get; private set; }
     public void Reset() => ResetCount++;
 
