@@ -31,9 +31,10 @@
 | `src/NagaBatteryTray/Settings/AppSettings.cs` | new `PreferredMouse`, new `ProfileNamesByMouse`, retire `ProfileNames` |
 | `src/NagaBatteryTray/Settings/JsonSettingsStore.cs` | one-time migration of legacy profile names |
 | `src/NagaBatteryTray/Hid/RazerProtocol.cs` | preference-aware scan order helpers (pure, testable) |
+| `src/NagaBatteryTray/Hid/ConnectionPolicy.cs` | **new** — the reselect decision, extracted so it is testable without Win32 |
 | `src/NagaBatteryTray/Hid/IRazerDevice.cs` | `PreferredModel`, `DiscoverReachableAsync` |
 | `src/NagaBatteryTray/Hid/RazerDevice.cs` | preference-ordered connect, reselect on the battery path, discovery |
-| `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs` | lock-serialized pass-throughs for preference + discovery |
+| `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs` | lock-serialized preference, discovery, and the atomic resolve-write-verify |
 | `src/NagaBatteryTray/Monitoring/DeviceScopedState.cs` | **new** — per-mouse cache that clears on model change |
 | `src/NagaBatteryTray/AppHost.cs` | wire the state object, the write-slot guard, the selector handler |
 | `src/NagaBatteryTray/Ui/Dashboard/CalloutViewModel.cs` | render the 1-byte stub as "Not set" |
@@ -349,9 +350,95 @@ git commit -m "feat(hid): preference-aware scan order helpers"
 - Consumes: `RazerProtocol.ScanPidsFor`, `RazerProtocol.PidsForModel` (Task 2).
 - Produces on `IRazerDevice`: `string? PreferredModel { get; set; }` and `Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct)`. Tasks 4 and 7 consume both.
 
-`RazerDevice` is one of the deliberate no-unit-test exceptions (real HID transport, hard rule 6). Two lines of the spec's §6 test list therefore have no unit test and are covered by acceptance step 2 instead: "return to the preferred mouse on the next battery read" and "button reads, writes, DPI and profile calls never trigger a re-scan". The second is also enforced by reading the diff — `reselect: true` must appear exactly once, in `ReadAsync`. Everything else here rests on Task 2's tested ordering.
+`RazerDevice` wraps real Win32 HID calls and is a deliberate no-unit-test exception (hard rule 6). That exception covers the transport, not the decision of which mouse to talk to. This task therefore splits the two: the **decision** moves into a pure `ConnectionPolicy` that Step 1 tests exhaustively, and the **rollback** is made structural with `try/finally` rather than left to a test that cannot reach it. Only "return to the preferred mouse on the next battery read" remains acceptance-only (acceptance step 2).
 
-- [ ] **Step 1: Extend the interface**
+- [ ] **Step 1: Extract and test the connection decision**
+
+Create `src/NagaBatteryTray/Hid/ConnectionPolicy.cs`:
+
+```csharp
+namespace NagaBatteryTray.Hid;
+
+/// <summary>What a device call should do with the connection it already has. Pure decision, no
+/// handles and no Win32, so the rule that fixed the sticky-selection defect is testable while the
+/// transport stays a no-unit-test exception (spec 2026-08-19 §4.3).</summary>
+internal enum ConnectionDecision
+{
+    /// <summary>Keep the live handle untouched. Every non-battery call lands here.</summary>
+    KeepLive,
+    /// <summary>Live, but on the wrong mouse and the caller may reselect: probe the preferred model
+    /// only, and keep the live connection if it does not answer.</summary>
+    ProbePreferred,
+    /// <summary>No usable handle: scan every candidate in preference order.</summary>
+    FullScan,
+}
+
+internal static class ConnectionPolicy
+{
+    internal static ConnectionDecision Decide(bool hasLiveHandle, string? currentModel, string? preferredModel, bool reselect)
+    {
+        if (!hasLiveHandle) return ConnectionDecision.FullScan;
+        if (!reselect || preferredModel is null) return ConnectionDecision.KeepLive;
+        return string.Equals(currentModel, preferredModel, StringComparison.OrdinalIgnoreCase)
+            ? ConnectionDecision.KeepLive
+            : ConnectionDecision.ProbePreferred;
+    }
+}
+```
+
+Create `tests/NagaBatteryTray.Tests/ConnectionPolicyTests.cs`:
+
+```csharp
+using NagaBatteryTray.Hid;
+
+public sealed class ConnectionPolicyTests
+{
+    [Fact]
+    public void NoHandleAlwaysScans()
+    {
+        Assert.Equal(ConnectionDecision.FullScan,
+            ConnectionPolicy.Decide(false, null, "Naga V3 Pro", reselect: true));
+        Assert.Equal(ConnectionDecision.FullScan,
+            ConnectionPolicy.Decide(false, null, null, reselect: false));
+    }
+
+    // the sticky-selection fix: the battery path is the ONLY caller that may reselect
+    [Fact]
+    public void ANonBatteryCallNeverReselectsALiveHandle()
+    {
+        Assert.Equal(ConnectionDecision.KeepLive,
+            ConnectionPolicy.Decide(true, "Naga V2 Pro", "Naga V3 Pro", reselect: false));
+    }
+
+    [Fact]
+    public void TheBatteryPathProbesWhenTheLiveMouseIsNotThePreferredOne()
+    {
+        Assert.Equal(ConnectionDecision.ProbePreferred,
+            ConnectionPolicy.Decide(true, "Naga V2 Pro", "Naga V3 Pro", reselect: true));
+    }
+
+    [Fact]
+    public void AlreadyOnThePreferredMouseCostsNothing()
+    {
+        Assert.Equal(ConnectionDecision.KeepLive,
+            ConnectionPolicy.Decide(true, "Naga V3 Pro", "Naga V3 Pro", reselect: true));
+        Assert.Equal(ConnectionDecision.KeepLive,
+            ConnectionPolicy.Decide(true, "naga v3 pro", "Naga V3 Pro", reselect: true));
+    }
+
+    [Fact]
+    public void NoPreferenceNeverProbes()
+    {
+        Assert.Equal(ConnectionDecision.KeepLive,
+            ConnectionPolicy.Decide(true, "Naga V2 Pro", null, reselect: true));
+    }
+}
+```
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~ConnectionPolicyTests"`
+Expected: fails to compile first, then 5 passing once `ConnectionPolicy.cs` exists.
+
+- [ ] **Step 2: Extend the interface**
 
 In `IRazerDevice.cs`, add above `void Reset();`:
 
@@ -365,15 +452,24 @@ In `IRazerDevice.cs`, add above `void Reset();`:
     /// SupportedMice order. Costs one probe per model, so callers use it on explicit user actions
     /// only — never on a timer. Leaves the connection on the preferred/first reachable mouse.</summary>
     Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct);
+
+    /// <summary>Increases every time a collection is adopted, including a reconnect to the same
+    /// model. The app's only reliable "am I still talking to the same mouse": a non-battery call can
+    /// reconnect onto a different mouse after a dropped handle, and nothing publishes that
+    /// (spec 2026-08-19 §4.10).</summary>
+    int ConnectionId { get; }
 ```
 
-- [ ] **Step 2: Implement in RazerDevice — split connect out of EnsureConnectedAsync**
+- [ ] **Step 3: Implement in RazerDevice — split connect out of EnsureConnectedAsync**
 
 Replace `EnsureConnectedAsync` and `FindControlPaths` in `RazerDevice.cs` with:
 
 ```csharp
     /// <summary>Which model to prefer (spec 2026-08-19 §4.1). Null = scan order.</summary>
     public string? PreferredModel { get; set; }
+
+    /// <summary>Bumped on every adoption — see IRazerDevice.ConnectionId (spec §4.10).</summary>
+    public int ConnectionId { get; private set; }
 
     /// <summary>Ensures <see cref="_handle"/> points at a collection that actually answers, and returns its
     /// working transaction id (0 = none reachable). Reuses a live connection cheaply; on (re)connect it tries
@@ -386,37 +482,55 @@ Replace `EnsureConnectedAsync` and `FindControlPaths` in `RazerDevice.cs` with:
     /// false, so button/DPI/profile calls never trigger a scan (spec §4.3).</para></summary>
     private async Task<byte> EnsureConnectedAsync(CancellationToken ct, bool reselect = false)
     {
-        if (_handle is { IsInvalid: false } && _tid != 0)
+        bool live = _handle is { IsInvalid: false } && _tid != 0;
+        switch (ConnectionPolicy.Decide(live, _model, PreferredModel, reselect))
         {
-            if (!reselect || PreferredModel is null) return _tid;
-            if (string.Equals(_model, PreferredModel, StringComparison.OrdinalIgnoreCase)) return _tid;
-            return await AdoptPreferredAsync(ct);
+            case ConnectionDecision.KeepLive:
+                return _tid;
+            case ConnectionDecision.ProbePreferred:
+                return await AdoptPreferredAsync(ct);
+            default:
+                CloseHandle();
+                return await ConnectAsync(RazerProtocol.ScanPidsFor(PreferredModel), ct);
         }
-        CloseHandle();
-        return await ConnectAsync(RazerProtocol.ScanPidsFor(PreferredModel), ct);
     }
 
     /// <summary>Running on a non-preferred mouse: probe ONLY the preferred model. Adopt it if it answers,
     /// otherwise put the live connection back untouched — a sleeping preference must never cost the user
-    /// the mouse that is actually awake (spec §4.3).</summary>
+    /// the mouse that is actually awake (spec §4.3).
+    /// <para>The rollback is a finally, not an if: an exception or a cancellation between the detach and
+    /// the adoption would otherwise leave the app with no connection AND leak the detached handle.</para></summary>
     private async Task<byte> AdoptPreferredAsync(CancellationToken ct)
     {
         var liveHandle = _handle;
         byte liveTid = _tid;
         bool liveWired = _wired;
         string? liveModel = _model;
+        bool adopted = false;
 
         _handle = null; // detach so ConnectAsync's failure path can't dispose the live handle
         _tid = 0;
-
-        byte tid = await ConnectAsync(RazerProtocol.PidsForModel(PreferredModel), ct);
-        if (tid != 0) { liveHandle?.Dispose(); return tid; }
-
-        _handle = liveHandle;
-        _tid = liveTid;
-        _wired = liveWired;
-        _model = liveModel;
-        return liveTid;
+        try
+        {
+            byte tid = await ConnectAsync(RazerProtocol.PidsForModel(PreferredModel), ct);
+            adopted = tid != 0;
+            return adopted ? tid : liveTid;
+        }
+        finally
+        {
+            if (adopted)
+            {
+                liveHandle?.Dispose(); // the loser, and only the loser
+            }
+            else
+            {
+                CloseHandle();          // drop anything a partial attempt left behind
+                _handle = liveHandle;
+                _tid = liveTid;
+                _wired = liveWired;
+                _model = liveModel;
+            }
+        }
     }
 
     /// <summary>Open and verify the first collection among <paramref name="pids"/> that answers.
@@ -437,6 +551,7 @@ Replace `EnsureConnectedAsync` and `FindControlPaths` in `RazerDevice.cs` with:
                 _tid = tid;
                 _wired = RazerProtocol.IsWiredPid(pid);
                 _model = RazerProtocol.ModelNameForPid(pid);
+                ConnectionId++; // every adoption, same model or not (spec §4.10)
                 return tid;
             }
             CloseHandle();
@@ -482,7 +597,7 @@ Replace `EnsureConnectedAsync` and `FindControlPaths` in `RazerDevice.cs` with:
     }
 ```
 
-- [ ] **Step 3: Make the battery path the one reselect trigger**
+- [ ] **Step 4: Make the battery path the one reselect trigger**
 
 In `RazerDevice.ReadAsync`, change the single line:
 
@@ -496,9 +611,11 @@ to:
             byte tid = await EnsureConnectedAsync(ct, reselect: true);
 ```
 
-Leave `GetDpiAsync`, `SetDpiAsync`, `SetButtonAsync`, `GetButtonAsync`, and every profile call exactly as they are — they must not scan.
+Leave `GetDpiAsync`, `SetDpiAsync`, `SetButtonAsync`, `GetButtonAsync`, and every profile call exactly as they are.
 
-- [ ] **Step 4: Extend the fake**
+Be precise about what that buys, because the loose version of this claim hides a real hazard. Those calls never **reselect a live handle**. They can still **reconnect** when the handle has dropped — existing, wanted behaviour — and that reconnect uses preference order, so a button read mid-sweep can land on a different mouse with no battery read to announce it. `ConnectionId` is what makes that detectable; Tasks 4b and 6 are what act on it.
+
+- [ ] **Step 5: Extend the fake**
 
 In `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`, add before `Reset()`:
 
@@ -514,14 +631,17 @@ In `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`, add before `Reset()`:
         DiscoverCount++;
         return Task.FromResult<IReadOnlyList<string>>(Reachable.ToList());
     }
+
+    /// <summary>Settable so a test can simulate the mouse changing underneath an operation.</summary>
+    public int ConnectionId { get; set; }
 ```
 
-- [ ] **Step 5: Build and run the whole suite**
+- [ ] **Step 6: Build and run the whole suite**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: all green. A red build here means a caller of `FindControlPaths()` was missed — it now takes a PID array.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/NagaBatteryTray/Hid tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs
@@ -580,6 +700,31 @@ public sealed class BatteryMonitorSelectionTests
     }
 
     [Fact]
+    public async Task DiscoverMiceRepublishesTheConnectedModel()
+    {
+        var device = new FakeRazerDevice();
+        device.Reachable.Add("Naga V3 Pro");
+        device.Enqueue(new BatteryReading(70, false, true, DateTimeOffset.Now, false, "Naga V3 Pro"));
+        var monitor = Build(device);
+
+        await monitor.DiscoverMiceAsync();
+
+        Assert.Equal("Naga V3 Pro", monitor.State.Model);
+    }
+
+    [Fact]
+    public async Task AnExplicitRefreshWaitsInsteadOfSkipping()
+    {
+        var device = new FakeRazerDevice();
+        device.Enqueue(new BatteryReading(55, false, true, DateTimeOffset.Now, false, "Naga V2 Pro"));
+        var monitor = Build(device);
+
+        await monitor.RefreshNowWaitingAsync();
+
+        Assert.Equal("Naga V2 Pro", monitor.State.Model);
+    }
+
+    [Fact]
     public async Task DiscoverMiceReturnsEmptyAfterDispose()
     {
         var device = new FakeRazerDevice();
@@ -610,18 +755,52 @@ Add to `BatteryMonitor.cs`, beside the other pass-throughs:
         set => _device.PreferredModel = value;
     }
 
+    /// <summary>Which mouse the app is talking to right now, as an identity that changes on every
+    /// adoption (spec §4.10). Callers capture it before a multi-step operation and discard results
+    /// whose id no longer matches.</summary>
+    public int ConnectionId => _device.ConnectionId;
+
     /// <summary>Which supported mice answer right now, for the dashboard's selector. Blocks for the
     /// read lock like every other pass-through — this is several device probes, so it must not
-    /// interleave with the battery poll. Called on dashboard open / refresh only, never polled.</summary>
+    /// interleave with the battery poll. Called on dashboard open / refresh only, never polled.
+    /// <para>Republishes State before returning: discovery reconnects at the end and can land on a
+    /// different mouse than State names, and State only ever updates from a battery read. Without
+    /// this the selector and the profile-name key describe the wrong mouse (spec §4.4).</para></summary>
     public async Task<IReadOnlyList<string>> DiscoverMiceAsync()
     {
         try { await _readLock.WaitAsync(_cts.Token); }
         catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return Array.Empty<string>(); }
-        try { return await _device.DiscoverReachableAsync(_cts.Token); }
+        try
+        {
+            var found = await _device.DiscoverReachableAsync(_cts.Token);
+            ProcessReading(await _device.ReadAsync(_cts.Token)); // same acquisition: no one can slip between
+            return found;
+        }
         catch (OperationCanceledException) { return Array.Empty<string>(); }
         finally { _readLock.Release(); }
     }
+
+    /// <summary>Refresh behind an EXPLICIT user action (a mouse pick). Identical to RefreshNowAsync
+    /// except that it WAITS for the read lock instead of skipping when one is busy — the skip is
+    /// right for a timer tick and wrong for a user, who would see a perfectly reachable mouse
+    /// reported as unreachable because a sweep happened to be in flight (spec §4.5).</summary>
+    public Task RefreshNowWaitingAsync() => PollAsync(reconnect: true, waitForLock: true);
 ```
+
+and change `PollAsync`'s acquisition (`src/NagaBatteryTray/Monitoring/BatteryMonitor.cs:124`):
+
+```csharp
+    private async Task PollAsync(bool reconnect = false, bool waitForLock = false)
+    {
+        if (waitForLock)
+        {
+            try { await _readLock.WaitAsync(_cts.Token); }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return; }
+        }
+        else if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip
+```
+
+The rest of `PollAsync` is unchanged.
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
@@ -633,6 +812,181 @@ Expected: 3 passing.
 ```bash
 git add src/NagaBatteryTray/Monitoring/BatteryMonitor.cs tests/NagaBatteryTray.Tests/BatteryMonitorSelectionTests.cs
 git commit -m "feat(monitoring): serialize mouse preference and discovery through the read lock"
+```
+
+---
+
+## Task 4b: The atomic button write
+
+**Files:**
+- Modify: `src/NagaBatteryTray/Monitoring/BatteryMonitor.cs`
+- Modify: `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs`
+- Test: `tests/NagaBatteryTray.Tests/AtomicButtonWriteTests.cs` (create)
+
+**Interfaces:**
+- Consumes: `BatteryMonitor.ConnectionId` (Task 4).
+- Produces: `ButtonWriteResult` and `BatteryMonitor.WriteButtonVerifiedAsync(...)`. Task 6 consumes both.
+
+**Why this task exists.** Today `WriteVerifiedAsync` takes the read lock three separate times — once to resolve the slot, once to write, once to verify (`src/NagaBatteryTray/AppHost.cs:318-327`). A battery-path reselect can land between the resolve and the write, and then the app writes one mouse's slot number onto another. Clearing a cache cannot undo that: the slot is already a local variable. The sequence has to be atomic.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `tests/NagaBatteryTray.Tests/AtomicButtonWriteTests.cs`:
+
+```csharp
+using NagaBatteryTray.Hid;
+using NagaBatteryTray.Monitoring;
+using NagaBatteryTray.Settings;
+
+public sealed class AtomicButtonWriteTests
+{
+    private static BatteryMonitor Build(FakeRazerDevice device) =>
+        new(device, new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"naga-{Guid.NewGuid():N}.json")),
+            a => a());
+
+    private static readonly byte[] F1 = { 0x00, 0x3a };
+
+    [Fact]
+    public async Task AKnownSlotIsWrittenAndVerified()
+    {
+        var device = new FakeRazerDevice();
+        device.ButtonActions[(1, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(1, null, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.True(r.Verified);
+        Assert.Equal((byte)1, r.Slot);
+        Assert.Single(device.ButtonWrites);
+        Assert.Equal((byte)1, device.ButtonWrites[0].Profile);
+    }
+
+    [Fact]
+    public async Task AnUnknownSlotIsResolvedInsideTheSameOperation()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2 };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.True(r.Verified);
+        Assert.Equal((byte)2, r.Slot);
+    }
+
+    [Fact]
+    public async Task ASlotTheMouseDoesNotHaveIsNeverWritten()
+    {
+        var device = new FakeRazerDevice();
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(3, new byte[] { 1 }, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.False(r.Verified);
+        Assert.Empty(device.ButtonWrites);   // refused before any device call
+    }
+
+    [Fact]
+    public async Task AReadBackThatDoesNotMatchFailsTheWrite()
+    {
+        var device = new FakeRazerDevice();
+        device.ButtonActions[(1, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, new byte[] { 0x00 });
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(1, null, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.False(r.Verified);
+    }
+
+    [Fact]
+    public async Task AMouseChangeDuringTheOperationIsReported()
+    {
+        var device = new FakeRazerDevice();
+        device.ButtonActions[(1, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        device.BeforeGetButton = () => device.ConnectionId++;   // reconnect landed mid-operation
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(1, null, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.True(r.ConnectionChanged);
+        Assert.False(r.Verified);   // a changed connection is never a verified write
+    }
+}
+```
+
+- [ ] **Step 2: Run the tests and confirm they fail**
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~AtomicButtonWriteTests"`
+Expected: compile error — `WriteButtonVerifiedAsync` and `BeforeGetButton` do not exist.
+
+- [ ] **Step 3: Add the fake's hook**
+
+In `FakeRazerDevice.GetButtonAsync`, as the first line of the method body:
+
+```csharp
+        BeforeGetButton?.Invoke();
+```
+
+and beside `GetButtonCount`:
+
+```csharp
+    /// <summary>Runs just before a button read — lets a test simulate the connection changing
+    /// in the middle of a multi-step operation.</summary>
+    public Action? BeforeGetButton { get; set; }
+```
+
+- [ ] **Step 4: Implement the atomic write**
+
+Add to `BatteryMonitor.cs`:
+
+```csharp
+    /// <summary>Outcome of one atomic button write. Slot is the slot actually used (null = it could
+    /// not be established). ConnectionChanged = the mouse underneath changed mid-operation, so the
+    /// caller must re-seed rather than trust anything it cached.</summary>
+    public readonly record struct ButtonWriteResult(bool Verified, byte? Slot, bool ConnectionChanged);
+
+    /// <summary>Resolve the target slot, write, and read back to verify — all inside ONE read-lock
+    /// acquisition. Split across three acquisitions (as it was before 2026-08-19) a battery-path
+    /// reselect can land between the resolve and the write, and one mouse's slot number gets written
+    /// to another; clearing a cache cannot undo that, because the slot is already a local
+    /// (spec §4.10). knownSlot null = resolve it here. createdSlots null = inventory unknown, which
+    /// never blocks; a known inventory that lacks the slot refuses before any device call.</summary>
+    public async Task<ButtonWriteResult> WriteButtonVerifiedAsync(
+        byte? knownSlot, byte[]? createdSlots, byte buttonId, byte category, byte[] data)
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return new(false, null, false); }
+        int entryConnection = _device.ConnectionId;
+        try
+        {
+            byte? slot = knownSlot ?? await _device.GetActiveProfileAsync(_cts.Token);
+            if (slot is not { } s) return new(false, null, false);
+            if (createdSlots is not null && Array.IndexOf(createdSlots, s) < 0) return new(false, s, false);
+
+            bool ok = await _device.SetButtonAsync(s, buttonId, category, data, _cts.Token);
+            if (ok)
+            {
+                var readBack = await _device.GetButtonAsync(s, buttonId, _cts.Token);
+                ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
+            }
+            bool changed = _device.ConnectionId != entryConnection;
+            return new(ok && !changed, s, changed);
+        }
+        catch (OperationCanceledException) { return new(false, knownSlot, false); }
+        finally { _readLock.Release(); }
+    }
+```
+
+- [ ] **Step 5: Run the tests and confirm they pass**
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~AtomicButtonWriteTests"`
+Expected: 5 passing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/NagaBatteryTray/Monitoring/BatteryMonitor.cs tests/NagaBatteryTray.Tests
+git commit -m "feat(monitoring): atomic resolve-write-verify so a reselect cannot cross mice"
 ```
 
 ---
@@ -836,18 +1190,33 @@ Then update every former `_lastActive` use:
         _scoped.CreatedSlots = list?.Slots;
 ```
 
-- `ResolveWriteSlotAsync` becomes:
+- `ResolveWriteSlotAsync` is **deleted**. Slot resolution moves inside the atomic write (Task 4b), because resolving it here and writing it there is precisely the gap a reselect slips through.
+
+- `WriteVerifiedAsync` becomes a thin caller of the atomic write:
 
 ```csharp
-    private async Task<byte?> ResolveWriteSlotAsync()
+    private async Task<bool> WriteVerifiedAsync(byte buttonId, byte category, byte[] data)
     {
-        if (_scoped.ActiveSlot is { } a) return _scoped.IsBlocked(a) ? null : a;
-        if (await Task.Run(() => _monitor.GetActiveProfileAsync()) is { } read) _scoped.ActiveSlot = read;
-        return _scoped.ActiveSlot is { } r && !_scoped.IsBlocked(r) ? r : null;
+        bool resolvedOnDemand = _scoped.ActiveSlot is null;
+        var r = await Task.Run(() => _monitor.WriteButtonVerifiedAsync(
+            _scoped.ActiveSlot, _scoped.CreatedSlots, buttonId, category, data));
+
+        if (r.Slot is { } used) _scoped.ActiveSlot = used;
+        // the mouse changed underneath the write: nothing cached describes the device any more,
+        // and the write's outcome is not attributable to either mouse (spec §4.10)
+        if (r.ConnectionChanged)
+        {
+            _scoped.Clear();
+            Interlocked.Increment(ref _gridSweep);
+            if (_dashboardVm is { } changedVm) _ = ReseedDeviceAsync(changedVm);
+            return false;
+        }
+        // the slot was only just learned (the card said "state unknown"): let the card + grid
+        // catch up so the other chips stop showing placeholders and gain undo snapshots
+        if (r.Verified && resolvedOnDemand && _dashboardVm is { } dvm) _ = RefreshProfileAsync(dvm);
+        return r.Verified;
     }
 ```
-
-- `WriteVerifiedAsync`: `bool resolvedOnDemand = _lastActive is null;` becomes `bool resolvedOnDemand = _scoped.ActiveSlot is null;`
 
 - [ ] **Step 3: Observe the model on every state change**
 
@@ -891,8 +1260,27 @@ probe runs only when the dashboard opens or the user picks a mouse:
     }
 ```
 
-`ReseedDeviceAsync` is today's `SeedDashboardAsync` body verbatim; Task 7 rewrites
+Except for one addition, `ReseedDeviceAsync` is today's `SeedDashboardAsync` body; Task 7 rewrites
 `SeedDashboardAsync` as "probe, then call `ReseedDeviceAsync`".
+
+The addition is discarding late results. Both reads here release the lock and can outlive the mouse
+they were issued against, so each one carries the connection it ran under and is dropped if that
+connection is gone:
+
+```csharp
+    private async Task ReseedDeviceAsync(DashboardViewModel vm)
+    {
+        int connection = _monitor.ConnectionId;
+        var dpi = await Task.Run(() => _monitor.GetDpiAsync());
+        if (_monitor.ConnectionId != connection || !ReferenceEquals(_dashboardVm, vm)) return;
+        Dispatch(() => vm.SetCurrentDpi(dpi));
+        await RefreshProfileAsync(vm);
+    }
+```
+
+Apply the same guard in `RefreshProfileAsync`: capture `_monitor.ConnectionId` before the two
+profile reads and return without touching `_scoped` or the view model if it changed. The grid sweep
+already has its own generation counter and keeps it.
 
 `vm.ResetForNewMouse()` arrives in Task 7. Until then this line will not compile, so Tasks 6 and 7 are committed in that order and the build is verified at the end of Task 7.
 
@@ -1012,6 +1400,7 @@ public sealed class MouseSelectorTests
 
         Assert.Empty(vm.ProfileSlots);
         Assert.Equal("…", vm.Callout(1).BindingText);
+        Assert.False(vm.DevicePresent);   // the old mouse's DPI is gone, not left on screen
     }
 
     [Fact]
@@ -1243,6 +1632,7 @@ Add the selector members beside the profile-card members:
         _activeSlot = null;
         SetProfileNote("");
         RefreshProfileDetail();
+        SetCurrentDpi(null); // the old mouse's number must not stay on screen until the reseed lands
         foreach (var c in Callouts) c.SetPending(); // also voids each chip's undo snapshot
     }
 ```
@@ -1308,7 +1698,9 @@ Add the handler beside `SwitchProfileAsync`:
         _settings.Save();
         _monitor.PreferredMouse = name;
 
-        await _monitor.RefreshNowAsync();
+        // WAITS for the read lock: the ordinary refresh skips when a read is in flight, which would
+        // report the mouse the user just picked as unreachable (spec §4.5)
+        await _monitor.RefreshNowWaitingAsync();
 
         if (!string.Equals(_monitor.State.Model, name, StringComparison.Ordinal))
         {

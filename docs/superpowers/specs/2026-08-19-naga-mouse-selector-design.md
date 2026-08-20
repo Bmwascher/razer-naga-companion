@@ -104,8 +104,15 @@ Behaviour when `reselect` is true:
 - Otherwise: try the preferred model's collections first. If one answers a battery query, adopt
   it. If none answers, keep the current connection.
 
-Every other device call (button read, button write, DPI, profile) keeps `reselect: false` and
-never triggers a scan, so the 12-button sweep and instant-apply writes are unchanged.
+Every other device call (button read, button write, DPI, profile) keeps `reselect: false`, so no
+other call ever **reselects a live handle**. They can still reconnect when the handle has dropped —
+that is existing, wanted behaviour — which is exactly why connection identity (4.10) is needed:
+a reconnect mid-sweep can land on a different mouse without any battery read publishing the change.
+
+Adoption of the preferred mouse must be rollback-safe. The live handle is detached from the field
+before the probe so the probe's own failure path cannot dispose it, and it is restored in a
+`finally`, so an exception or a cancellation cannot leave the app with no connection and a leaked
+handle.
 
 Worst-case extra cost: one probe (~400 ms of HID I/O, off the UI thread, serialized on
 `BatteryMonitor._readLock`) per battery poll, and only while running on a non-preferred mouse.
@@ -120,6 +127,11 @@ It then re-runs normal selection so the connection ends on the preferred/current
   other pass-through.
 - Called only on dashboard open and on the dashboard's refresh. Never on a timer.
 - Cost is one probe per supported model, about a second in total today.
+- **It republishes the connected model before returning.** Discovery reconnects at the end, and
+  that reconnect can adopt a different mouse than the one `BatteryMonitor.State` still names —
+  `State.Model` only ever updates from a battery read. So `DiscoverMiceAsync` performs one battery
+  read and processes it inside the same lock acquisition, and only then returns. Without this the
+  selector, the profile-name key, and the scoped cache would all describe the wrong mouse.
 
 A HID enumeration alone cannot answer this: the receiver stays enumerated while the mouse is off,
 so a list built from enumeration would show a sleeping mouse. The user chose accuracy over speed.
@@ -134,7 +146,9 @@ so a list built from enumeration would show a sleeping mouse. The user chose acc
 - Until discovery lands, the box shows the connected model and is disabled.
 - The wired/wireless caption (`HeaderSubtitle`) is unchanged.
 - Picking a mouse: save `PreferredMouse`, force reselection, then reload battery, DPI, profile
-  card and button grid, because the new mouse holds entirely different state.
+  card and button grid, because the new mouse holds entirely different state. The refresh behind a
+  pick **waits for the read lock**; the ordinary poll's skip-when-busy behaviour would otherwise
+  report a perfectly reachable mouse as unreachable whenever another read happened to be in flight.
 - A pick that fails to connect restores the selection to the mouse actually connected and shows a
   short failure note, matching the existing profile-switch failure pattern.
 - Tray icon, tooltip and popup follow the active mouse through the existing `DeviceState.Model`.
@@ -150,10 +164,37 @@ resets everything scoped to a mouse:
 - `_lastActive` to `null`
 - the grid sweep generation, so any sweep in flight for the old mouse is superseded
 - the created-slot list (4.7)
-- the dashboard view model's profile inventory, DPI reading, grid chips and undo snapshots
+- the dashboard view model's profile inventory, DPI reading (back to "unknown", not the old
+  mouse's number), grid chips and undo snapshots
 
-If the dashboard is open, the reset is followed by the normal seed path, so the card and grid
-refill from the new mouse.
+If the dashboard is open, the reset is followed by a **probe-free** reseed, so the card and grid
+refill from the new mouse without re-running discovery.
+
+Model-change invalidation alone is not sufficient, because the model is published only by a battery
+read. Connection identity (4.10) closes the gap.
+
+### 4.10 Connection identity
+
+`RazerDevice` exposes a `ConnectionId` that increases every time it adopts a collection, including
+a reconnect to the same model. It is the app's only reliable answer to "is the mouse I am talking
+to now the mouse I was talking to a moment ago", because:
+
+- a non-battery call can reconnect after a dropped handle and land on a different mouse, and
+  nothing publishes that;
+- `BatteryMonitor` keeps reporting the previous model for three consecutive failed reads, so
+  `State.Model` lags reality; and
+- a multi-step operation releases the read lock between steps, so a battery-path reselect can land
+  between them.
+
+Two consequences:
+
+1. **The button write is atomic.** Resolving the active slot, writing, and reading back happen
+   inside one `_readLock` acquisition, in one `BatteryMonitor` method. Split across three
+   acquisitions, a reselect can land between resolve and write, and the app writes one mouse's slot
+   number onto another — the exact failure this whole pass exists to prevent.
+2. **Late results are discarded.** The DPI read and the profile read carry the `ConnectionId` they
+   ran under; a result whose id no longer matches is dropped rather than painted onto the UI. The
+   grid sweep already has an equivalent generation counter and keeps it.
 
 ### 4.7 Write-slot guard
 
@@ -199,13 +240,25 @@ Old settings files load unchanged: absent fields take their defaults and the mig
 
 Through the `IRazerDevice` seam with `FakeRazerDevice` (hard rule 6):
 
+The connection state machine (which PIDs to try, when to reselect, how to roll back) is extracted
+behind a narrow injectable connector so it can be tested without any Win32 call. Only the HID calls
+themselves stay untested.
+
 - preference honoured when the preferred mouse is reachable
 - fallback to another mouse when the preferred one is not
-- return to the preferred mouse on the next battery read once it becomes reachable
-- button reads, writes, DPI and profile calls never trigger a re-scan
-- discovery lists only mice that answered
-- model change clears the active slot, the created-slot list and the sweep generation
-- the write-slot guard refuses a slot not in the created list
+- a live handle is reselected only on the battery path, never by a button, DPI or profile call
+- adoption of the preferred mouse rolls back on failure, on an exception, and on cancellation,
+  restoring handle, transaction id, link state and model together, and disposing exactly the
+  losing handle
+- `ConnectionId` increases on every adoption, including a reconnect to the same model
+- the atomic write resolves, writes and verifies under one lock, and reports the connection it ran
+  under
+- a DPI or profile result from a superseded connection is discarded, not displayed
+- discovery lists only mice that answered, and republishes the connected model before returning
+- an explicit mouse pick waits for the read lock instead of skipping when busy
+- model change clears the active slot, the created-slot list, the DPI reading and the sweep
+  generation
+- the write-slot guard refuses a slot the known inventory does not contain
 - `DisplayRaw` renders 1-byte category `0x02` as "Not set" without setting `Failed`
 - legacy `ProfileNames` migrate to the V2 and per-mouse names round-trip
 
