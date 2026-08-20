@@ -28,6 +28,53 @@ public static class RazerProtocol
     public static int[] ScanPids { get; } =
         { MousePidV3Wired, MousePidWired, MousePidV3Wireless, MousePidWireless };
 
+    /// <summary>Index of a model in SupportedMice by display name, or -1. Case-insensitive because
+    /// the name round-trips through settings.json.</summary>
+    private static int IndexOfModel(string? displayName)
+    {
+        if (displayName is null) return -1;
+        for (int i = 0; i < SupportedMice.Length; i++)
+            if (string.Equals(SupportedMice[i].DisplayName, displayName, StringComparison.OrdinalIgnoreCase))
+                return i;
+        return -1;
+    }
+
+    /// <summary>The two PIDs of one model, wired first. Empty when the name is null or unknown.</summary>
+    public static int[] PidsForModel(string? displayName)
+    {
+        int i = IndexOfModel(displayName);
+        return i < 0 ? Array.Empty<int>() : new[] { SupportedMice[i].WiredPid, SupportedMice[i].WirelessPid };
+    }
+
+    /// <summary>The canonical display name for a model name that came from settings, or null when it
+    /// names no supported mouse. An unknown preference must behave EXACTLY like no preference
+    /// (spec §4.1), and normalizing once at the boundary is what makes that true everywhere.</summary>
+    public static string? NormalizeModelName(string? displayName)
+    {
+        int i = IndexOfModel(displayName);
+        return i < 0 ? null : SupportedMice[i].DisplayName;
+    }
+
+    /// <summary>Scan order under a user preference (spec 2026-08-19 §4.2): the preferred model's
+    /// wired then wireless PID, then every other model's wired PIDs, then their wireless ones. The
+    /// wired-before-wireless rule still holds within each model — a cabled mouse must beat a
+    /// still-plugged receiver that can no longer reach it. Null or unknown = ScanPids unchanged.</summary>
+    public static int[] ScanPidsFor(string? preferredModel)
+    {
+        int p = IndexOfModel(preferredModel);
+        if (p < 0) return ScanPids;
+
+        var order = new int[SupportedMice.Length * 2];
+        int n = 0;
+        order[n++] = SupportedMice[p].WiredPid;
+        order[n++] = SupportedMice[p].WirelessPid;
+        for (int i = 0; i < SupportedMice.Length; i++)
+            if (i != p) order[n++] = SupportedMice[i].WiredPid;
+        for (int i = 0; i < SupportedMice.Length; i++)
+            if (i != p) order[n++] = SupportedMice[i].WirelessPid;
+        return order;
+    }
+
     public static bool IsWiredPid(int pid)
     {
         foreach (var m in SupportedMice) if (m.WiredPid == pid) return true;

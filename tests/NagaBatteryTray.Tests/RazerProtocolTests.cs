@@ -527,4 +527,73 @@ public class RazerProtocolTests
         Assert.Equal("Naga V2 Pro", RazerProtocol.ModelNameForPid(0x00A8));
         Assert.Null(RazerProtocol.ModelNameForPid(0x00A4));
     }
+
+    [Fact]
+    public void ScanPidsForNullPreferenceIsTheDefaultOrder()
+    {
+        Assert.Equal(RazerProtocol.ScanPids, RazerProtocol.ScanPidsFor(null));
+    }
+
+    [Fact]
+    public void ScanPidsForUnknownModelIsTheDefaultOrder()
+    {
+        Assert.Equal(RazerProtocol.ScanPids, RazerProtocol.ScanPidsFor("Naga Imaginary"));
+    }
+
+    [Fact]
+    public void ScanPidsForPreferredModelPutsItsWiredThenWirelessFirst()
+    {
+        var order = RazerProtocol.ScanPidsFor("Naga V2 Pro");
+
+        Assert.Equal(RazerProtocol.MousePidWired, order[0]);
+        Assert.Equal(RazerProtocol.MousePidWireless, order[1]);
+        Assert.Equal(RazerProtocol.MousePidV3Wired, order[2]);
+        Assert.Equal(RazerProtocol.MousePidV3Wireless, order[3]);
+    }
+
+    [Fact]
+    public void ScanPidsForIsAPermutationOfScanPids()
+    {
+        foreach (var m in RazerProtocol.SupportedMice)
+        {
+            var order = RazerProtocol.ScanPidsFor(m.DisplayName);
+            Assert.Equal(RazerProtocol.ScanPids.Length, order.Length);
+            Assert.Equal(RazerProtocol.ScanPids.OrderBy(p => p), order.OrderBy(p => p));
+        }
+    }
+
+    [Fact]
+    public void ScanPidsForIsCaseInsensitive()
+    {
+        Assert.Equal(RazerProtocol.ScanPidsFor("Naga V2 Pro"), RazerProtocol.ScanPidsFor("naga v2 pro"));
+    }
+
+    [Fact]
+    public void PidsForModelReturnsWiredThenWireless()
+    {
+        Assert.Equal(new[] { RazerProtocol.MousePidV3Wired, RazerProtocol.MousePidV3Wireless },
+            RazerProtocol.PidsForModel("Naga V3 Pro"));
+    }
+
+    [Fact]
+    public void PidsForModelIsEmptyForUnknownOrNull()
+    {
+        Assert.Empty(RazerProtocol.PidsForModel("Naga Imaginary"));
+        Assert.Empty(RazerProtocol.PidsForModel(null));
+    }
+
+    [Fact]
+    public void NormalizeModelNameCanonicalisesAKnownName()
+    {
+        Assert.Equal("Naga V3 Pro", RazerProtocol.NormalizeModelName("naga v3 pro"));
+    }
+
+    [Fact]
+    public void NormalizeModelNameDropsAnUnknownName()
+    {
+        // an unknown preference must read as NO preference, or the device detaches and rolls back
+        // on every battery read chasing a mouse that cannot exist
+        Assert.Null(RazerProtocol.NormalizeModelName("Naga Imaginary"));
+        Assert.Null(RazerProtocol.NormalizeModelName(null));
+    }
 }
