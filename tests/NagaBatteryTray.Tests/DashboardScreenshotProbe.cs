@@ -60,7 +60,7 @@ public class DashboardScreenshotProbe
         if (target == "popup")
         {
             var pop = new NagaBatteryTray.Ui.PopupWindow { ShowInTaskbar = false, ShowActivated = false };
-            pop.ApplyState(DeviceState.Online(95, charging: true, wired: true));
+            pop.ApplyState(DeviceState.Online(95, charging: true, wired: true, model: "Naga V3 Pro"));
             pop.Show();
             pop.UpdateLayout();
             DoEvents();
@@ -77,7 +77,7 @@ public class DashboardScreenshotProbe
 
         // seeded online state ≈ the user's real dashboard: 48% wireless, 1600 DPI, slot 1 of 3,
         // grid = F1..F12 (keyboard category 0x02, data [modifiers, usage], F1 = usage 0x3A)
-        vm.ApplyState(DeviceState.Online(48, charging: false, wired: false));
+        vm.ApplyState(DeviceState.Online(48, charging: false, wired: false, model: "Naga V3 Pro"));
         vm.SetCurrentDpi(new DpiSetting(1600, 1600));
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 1);
         for (int pos = 1; pos <= 12; pos++)

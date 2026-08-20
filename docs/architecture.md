@@ -90,10 +90,11 @@ Zero-access `CreateFile` + `HidD_Set/GetFeature`.
   class/cmd echo — the grid sweep's 12 reads land in ~a second instead of ~5 s.
 - `EnsureConnectedAsync` picks the **live** collection (the one whose
   `GetMaxFeatureReportLength()==91`, **not** usage page 0xFF00 — none exposed) by trying candidates
-  **wired `0x00A7` first, then wireless `0x00A8`**, and **verifying each actually answers a battery
-  query** before committing: the dock's wireless receiver stays enumerated when the mouse switches
-  to wired, so first-enumerated alone would lock onto a dead collection (this was the wired/USB-C
-  "no response" bug, `932398e`).
+  in `RazerProtocol.ScanPids` order (every supported model's wired PID before any wireless one; V3
+  before V2 within a link), and **verifying each actually answers a battery query** before
+  committing: the dock's wireless receiver stays enumerated when the mouse switches to wired, so
+  first-enumerated alone would lock onto a dead collection (this was the wired/USB-C "no response"
+  bug, `932398e`).
 - A read returning null drops the handle so the next poll re-selects (self-heals on plug/unplug).
   Explicit refreshes (`RefreshNowAsync`) additionally call **`Reset()`** so they re-select
   *immediately* — the null-drop self-heal is too slow on a wired plug, where the stale wireless
