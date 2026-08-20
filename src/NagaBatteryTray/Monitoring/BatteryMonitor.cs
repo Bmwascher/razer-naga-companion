@@ -121,6 +121,48 @@ public sealed class BatteryMonitor : IDisposable
         finally { _readLock.Release(); }
     }
 
+    /// <summary>Outcome of one atomic button write. Slot is the slot actually used (null = it could
+    /// not be established). ConnectionChanged = the mouse underneath changed mid-operation, so the
+    /// caller must re-seed rather than trust anything it cached.</summary>
+    public readonly record struct ButtonWriteResult(bool Verified, byte? Slot, bool ConnectionChanged);
+
+    /// <summary>Read the active slot, write, and read back to verify - all inside ONE read-lock
+    /// acquisition. Split across three acquisitions (as it was before 2026-08-19) a reselect can land
+    /// between the resolve and the write, and one mouse's slot number gets written to another;
+    /// clearing a cache cannot undo that, because the slot is already a local (spec 4.10).
+    /// <para>The slot is ALWAYS read here rather than taken from the caller's cache. That is what makes
+    /// the target belong to the mouse being written to: the read forces any pending reconnect to happen
+    /// BEFORE a slot is committed to, at the cost of one extra device read per write. A failed read
+    /// fails the write - writing a cached slot to a mouse we could not interrogate is the whole
+    /// defect.</para>
+    /// <para>createdSlots null = inventory unknown, which never blocks; a known inventory that lacks
+    /// the slot refuses before any write.</para></summary>
+    public async Task<ButtonWriteResult> WriteButtonVerifiedAsync(
+        byte[]? createdSlots, byte buttonId, byte category, byte[] data)
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return new(false, null, false); }
+        try
+        {
+            // this read also forces any pending reconnect, so the id captured after it is the
+            // connection the write will actually use
+            if (await _device.GetActiveProfileAsync(_cts.Token) is not { } slot) return new(false, null, false);
+            int connection = _device.ConnectionId;
+            if (createdSlots is not null && Array.IndexOf(createdSlots, slot) < 0) return new(false, slot, false);
+
+            bool ok = await _device.SetButtonAsync(slot, buttonId, category, data, _cts.Token);
+            if (ok)
+            {
+                var readBack = await _device.GetButtonAsync(slot, buttonId, _cts.Token);
+                ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
+            }
+            bool changed = _device.ConnectionId != connection;
+            return new(ok && !changed, slot, changed);
+        }
+        catch (OperationCanceledException) { return new(false, null, false); }
+        finally { _readLock.Release(); }
+    }
+
     /// <summary>Which mouse the app should talk to (spec 2026-08-19 §4.1). Set-only plumbing: the
     /// device acts on it at its next battery read, so this never blocks and never takes the lock.</summary>
     public string? PreferredMouse
