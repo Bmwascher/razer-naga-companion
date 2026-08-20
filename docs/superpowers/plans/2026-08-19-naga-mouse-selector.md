@@ -1940,7 +1940,7 @@ git commit -m "feat(monitoring): per-mouse state cache that clears on a model ch
 
 **Interfaces:**
 - Consumes: `DeviceScopedState` (Task 5), `BatteryMonitor.PreferredMouse` (Task 4), `AppSettings.PreferredMouse` (Task 3c).
-- Produces: `AppHost.OnDeviceStateChanged(DeviceState)`, and `_scoped` replacing `_lastActive`. Task 7 calls into the same handler for the selector.
+- Produces: `AppHost.OnDeviceStateChanged(DeviceState)`, `AppHost.ReseedDeviceAsync`, `AppHost.RecoverFromReconnectAsync`, `DashboardViewModel.ResetForNewMouse()`, and `_scoped` replacing `_lastActive`. Task 7 calls into the same handler for the selector.
 
 No new unit tests: `AppHost` constructs WPF windows and is outside the suite by design (hard rule 6). Its logic now lives in `DeviceScopedState`, which Task 5 covers.
 
@@ -2163,7 +2163,7 @@ git commit -m "feat(host): scope cached slot state to the connected mouse, guard
 
 **Interfaces:**
 - Consumes: `BatteryMonitor.DiscoverMiceAsync`, `BatteryMonitor.PreferredMouse` (Task 4); `AppSettings.ProfileNamesByMouse` (Task 3c); `DeviceScopedState` (Tasks 5, 6).
-- Produces: `DashboardViewModel.Mice`, `.SelectedMouse`, `.MiceLoaded`, `.MouseSelectRequested`, `.SetMice(...)`, `.ResetForNewMouse()`.
+- Produces: `DashboardViewModel.Mice`, `.SelectedMouse`, `.MiceLoaded`, `.MouseSelectRequested`, `.SetMice(...)`, `.ResyncMouse()`. (`ResetForNewMouse` is Task 6's.)
 
 - [ ] **Step 1: Write the failing tests**
 
