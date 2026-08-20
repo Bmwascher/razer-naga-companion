@@ -20,6 +20,7 @@
 - Build: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build`
 - Test: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test` — single class: `--filter "FullyQualifiedName~<Class>"`
 - Existing style in `RazerProtocol.cs` deliberately avoids LINQ. Keep it that way in that file.
+- Every test file needs `using Xunit;`. The project enables `ImplicitUsings`, which does NOT cover xUnit, and there is no global-usings file — every existing test imports it explicitly.
 - Hard rule 6's HID-transport test exemption now covers only `HidControlCollection` / `HidControlCollectionSource` (the two Win32 wrappers) and the WPF windows. The connection state machine above them is tested (product-owner decision, 2026-08-19).
 - Branch: `feature/mouse-selector`. Commit after every task. Do not push.
 
@@ -243,6 +244,7 @@ Create `tests/NagaBatteryTray.Tests/ConnectionPolicyTests.cs`:
 
 ```csharp
 using NagaBatteryTray.Hid;
+using Xunit;
 
 public sealed class ConnectionPolicyTests
 {
@@ -566,6 +568,7 @@ Create `tests/NagaBatteryTray.Tests/MouseConnectionTests.cs`:
 
 ```csharp
 using NagaBatteryTray.Hid;
+using Xunit;
 
 public sealed class MouseConnectionTests
 {
@@ -1162,6 +1165,7 @@ change. Create `tests/NagaBatteryTray.Tests/RazerDeviceTransportTests.cs`:
 ```csharp
 using NagaBatteryTray.Hid;
 using NagaBatteryTray.Settings;
+using Xunit;
 
 public sealed class RazerDeviceTransportTests
 {
@@ -1265,6 +1269,7 @@ Create `tests/NagaBatteryTray.Tests/SettingsMigrationTests.cs`:
 ```csharp
 using System.Text.Json;
 using NagaBatteryTray.Settings;
+using Xunit;
 
 public sealed class SettingsMigrationTests
 {
@@ -1395,15 +1400,41 @@ In `JsonSettingsStore.cs`, add the call at the end of both constructor branches,
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~SettingsMigrationTests"`
 Expected: 4 passing.
 
-- [ ] **Step 6: Run the whole suite**
+- [ ] **Step 6: Update the existing test the migration invalidates**
+
+`tests/NagaBatteryTray.Tests/SettingsStoreTests.cs:144-157` asserts that legacy `ProfileNames`
+survive a save and reload. They no longer do — the migration is what moves them — so the test now
+asserts the migration instead. Replace it with:
+
+```csharp
+    [Fact]
+    public void ProfileNames_migrate_to_the_V2_on_reload()
+    {
+        var path = TempFile();
+        var store = new JsonSettingsStore(path);
+        store.Settings.ProfileNames[2] = "Work";
+        store.Settings.ProfileNames[5] = "MMO night";
+        store.Save();
+
+        var reloaded = new JsonSettingsStore(path);
+
+        // slot numbers mean different slots on different mice, so a legacy name belongs to the only
+        // mouse that could have written it (spec §4.9)
+        Assert.Empty(reloaded.Settings.ProfileNames);
+        Assert.Equal("Work", reloaded.Settings.ProfileNamesByMouse["Naga V2 Pro"][2]);
+        Assert.Equal("MMO night", reloaded.Settings.ProfileNamesByMouse["Naga V2 Pro"][5]);
+    }
+```
+
+- [ ] **Step 7: Run the whole suite**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
-Expected: all green. `DashboardViewModel` still compiles because it reads `source.ProfileNames`, which still exists (Task 6 moves it).
+Expected: all green. `DashboardViewModel` still compiles because it reads `source.ProfileNames`, which still exists (Task 7 moves it).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/NagaBatteryTray/Settings tests/NagaBatteryTray.Tests/SettingsMigrationTests.cs
+git add src/NagaBatteryTray/Settings tests/NagaBatteryTray.Tests
 git commit -m "feat(settings): preferred mouse + per-mouse profile names with one-time migration"
 ```
 
@@ -1426,6 +1457,7 @@ Create `tests/NagaBatteryTray.Tests/BatteryMonitorSelectionTests.cs`:
 ```csharp
 using NagaBatteryTray.Monitoring;
 using NagaBatteryTray.Settings;
+using Xunit;
 
 public sealed class BatteryMonitorSelectionTests
 {
@@ -1564,7 +1596,7 @@ The rest of `PollAsync` is unchanged.
 - [ ] **Step 4: Run the tests and confirm they pass**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~BatteryMonitorSelectionTests"`
-Expected: 3 passing.
+Expected: 5 passing.
 
 - [ ] **Step 5: Commit**
 
@@ -1596,6 +1628,7 @@ Create `tests/NagaBatteryTray.Tests/AtomicButtonWriteTests.cs`:
 using NagaBatteryTray.Hid;
 using NagaBatteryTray.Monitoring;
 using NagaBatteryTray.Settings;
+using Xunit;
 
 public sealed class AtomicButtonWriteTests
 {
@@ -1677,21 +1710,10 @@ public sealed class AtomicButtonWriteTests
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~AtomicButtonWriteTests"`
 Expected: compile error — `WriteButtonVerifiedAsync` and `BeforeGetButton` do not exist.
 
-- [ ] **Step 3: Add the fake's hook**
+- [ ] **Step 3: Check the fake's hook is already there**
 
-In `FakeRazerDevice.GetButtonAsync`, as the first line of the method body:
-
-```csharp
-        BeforeGetButton?.Invoke();
-```
-
-and beside `GetButtonCount`:
-
-```csharp
-    /// <summary>Runs just before a button read — lets a test simulate the connection changing
-    /// in the middle of a multi-step operation.</summary>
-    public Action? BeforeGetButton { get; set; }
-```
+`BeforeGetButton` and its call in `GetButtonAsync` were added in Task 3b Step 6. Confirm they are
+present and add nothing — applying that step again duplicates the invocation.
 
 - [ ] **Step 4: Implement the atomic write**
 
@@ -1773,6 +1795,7 @@ Create `tests/NagaBatteryTray.Tests/DeviceScopedStateTests.cs`:
 
 ```csharp
 using NagaBatteryTray.Monitoring;
+using Xunit;
 
 public sealed class DeviceScopedStateTests
 {
@@ -2092,12 +2115,32 @@ beside the existing generation check:
         }
 ```
 
-`vm.ResetForNewMouse()` arrives in Task 7. Until then this line will not compile, so Tasks 6 and 7 are committed in that order and the build is verified at the end of Task 7.
+`ResetForNewMouse` is a self-contained view-model method with no dependency on the selector, so it
+lands here rather than in Task 7 — otherwise this task commits a tree that does not build, which
+poisons `git bisect` for no benefit. Add to `DashboardViewModel`:
 
-- [ ] **Step 4: Build**
+```csharp
+    /// <summary>The connected mouse changed: drop everything that described the old one. The profile
+    /// card, the DPI reading and every chip snapshot belong to one mouse and are meaningless on
+    /// another (spec §4.6). A fresh seed refills them.</summary>
+    public void ResetForNewMouse()
+    {
+        ProfileSlots.Clear();
+        _activeSlot = null;
+        SetProfileNote("");
+        RefreshProfileDetail();
+        SetCurrentDpi(null); // the old mouse's number must not stay on screen until the reseed lands
+        foreach (var c in Callouts) c.SetPending(); // also voids each chip's undo snapshot
+    }
+```
 
-Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" build`
-Expected: one error, `'DashboardViewModel' does not contain a definition for 'ResetForNewMouse'`. That is the only acceptable error at this step; anything else is a missed `_lastActive` use.
+`SetPending()` already clears `_currentRaw` and expires the undo window, so no snapshot survives a
+mouse change (hard rule 2 is untouched: the snapshot/undo path itself is unchanged).
+
+- [ ] **Step 4: Build and run the suite**
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
+Expected: green. A build error here is a missed `_lastActive` use.
 
 - [ ] **Step 5: Commit**
 
@@ -2131,6 +2174,7 @@ using NagaBatteryTray.Hid;
 using NagaBatteryTray.Monitoring;
 using NagaBatteryTray.Settings;
 using NagaBatteryTray.Ui.Dashboard;
+using Xunit;
 
 public sealed class MouseSelectorTests
 {
@@ -2159,6 +2203,32 @@ public sealed class MouseSelectorTests
         Assert.Equal(new[] { "Naga V3 Pro" }, vm.Mice);
         Assert.Equal("Naga V3 Pro", vm.SelectedMouse);
         Assert.False(vm.MiceLoaded);   // still disabled: nothing has been probed yet
+    }
+
+    [Fact]
+    public void TheHeaderFollowsAnUnannouncedHopToAnotherMouse()
+    {
+        var vm = Build();
+        vm.SetMice(new[] { "Naga V3 Pro", "Naga V2 Pro" }, "Naga V3 Pro");
+        int picks = 0;
+        vm.MouseSelectRequested += _ => picks++;
+
+        vm.ApplyState(DeviceState.Online(60, false, false, "Naga V2 Pro"));
+
+        Assert.Equal("Naga V2 Pro", vm.SelectedMouse);   // never claims a mouse it is not on
+        Assert.Equal(0, picks);                          // and does not read as a user pick
+    }
+
+    [Fact]
+    public void AProbeThatFindsNothingStillShowsTheConnectedMouse()
+    {
+        var vm = Build();
+        vm.ApplyState(DeviceState.Online(60, false, false, "Naga V3 Pro"));
+
+        vm.SetMice(Array.Empty<string>(), "Naga V3 Pro");
+
+        Assert.Equal(new[] { "Naga V3 Pro" }, vm.Mice);
+        Assert.False(vm.MiceLoaded);
     }
 
     [Fact]
@@ -2262,6 +2332,7 @@ Create `tests/NagaBatteryTray.Tests/CalloutDisplayTests.cs`:
 ```csharp
 using NagaBatteryTray.Hid;
 using NagaBatteryTray.Ui.Dashboard;
+using Xunit;
 
 public sealed class CalloutDisplayTests
 {
@@ -2363,11 +2434,13 @@ In `ApplyState`, after `ModelName = s.Model ?? "Razer Naga";` add:
 
 ```csharp
         _namesKey = ModelName;
-        // seed the header box with the connected mouse so it reads like the label it replaced
-        // while the reachability probe runs; SetMice replaces this the moment the probe lands
-        if (Mice.Count == 0 && s.Model is { } connected)
+        // The box IS the header's model indicator now, so it has to follow the mouse actually
+        // connected — before the probe lands (it reads like the label it replaced) and after an
+        // unannounced hop (otherwise it says "Naga V3 Pro" over the V2's battery and profile card,
+        // and re-picking the displayed value is a no-op, so the user cannot even correct it).
+        if (s.Model is { } connected && !string.Equals(SelectedMouse, connected, StringComparison.Ordinal))
         {
-            Mice.Add(connected);
+            if (!Mice.Contains(connected)) Mice.Add(connected);
             _syncingMouse = true;
             try { SelectedMouse = connected; }
             finally { _syncingMouse = false; }
@@ -2419,10 +2492,12 @@ Add the selector members beside the profile-card members:
     {
         Mice.Clear();
         foreach (var m in mice) Mice.Add(m);
+        // a probe that found nothing must not leave an empty box where the model label used to be
+        if (Mice.Count == 0 && connected is not null) Mice.Add(connected);
         _syncingMouse = true;
-        try { SelectedMouse = connected is not null && Mice.Contains(connected) ? connected : null; }
+        try { SelectedMouse = connected is not null && Mice.Contains(connected) ? connected : Mice.FirstOrDefault(); }
         finally { _syncingMouse = false; }
-        MiceLoaded = Mice.Count > 0;
+        MiceLoaded = mice.Count > 0;   // the PROBE's result, not the box's contents
     }
 
     /// <summary>Snap the dropdown back to the mouse actually connected, after a failed pick.</summary>
@@ -2433,21 +2508,9 @@ Add the selector members beside the profile-card members:
         finally { _syncingMouse = false; }
     }
 
-    /// <summary>The connected mouse changed: drop everything that described the old one. The profile
-    /// card, the DPI reading and every chip snapshot belong to one mouse and are meaningless on
-    /// another (spec §4.6). A fresh seed refills them.</summary>
-    public void ResetForNewMouse()
-    {
-        ProfileSlots.Clear();
-        _activeSlot = null;
-        SetProfileNote("");
-        RefreshProfileDetail();
-        SetCurrentDpi(null); // the old mouse's number must not stay on screen until the reseed lands
-        foreach (var c in Callouts) c.SetPending(); // also voids each chip's undo snapshot
-    }
 ```
 
-`SetPending()` already clears `_currentRaw` and expires the undo window, so no snapshot survives a mouse change (hard rule 2 is untouched: the snapshot/undo path itself is unchanged).
+`ResetForNewMouse` is not here: Task 6 added it, so that its own commit builds.
 
 - [ ] **Step 5: The header ComboBox**
 
@@ -2534,12 +2597,50 @@ Add the handler beside `SwitchProfileAsync`:
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~MouseSelectorTests|FullyQualifiedName~CalloutDisplayTests"`
 Expected: all passing.
 
-- [ ] **Step 8: Run the whole suite**
+- [ ] **Step 8: Update the three existing tests this task invalidates**
+
+These assert the behaviour the task deliberately replaces. Leaving them is not an option: the green
+gate below cannot pass while they stand.
+
+1. `tests/NagaBatteryTray.Tests/DashboardViewModelTests.cs:133-143` seeds `src.ProfileNames[2]`,
+   which the constructor no longer reads. Seed the per-mouse map and tell the view model which mouse
+   it is on:
+
+```csharp
+    [Fact]
+    public void Slot_names_seed_from_settings_and_default_when_absent()
+    {
+        var src = new AppSettings();
+        src.ProfileNamesByMouse["Naga V2 Pro"] = new Dictionary<byte, string> { [2] = "Work" };
+        var vm = NewVm(src);
+        vm.ApplyState(DeviceState.Online(80, false, false, "Naga V2 Pro"));
+        vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 1);
+
+        Assert.Equal("Slot 1", vm.ProfileSlots.Single(p => p.Number == 1).Name);
+        Assert.Equal("Work", vm.ProfileSlots.Single(p => p.Number == 2).Name);
+        Assert.Equal("Slot 3", vm.ProfileSlots.Single(p => p.Number == 3).Name);
+    }
+```
+
+2. In the rename test at `DashboardViewModelTests.cs:255`, `ApplyTo` no longer writes
+   `target.ProfileNames`, so that line throws `KeyNotFoundException`. The test's view model is on the
+   default "Razer Naga" unless it was given a state, so assert under whichever key it used:
+
+```csharp
+        Assert.Equal("Work", target.ProfileNamesByMouse[vm.ModelName][2]);
+```
+
+3. `tests/NagaBatteryTray.Tests/CalloutViewModelTests.cs:295-301` asserts that a one-byte category
+   `0x02` renders as "Synapse action (0x02)" — the exact rendering this task abolishes. Delete it;
+   `CalloutDisplayTests.TheOneByteStubReadsAsNotSet` is its replacement, and the neighbouring
+   category-`0x01` test still covers the genuine Synapse label.
+
+- [ ] **Step 9: Run the whole suite**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: all green, including `DpiPillInteractionTests` and the pre-existing dashboard tests.
 
-- [ ] **Step 9: Render the dashboard through the UI probe and look at the header**
+- [ ] **Step 10: Render the dashboard through the UI probe and look at the header**
 
 Run:
 
@@ -2551,7 +2652,7 @@ $env:NAGA_UI_PROBE_OUT = "$env:TEMP\naga-header.png"
 
 Expected: the header shows the mouse ComboBox with the link caption beneath it, and the layout is unchanged otherwise.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add src/NagaBatteryTray tests/NagaBatteryTray.Tests
