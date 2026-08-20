@@ -47,7 +47,9 @@ internal sealed class FakeControlCollectionSource : IControlCollectionSource
         {
             Array.Copy(_lastRequest, buffer, Math.Min(_lastRequest.Length, buffer.Length));
             buffer[1] = 0x02;    // status: command completed
-            buffer[10] = 0x80;   // ~50% for a power query; harmless filler for other classes
+            buffer[10] = 0x80;   // ~50% for a power query; safe for other classes only because the
+                                  // verify path is battery-only — it would clobber the buttonId echo
+                                  // ParseButtonReply checks
 
             var report = new byte[RazerProtocol.ReportLength];
             Array.Copy(buffer, 1, report, 0, RazerProtocol.ReportLength);

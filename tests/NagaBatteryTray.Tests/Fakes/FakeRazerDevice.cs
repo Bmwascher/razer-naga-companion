@@ -31,8 +31,13 @@ public sealed class FakeRazerDevice : IRazerDevice
 
     public int GetButtonCount { get; private set; }
 
+    /// <summary>Runs just before a button read — lets a test simulate the connection changing
+    /// in the middle of a multi-step operation.</summary>
+    public Action? BeforeGetButton { get; set; }
+
     public Task<RawButtonAction?> GetButtonAsync(byte profile, byte buttonId, CancellationToken ct)
     {
+        BeforeGetButton?.Invoke();
         GetButtonCount++;
         return Task.FromResult(ButtonActions.TryGetValue((profile, buttonId), out var a) ? a : (RawButtonAction?)null);
     }
@@ -61,6 +66,21 @@ public sealed class FakeRazerDevice : IRazerDevice
         if (SetActiveProfileResult) ActiveProfile = slot; // realistic: a successful set changes the active slot
         return Task.FromResult(SetActiveProfileResult);
     }
+
+    public string? PreferredModel { get; set; }
+
+    /// <summary>What DiscoverReachableAsync returns; tests set it per scenario.</summary>
+    public List<string> Reachable { get; } = new();
+    public int DiscoverCount { get; private set; }
+
+    public Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct)
+    {
+        DiscoverCount++;
+        return Task.FromResult<IReadOnlyList<string>>(Reachable.ToList());
+    }
+
+    /// <summary>Settable so a test can simulate the mouse changing underneath an operation.</summary>
+    public int ConnectionId { get; set; }
 
     public int ResetCount { get; private set; }
     public void Reset() => ResetCount++;

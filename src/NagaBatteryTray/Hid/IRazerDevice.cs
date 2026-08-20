@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -33,6 +34,22 @@ public interface IRazerDevice : IDisposable
     /// across power-cycles — bottom-button parity). Targets slots from the device's own profile
     /// list (the card's dropdown). True = firmware acked (status 0x02).</summary>
     Task<bool> SetActiveProfileAsync(byte slot, CancellationToken ct);
+
+    /// <summary>Which model the app should talk to, as a RazerProtocol.SupportedMice display name.
+    /// Null = scan order. Only the battery path (ReadAsync) acts on a change, so setting this never
+    /// stalls a button or DPI call (spec 2026-08-19 §4.3).</summary>
+    string? PreferredModel { get; set; }
+
+    /// <summary>Display names of the supported mice that actually answer right now, in
+    /// SupportedMice order. Costs one probe per model, so callers use it on explicit user actions
+    /// only — never on a timer. Leaves the connection on the preferred/first reachable mouse.</summary>
+    Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct);
+
+    /// <summary>Increases every time a collection is adopted, including a reconnect to the same
+    /// model. The app's only reliable "am I still talking to the same mouse": a non-battery call can
+    /// reconnect onto a different mouse after a dropped handle, and nothing publishes that
+    /// (spec §4.10).</summary>
+    int ConnectionId { get; }
 
     /// <summary>Drop any cached connection so the next call re-selects the active interface. Used after a
     /// device-change (e.g. USB-C plug flips wireless&lt;-&gt;wired) where the cached handle would read stale.</summary>
