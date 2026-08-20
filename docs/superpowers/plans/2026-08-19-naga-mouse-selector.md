@@ -2662,9 +2662,30 @@ The session verified every finding against the live repo before adjudicating. Al
 Reviewer: "No substantive plan risk remains." Overall verdict PASS. Dry round, no new finding, no
 outstanding contested point. Fix-verify budget: 4 of 4 exchanges used.
 
+### Round 7 — PASS
+
+Both round-6 fixes verified. "No substantive plan risk remains." Dry round, no new finding, no
+outstanding contested point. Seven rounds total: the declared budget of four, one round the product
+owner authorized to check the restructure, and two more under a standing authorization to continue
+until convergence.
+
 ### Session's final adjudication
 
-Terminal verdict: **PASS on the plan**, with one open question below. Every finding across the four
+Terminal verdict: **PASS on the plan.** Twenty-two findings across seven rounds, every one checked
+against the live repo before it was accepted; all twenty-two were real. Two of the session's own
+claims were refuted with evidence and are recorded as such: that `_lastActive` had a single
+assignment site, and that discovery could re-enter the model-change handler.
+
+Five of the findings were in code the session wrote *after* an earlier PASS — wrong V2 PIDs, a
+cancellation test that could not reach its assertion, dropped marshalling attributes, a lost
+transport-loss guard, and a fake that could never verify. That is the argument for re-reviewing
+after amendments rather than treating a PASS as durable.
+
+Nothing here is verified code. The plan remains unexecuted, `dotnet test` has not run against any of
+it, and hardware acceptance (spec §7, plus the probe-suite gate at the end of Task 3b) is still what
+decides whether it works.
+
+### The escalated question, and how it was settled Every finding across the four
 rounds was checked against the live repo before being accepted; all fifteen were real. Two of the
 session's own claims were refuted with evidence and are recorded as such: that `_lastActive` had a
 single assignment site, and that discovery could re-enter the model-change handler.
