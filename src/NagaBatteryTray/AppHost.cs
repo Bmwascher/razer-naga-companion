@@ -165,10 +165,26 @@ public sealed class AppHost
     {
         int connection = _monitor.ConnectionId;
         var dpi = await Task.Run(() => _monitor.GetDpiAsync());
-        if (_monitor.ConnectionId != connection || !ReferenceEquals(_dashboardVm, vm)) return;
+        if (!ReferenceEquals(_dashboardVm, vm)) return;
+        // WITHIN one operation the id is the right question: this result came back after an
+        // adoption, so it is not attributable and must not be painted on.
+        if (_monitor.ConnectionId != connection)
+        {
+            // A guard that fires HANDS OFF; it never just returns. On dashboard open with a napping
+            // mouse the DPI read itself re-adopts, and returning here left no DPI, no profile card
+            // and no sweep, with nothing to retry until the model changed (review round 1).
+            _ = RecoverFromReconnectAsync(vm);
+            return;
+        }
         Dispatch(() => vm.SetCurrentDpi(dpi));
         await RefreshProfileAsync(vm);
     }
+
+    // 0 = idle. One recovery at a time: a write-stale hand-off and a sweep abort can fire together,
+    // and each Reset()s under the other. A second call is DROPPED, never queued — no timer, no
+    // thread, no retry loop, no backoff (hard rule 1). Recovery's own nested reseed is dropped by
+    // the same flag, which is what stops a guard that keeps firing from recursing.
+    private int _recovering;
 
     /// <summary>Recover from a reconnect that nothing announced. A lock-waiting battery read
     /// republishes the connection's identity FIRST; only then is it safe to reload anything, because
@@ -176,10 +192,15 @@ public sealed class AppHost
     /// OnDeviceStateChanged has already reset and reseeded, so this does not do it twice.</summary>
     private async Task RecoverFromReconnectAsync(DashboardViewModel vm)
     {
-        string? before = _monitor.State.Model;
-        await Task.Run(() => _monitor.RefreshNowWaitingAsync());
-        if (!ReferenceEquals(_dashboardVm, vm)) return;
-        if (string.Equals(_monitor.State.Model, before, StringComparison.Ordinal)) await ReseedDeviceAsync(vm);
+        if (Interlocked.CompareExchange(ref _recovering, 1, 0) != 0) return;
+        try
+        {
+            string? before = _monitor.State.Model;
+            await Task.Run(() => _monitor.RefreshNowWaitingAsync());
+            if (!ReferenceEquals(_dashboardVm, vm)) return;
+            if (string.Equals(_monitor.State.Model, before, StringComparison.Ordinal)) await ReseedDeviceAsync(vm);
+        }
+        finally { Volatile.Write(ref _recovering, 0); }
     }
 
     /// <summary>Profile card refresh (spec §13.1): the full slot inventory (0x05/0x81) plus the
@@ -187,10 +208,13 @@ public sealed class AppHost
     /// inside one Task.Run — the sequential awaits still serialize on the monitor's lock either way.
     /// Only called on dashboard open / explicit refresh — never polled (also runs after a switch and
     /// after a write that resolved the slot on demand). A known active slot then kicks the grid
-    /// sweep, fire-and-forget so a switch in progress isn't blocked behind ~12 reads.</summary>
-    private async Task RefreshProfileAsync(DashboardViewModel vm)
+    /// sweep, fire-and-forget so a switch in progress isn't blocked behind ~12 reads.
+    /// <para>False = it bailed on a connection change and handed off to recovery, so the caller must
+    /// not leave a "working…" note on screen for a refresh that never landed.</para></summary>
+    private async Task<bool> RefreshProfileAsync(DashboardViewModel vm)
     {
         int connection = _monitor.ConnectionId;
+        string? model = _monitor.ConnectedModel;
         var (list, active) = await Task.Run(async () =>
         {
             var l = await _monitor.GetProfileListAsync();
@@ -198,13 +222,21 @@ public sealed class AppHost
             return (l, a);
         });
         // a hop while the two reads were in flight: what came back describes a mouse that may no
-        // longer be here, so it must not be cached or shown
-        if (_monitor.ConnectionId != connection) return;
+        // longer be here, so it must not be cached or shown. Hand off to recovery rather than
+        // returning — nothing else retries, and the card would sit half-built (review round 1).
+        if (_monitor.ConnectionId != connection)
+        {
+            _ = RecoverFromReconnectAsync(vm);
+            return false;
+        }
         _scoped.ActiveSlot = active;
         _scoped.CreatedSlots = list?.Slots;
-        _scoped.SeededConnection = connection;
+        // stamp the seed identity only when the seed actually landed: an empty cache carrying one
+        // would tell the write path "the snapshots are current" when there are none (review round 1)
+        if (list?.Slots is not null || active is not null) _scoped.SeededModel = model;
         Dispatch(() => vm.SetProfileInventory(list?.Slots, active));
         if (active is { } a2) _ = ReadGridAsync(vm, a2);
+        return true;
     }
 
     private int _gridSweep; // sweep generation: a new sweep or dashboard close supersedes any in flight
@@ -230,17 +262,20 @@ public sealed class AppHost
             for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++) vm.Callout(pos).SetPending();
         });
         // the generation counter is not a substitute: _gridSweep moves on a PUBLISHED model change, a
-        // dashboard close, or a new sweep, and a mid-sweep reconnect onto another mouse publishes nothing
-        int connection = _monitor.ConnectionId;
+        // dashboard close, or a new sweep, and a mid-sweep reconnect onto another mouse publishes nothing.
+        // The MODEL is what is compared here, not the id: a same-mouse reconnect (any USB event resets
+        // the handle) leaves every byte read so far still true, and throwing the sweep away for it
+        // would red the grid over a plugged-in headset (spec §4.10 point 3).
+        string? model = _monitor.ConnectedModel;
         for (int pos = 1; pos <= NagaV2ProButtons.Count; pos++)
         {
             if (gen != Volatile.Read(ref _gridSweep) || !ReferenceEquals(_dashboardVm, vm)) return;
             int p = pos;
             var raw = await Task.Run(() => _monitor.GetButtonAsync(slot, NagaV2ProButtons.IdForPosition(p)));
             if (gen != Volatile.Read(ref _gridSweep) || !ReferenceEquals(_dashboardVm, vm)) return;
-            if (_monitor.ConnectionId != connection)
+            if (!string.Equals(_monitor.ConnectedModel, model, StringComparison.Ordinal))
             {
-                // reconnected mid-sweep, possibly onto another mouse: abandon the half-read grid
+                // hopped onto the other mouse mid-sweep: abandon the half-read grid
                 // rather than mixing two mice in it, drop the snapshots, and start over
                 _scoped.Clear();
                 Dispatch(() => vm.ResetForNewMouse());
@@ -249,9 +284,9 @@ public sealed class AppHost
             }
             Dispatch(() => vm.Callout(p).SetFromDevice(raw));
         }
-        // the whole grid was read under one connection: stamp it, so a write that arrives after a
-        // later hop can tell that these snapshots belong to a mouse that is no longer here
-        _scoped.SeededConnection = connection;
+        // the whole grid was read off one mouse: stamp it, so a write that arrives after a later hop
+        // can tell that these snapshots belong to a mouse that is no longer here
+        _scoped.SeededModel = model;
     }
 
     /// <summary>Dropdown pick: switch the mouse to ANY listed onboard slot (0x05/0x04,
@@ -281,7 +316,17 @@ public sealed class AppHost
                 });
                 return;
             }
-            await RefreshProfileAsync(vm);
+            if (!await RefreshProfileAsync(vm))
+            {
+                // the confirm read bailed on a connection change and handed off to recovery. The
+                // switch itself landed, but "Switching…" would sit there forever and the dropdown
+                // would never resync — a guard that fires must not leave the UI mid-state.
+                Dispatch(() =>
+                {
+                    vm.SetProfileNote("");
+                    vm.ResyncSelection();
+                });
+            }
         }
         finally
         {
@@ -374,20 +419,30 @@ public sealed class AppHost
 
         if (r.Slot is { } used) _scoped.ActiveSlot = used;
         // Two ways the cache can be stale, and both land in the same branch.
-        // r.ConnectionChanged: the mouse was adopted DURING the write, inside the lock.
-        // r.Connection != SeededConnection: a hop landed BEFORE the lock, between the grid sweep
-        // that armed the undo snapshots and this click. The write itself is fine — it went to the
-        // slot it read from the mouse in front of it — but every chip snapshot describes a
-        // different mouse, and offering undo against one would restore the wrong binding onto
-        // this one (hard rule 2, spec §4.10). A null SeededConnection means nothing was seeded,
-        // so there is no snapshot to be wrong about.
+        // r.ConnectionChanged: the mouse was adopted DURING the write, inside the lock — the
+        // WITHIN-operation question, where the connection id is the right answer.
+        // r.Model != SeededModel: a hop onto the OTHER mouse landed BEFORE the lock, between the
+        // grid sweep that armed the undo snapshots and this click. The write itself is fine — it
+        // went to the slot it read from the mouse in front of it — but every chip snapshot
+        // describes a different mouse, and offering undo against one would restore the wrong
+        // binding onto this one (hard rule 2, spec §4.10). This is the ACROSS-TIME question, so it
+        // is asked of the MODEL: comparing ids here failed landed writes whenever any unrelated USB
+        // event bumped the id. A null SeededModel means nothing was seeded, so there is no
+        // snapshot to be wrong about.
         bool stale = r.ConnectionChanged
-            || (_scoped.SeededConnection is { } seeded && r.Connection != seeded);
+            || (_scoped.SeededModel is { } seeded && !string.Equals(r.Model, seeded, StringComparison.Ordinal));
         if (stale)
         {
             _scoped.Clear();
             Interlocked.Increment(ref _gridSweep);
-            if (_dashboardVm is { } changedVm) _ = RecoverFromReconnectAsync(changedVm);
+            // void the chips' live undo snapshots in the same breath as the cache. Without this a
+            // chip still inside its 5 s undo window would write the OLD mouse's raw bytes into the
+            // NEW mouse's active slot and report it applied (hard rule 2, review round 1).
+            if (_dashboardVm is { } changedVm)
+            {
+                Dispatch(() => changedVm.ResetForNewMouse());
+                _ = RecoverFromReconnectAsync(changedVm);
+            }
             return false;
         }
         // the slot was only just learned (the card said "state unknown"): let the card + grid

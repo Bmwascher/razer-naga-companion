@@ -129,8 +129,14 @@ public sealed class BatteryMonitor : IDisposable
     /// <para>ConnectionChanged only covers the interval inside THIS lock acquisition; it cannot see a
     /// hop that landed before the lock was taken. A caller holding an undo snapshot must instead
     /// compare Connection against the id its snapshot was taken under - that catches a pre-lock hop
-    /// too, which ConnectionChanged alone would miss.</para></summary>
-    public readonly record struct ButtonWriteResult(bool Verified, byte? Slot, bool ConnectionChanged, int Connection);
+    /// too, which ConnectionChanged alone would miss.</para>
+    /// <para>Model is the connected MODEL the operation ran under, captured at entry inside the lock.
+    /// It is the identity a caller compares ACROSS TIME (is this undo snapshot still about the mouse
+    /// in front of me), because Connection increases on every adoption including a reconnect to the
+    /// same mouse - comparing ids across time reds a landed write over an unrelated USB event
+    /// (spec 4.10 point 3).</para></summary>
+    public readonly record struct ButtonWriteResult(
+        bool Verified, byte? Slot, bool ConnectionChanged, int Connection, string? Model);
 
     /// <summary>Read the active slot, write, and read back to verify - all inside ONE read-lock
     /// acquisition. Split across three acquisitions (as it was before 2026-08-19) a reselect can land
@@ -150,20 +156,22 @@ public sealed class BatteryMonitor : IDisposable
         byte[]? createdSlots, byte buttonId, byte category, byte[] data)
     {
         try { await _readLock.WaitAsync(_cts.Token); }
-        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return new(false, null, false, _device.ConnectionId); }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return new(false, null, false, _device.ConnectionId, _device.ConnectedModel); }
 
         // captured BEFORE the slot read, because the slot read is itself the device call that can
         // trigger a reconnect: a dropped handle re-scans on the next call, possibly onto a different
         // mouse, and that can happen even when the read then fails to parse. Every return path below
         // reports ConnectionChanged against THIS id, never a later one, so an adoption that happens
         // during a failed slot read is never reported as "connection unchanged".
+        // The model is captured in the same breath, and is what the caller compares across time.
         int entry = _device.ConnectionId;
+        string? entryModel = _device.ConnectedModel;
         try
         {
             if (await _device.GetActiveProfileAsync(_cts.Token) is not { } slot)
-                return new(false, null, _device.ConnectionId != entry, _device.ConnectionId);
+                return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, entryModel);
             if (createdSlots is not null && Array.IndexOf(createdSlots, slot) < 0)
-                return new(false, slot, _device.ConnectionId != entry, _device.ConnectionId);
+                return new(false, slot, _device.ConnectionId != entry, _device.ConnectionId, entryModel);
 
             bool ok = await _device.SetButtonAsync(slot, buttonId, category, data, _cts.Token);
             if (ok)
@@ -172,9 +180,9 @@ public sealed class BatteryMonitor : IDisposable
                 ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
             }
             bool changed = _device.ConnectionId != entry;
-            return new(ok && !changed, slot, changed, _device.ConnectionId);
+            return new(ok && !changed, slot, changed, _device.ConnectionId, entryModel);
         }
-        catch (OperationCanceledException) { return new(false, null, _device.ConnectionId != entry, _device.ConnectionId); }
+        catch (OperationCanceledException) { return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, entryModel); }
         finally { _readLock.Release(); }
     }
 
@@ -190,6 +198,10 @@ public sealed class BatteryMonitor : IDisposable
     /// adoption (spec §4.10). Callers capture it before a multi-step operation and discard results
     /// whose id no longer matches.</summary>
     public int ConnectionId => _device.ConnectionId;
+
+    /// <summary>Which mouse the app is talking to, by MODEL — the identity to compare ACROSS TIME
+    /// (spec §4.10 point 3). Plain read, no lock, like <see cref="ConnectionId"/>.</summary>
+    public string? ConnectedModel => _device.ConnectedModel;
 
     /// <summary>Which supported mice answer right now, for the dashboard's selector. Blocks for the
     /// read lock like every other pass-through — this is several device probes, so it must not

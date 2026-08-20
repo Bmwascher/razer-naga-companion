@@ -16,9 +16,12 @@ public sealed class DeviceScopedState
     /// <summary>Slots the connected mouse has actually created (0x05/0x81). Null = not read yet.</summary>
     public byte[]? CreatedSlots { get; set; }
 
-    /// <summary>The connection id the cache was last seeded under, so a caller can tell whether a
-    /// hop landed between the seed and now. Null = nothing seeded yet (spec §4.10).</summary>
-    public int? SeededConnection { get; set; }
+    /// <summary>The MODEL the cache was last seeded under, so a caller can tell whether a hop onto
+    /// the other mouse landed between the seed and now. The connection id cannot answer this: it
+    /// increases on every adoption, including a reconnect to the same mouse, so any unrelated USB
+    /// event would invalidate a cache that is still perfectly true (spec §4.10 point 3). Null =
+    /// nothing was seeded, so there is nothing to be stale about.</summary>
+    public string? SeededModel { get; set; }
 
     /// <summary>Feed every observed model name, including null when the mouse goes away. True = the
     /// mouse changed and the cache was dropped, so the caller must supersede in-flight work and
@@ -37,7 +40,7 @@ public sealed class DeviceScopedState
     {
         ActiveSlot = null;
         CreatedSlots = null;
-        SeededConnection = null;
+        SeededModel = null;
     }
 
     /// <summary>True when the inventory is KNOWN and the slot is absent from it — the one case where

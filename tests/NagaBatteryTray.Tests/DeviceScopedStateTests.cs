@@ -37,6 +37,17 @@ public sealed class DeviceScopedStateTests
     }
 
     [Fact]
+    public void ADifferentModelClearsTheSeedIdentityToo()
+    {
+        var s = new DeviceScopedState();
+        s.Observe("Naga V2 Pro");
+        s.SeededModel = "Naga V2 Pro";
+
+        Assert.True(s.Observe("Naga V3 Pro"));
+        Assert.Null(s.SeededModel); // an empty cache must never carry a seed identity
+    }
+
+    [Fact]
     public void GoingOfflineAndBackClearsToo()
     {
         var s = new DeviceScopedState();

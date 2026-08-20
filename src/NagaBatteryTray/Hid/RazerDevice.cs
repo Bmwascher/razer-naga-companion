@@ -35,6 +35,8 @@ public sealed class RazerDevice : IRazerDevice
 
     public int ConnectionId => _conn.ConnectionId;
 
+    public string? ConnectedModel => _conn.Model;
+
     /// <summary>MouseConnection's protocol hook: resolve a transaction id on a candidate and confirm
     /// it answers a battery query. Runs against the candidate directly, because it is not the live
     /// collection yet.</summary>

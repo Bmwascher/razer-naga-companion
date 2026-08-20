@@ -51,6 +51,15 @@ public interface IRazerDevice : IDisposable
     /// (spec §4.10).</summary>
     int ConnectionId { get; }
 
+    /// <summary>Display name of the mouse currently connected, or null. This is the ACROSS-TIME
+    /// identity: "is the cached slot / profile list / undo snapshot still about the mouse in front
+    /// of me". <see cref="ConnectionId"/> cannot answer that — it increases on every adoption,
+    /// including a reconnect to the same mouse, so any unrelated WM_DEVICECHANGE would fail a
+    /// landed write. The model survives a dropped handle, so it still answers afterwards
+    /// (spec §4.10 point 3). Default null: a test double with no modelled connection has no answer.
+    /// </summary>
+    string? ConnectedModel => null;
+
     /// <summary>Drop any cached connection so the next call re-selects the active interface. Used after a
     /// device-change (e.g. USB-C plug flips wireless&lt;-&gt;wired) where the cached handle would read stale.</summary>
     void Reset();
