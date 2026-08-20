@@ -1789,3 +1789,44 @@ Run `.\scripts\install.ps1`, then check the spec's §7 list:
 4. No chip shows a red "Synapse action (0x02)".
 5. V2 profile names do not appear on the V3.
 6. Idle footprint back to baseline and mouse feel unchanged (hard rule 1).
+
+---
+
+## Debate record
+
+Cross-model plan verification, parallax multi-model-verify mode `plan`.
+
+- Session lane: Claude Opus 5 (driver, live repo access).
+- Reviewer lane: `gpt-5.6-sol` via codex-cli 0.144.1, effort `high`, sandbox `read-only`,
+  provider `openai`. Effective route confirmed from the run header.
+- Verification status: FULL. Repo instruction-channel enumeration clean (no `AGENTS.md`, no
+  `.agents/`, no `.kimi-code/`), so no review mirror was needed. Client context probe: `status:
+  clean`, 0 skills advertised, 0 repo-scoped and 0 plugin-cache-scoped instruction sources, 29
+  home-scoped skills suppressed by the verified override. The user's global
+  `~/.codex/AGENTS.md` is present and instructing the reviewer; recorded, not removed.
+- Per-round evidence: `read-codex-round-evidence.ps1` returned `clean` for round 1 — client-echo
+  evidence that the reply is bound to the brief this side sent.
+- Fix-verify budget: 4 dispatched exchanges, declared before round 1.
+
+### Round 1 — reviewer verdict FIX, nine findings
+
+The session verified every finding against the live repo before adjudicating. All nine were real.
+
+| Finding | Adjudication | Where it landed |
+| --- | --- | --- |
+| Claim 3's rationale named only one `_lastActive` assignment site | Accepted; the session's brief was wrong, the plan was already correct | no change |
+| Resolve then write then verify spans three lock acquisitions, so a reselect can cross mice | Accepted | new Task 4b, spec 4.10 |
+| "Never triggers a re-scan" overstates it; a dropped handle still reconnects | Accepted | spec 4.3, Task 3 Step 4 |
+| `AdoptPreferredAsync` loses and leaks the live handle on exception or cancellation | Accepted | Task 3 Step 3, `try/finally` |
+| Discovery cannot re-enter the handler, but leaves `State.Model` describing the wrong mouse | Accepted; the session's re-entrancy premise was refuted | spec 4.4, Task 4 |
+| A pick can falsely fail because `PollAsync` skips when the lock is busy | Accepted | `RefreshNowWaitingAsync`, Tasks 4 and 7 |
+| `ResetForNewMouse` leaves the old mouse's DPI on screen | Accepted | Task 7 Step 4 |
+| Model-only invalidation misses a reconnect that changes mouse without a battery read | Accepted | `ConnectionId`, spec 4.10 |
+| The connection state machine has no automated coverage | Partially accepted | new `ConnectionPolicy` + Task 3 Step 1 |
+
+The one partial: the reviewer asked for the connection state machine to be isolated behind a
+fakeable transport. The session extracted the decision (`ConnectionPolicy.Decide`) and tests it
+exhaustively, but declined to put the Win32 handle lifecycle behind an injectable seam —
+refactoring transport code proven on hardware costs more risk than the coverage buys, and the
+rollback it would test is instead made structural with `try/finally`. Put to the reviewer in
+round 2.
