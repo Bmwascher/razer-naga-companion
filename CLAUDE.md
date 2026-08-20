@@ -105,6 +105,23 @@ Shipped (spec links = the full story):
 
 Next:
 
+- [ ] **V3 acceptance follow-ups — FIRST, ahead of DPI stages** (user, 2026-08-19; both found in
+  acceptance testing of the dual-support merge, neither is a regression it introduced). Two
+  device-behaviour defects, measured on real hardware:
+  - **Sticky device selection.** `EnsureConnectedAsync` short-circuits on a live handle, so once
+    it latches a mouse it never re-checks whether a preferred one became reachable. Pulling the
+    V3's cable made it re-scan while the V3's wireless link was still coming up; the V2 answered
+    first and it stayed there indefinitely. A fresh start picks correctly. **User wants a
+    mouse-selector dropdown in the dashboard header, defaulting to the V3**, with automatic
+    re-evaluation underneath. Needs its own design round (selector + persisted choice).
+  - **"Not applied" on writes that actually landed.** `AppHost.WriteVerifiedAsync` writes, then
+    reads back and demands an exact match; the chip goes red on any mismatch. Reads are NOT the
+    cause — 36/36 button reads through the production path succeeded, median 61 ms, on V3
+    wireless. Leading unproven hypothesis: the verify read races the device's commit and returns
+    the stale value. Confirming it needs a write-then-immediately-read probe.
+  - Minor, same pass: an unset V3 button reads as category `0x02` with ONE data byte, and
+    `CalloutViewModel.DisplayRaw` only decodes `0x02` + exactly 2 bytes, so it renders as a red
+    "Synapse action (0x02)". Cosmetic, and invisible once buttons are set.
 - [ ] **DPI stages + polling rate** — onboard 5-stage table (+ stage up/down), polling-rate
   get/set (openrazer-validated, write-on-action only). Carries two deferred riders: the preset
   row likely becomes the onboard stage table (user, 2026-07-17), and the right-rail relayout
