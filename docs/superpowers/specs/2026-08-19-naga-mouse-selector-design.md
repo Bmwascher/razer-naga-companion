@@ -320,4 +320,9 @@ README screenshots regenerate through the UI probe on this branch (hard rule 4).
 - Discovery adds about a second to dashboard open. Accepted by the user in place of a list that
   shows sleeping mice.
 - While running on a non-preferred mouse, each battery poll pays one extra probe. It stops as soon
-  as the preferred mouse is adopted.
+  as the preferred mouse is adopted — and if that mouse never wakes, it never stops: the probe
+  repeats on every poll, for as long as the app runs on the other mouse. That is the intended
+  behaviour, not an oversight; the retry is the whole mechanism by which the app hops back, and
+  giving up after N tries would strand the user on the wrong mouse until the next restart. The cost
+  is bounded by the poll cadence (15 s floor), runs off the UI thread, and is serialized on the one
+  read lock, so it cannot touch input feel (hard rule 1).

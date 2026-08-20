@@ -229,15 +229,10 @@ public sealed class DashboardViewModel : ObservableObject
     /// mice are listed, so a sleeping mouse never appears (user decision, 2026-08-19).</summary>
     public ObservableCollection<string> Mice { get; } = new();
 
-    /// <summary>False until the first reachability probe lands — the record of whether discovery has
-    /// run at all, kept separate from whether the box is pickable (that is CanPickMouse).</summary>
-    public bool MiceLoaded { get => _miceLoaded; private set => Set(ref _miceLoaded, value); }
-    private bool _miceLoaded;
-
     /// <summary>Drives the header ComboBox's IsEnabled. One entry is nothing to pick between, so the
     /// box reads as the model label it replaced — including before the probe lands, where binding
-    /// enablement to MiceLoaded greyed the app's primary identity element on every open. It becomes
-    /// a real selector the moment a second reachable mouse is listed.</summary>
+    /// enablement to "has the probe run" greyed the app's primary identity element on every open.
+    /// It becomes a real selector the moment a second reachable mouse is listed.</summary>
     public bool CanPickMouse => Mice.Count > 1;
 
     public event Action<string>? MouseSelectRequested;
@@ -288,7 +283,6 @@ public sealed class DashboardViewModel : ObservableObject
         // no connected mouse means the app is talking to nothing, and the box must not claim
         // otherwise — showing the first probe hit as selected named a mouse we are not on
         SyncSelectedMouse(connected);
-        MiceLoaded = mice.Count > 0;   // the PROBE's result, not the box's contents
     }
 
     /// <summary>Snap the dropdown back after a failed pick: to the mouse actually connected, or —
@@ -386,6 +380,7 @@ public sealed class DashboardViewModel : ObservableObject
                                  // entitled to call it unreachable until a read actually fails
         RefreshProfileDetail();
         SetCurrentDpi(null); // the old mouse's number must not stay on screen until the reseed lands
+        SetDpiStatus("");    // and neither must its verdict — "Couldn't confirm" was about that mouse
         foreach (var c in Callouts) c.SetPending(); // also voids each chip's undo snapshot
     }
 

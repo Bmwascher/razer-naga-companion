@@ -18,7 +18,7 @@ public sealed class AtomicButtonWriteTests
         device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
         var monitor = Build(device);
 
-        var r = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var r = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
 
         Assert.True(r.Verified);
         Assert.Equal((byte)2, r.Slot);
@@ -32,7 +32,7 @@ public sealed class AtomicButtonWriteTests
         var device = new FakeRazerDevice { ActiveProfile = null };
         var monitor = Build(device);
 
-        var r = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var r = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
 
         Assert.False(r.Verified);
         Assert.Empty(device.ButtonWrites);   // never guess a slot we could not read
@@ -44,7 +44,7 @@ public sealed class AtomicButtonWriteTests
         var device = new FakeRazerDevice { ActiveProfile = 3 };
         var monitor = Build(device);
 
-        var r = await monitor.WriteButtonVerifiedAsync(new byte[] { 1 }, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var r = await monitor.WriteButtonVerifiedAsync(new byte[] { 1 }, null, 0x4b, RazerProtocol.FnKeyboard, F1);
 
         Assert.False(r.Verified);
         Assert.Equal((byte)3, r.Slot);
@@ -58,7 +58,7 @@ public sealed class AtomicButtonWriteTests
         device.ButtonActions[(1, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, new byte[] { 0x00 });
         var monitor = Build(device);
 
-        var r = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var r = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
 
         Assert.False(r.Verified);
         Assert.Single(device.ButtonWrites);   // the write WAS issued; only the read-back rejected it
@@ -72,7 +72,7 @@ public sealed class AtomicButtonWriteTests
         device.BeforeGetButton = () => device.ConnectionId++;   // reconnect landed mid-operation
         var monitor = Build(device);
 
-        var r = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var r = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
 
         Assert.True(r.ConnectionChanged);
         Assert.False(r.Verified);   // a changed connection is never a verified write
@@ -87,7 +87,7 @@ public sealed class AtomicButtonWriteTests
         device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
         var monitor = Build(device);
 
-        var r = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var r = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
 
         Assert.True(r.Verified);
         Assert.Equal("Naga V3 Pro", r.Model);
@@ -103,12 +103,59 @@ public sealed class AtomicButtonWriteTests
         device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
         var monitor = Build(device);
 
-        var first = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var first = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
         device.ConnectedModel = "Naga V3 Pro";   // the other mouse is what answers now
-        var second = await monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var second = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
 
         Assert.Equal("Naga V2 Pro", first.Model);
         Assert.Equal("Naga V3 Pro", second.Model);
+    }
+
+    /// <summary>Hard rule 2, from the inside: the caller's snapshots describe the V2, the mouse
+    /// answering is the V3, so the bytes must NEVER leave — a verdict returned after the write has
+    /// landed protects nothing. This is the undo path's guarantee.</summary>
+    [Fact]
+    public async Task AWriteForTheOtherMouseIsRefusedBeforeItIsIssued()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2, ConnectedModel = "Naga V3 Pro" };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(null, "Naga V2 Pro", 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.Empty(device.ButtonWrites);        // nothing landed on the mouse that IS here
+        Assert.False(r.Verified);
+        Assert.Equal("Naga V3 Pro", r.Model);     // and the caller is told which mouse it is really on
+    }
+
+    /// <summary>The refusal is not a blanket "no writes while an expectation is set": the mouse
+    /// the caller expects is the mouse answering, so the write goes through normally.</summary>
+    [Fact]
+    public async Task AWriteForTheConnectedMouseIsWrittenNormally()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2, ConnectedModel = "Naga V3 Pro" };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(null, "Naga V3 Pro", 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.True(r.Verified);
+        Assert.Single(device.ButtonWrites);
+    }
+
+    /// <summary>No expected model means nothing was seeded, so there is no snapshot to protect —
+    /// the same rule the unknown-inventory case follows. It must not block the write.</summary>
+    [Fact]
+    public async Task NoExpectedModelNeverBlocks()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2, ConnectedModel = "Naga V3 Pro" };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.True(r.Verified);
+        Assert.Single(device.ButtonWrites);
     }
 
     /// <summary>The point of the single lock acquisition: nothing can run between the write's own
@@ -157,7 +204,7 @@ public sealed class AtomicButtonWriteTests
         var parked = monitor.RefreshNowAsync();
         await device.ReadEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        var write = monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        var write = monitor.WriteButtonVerifiedAsync(null, null, 0x4b, RazerProtocol.FnKeyboard, F1);
         // queued after the write, so it is first in line the moment the write frees the lock —
         // under three acquisitions that is the gap between resolving the slot and writing it.
         var beforeTheWrite = monitor.RefreshNowWaitingAsync();

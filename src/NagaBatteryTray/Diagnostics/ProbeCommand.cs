@@ -542,7 +542,8 @@ public static class ProbeCommand
 
     /// <summary>Opens the live mouse control collection: wired PID first, then wireless (a stale dongle
     /// collection stays enumerated when the mouse goes wired), verifying each candidate answers a
-    /// battery query before committing - mirrors RazerDevice.EnsureConnectedAsync.</summary>
+    /// battery query before committing - mirrors HidControlCollectionSource.Open plus
+    /// MouseConnection.ConnectAsync, which is how the app itself opens a mouse.</summary>
     private static SafeFileHandle? OpenLiveMouse(out int pidOpened)
     {
         foreach (int pid in RazerProtocol.ScanPids)

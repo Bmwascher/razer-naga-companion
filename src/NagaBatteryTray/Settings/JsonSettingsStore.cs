@@ -57,11 +57,16 @@ public sealed class JsonSettingsStore : ISettingsStore
 
     /// <summary>One-time move of slot-keyed profile names under the only mouse that could have
     /// written them. Per-mouse names ship with the 2026-08-19 selector change, so a file carrying
-    /// legacy names predates dual support and belongs to the V2 Pro (spec §4.9).</summary>
+    /// legacy names predates dual support and belongs to the V2 Pro (spec §4.9).
+    /// <para>The legacy dictionary is cleared on BOTH branches — including the one where per-mouse
+    /// names already exist and win. Leaving it in the file made the migration repeatable: the user
+    /// deletes every per-mouse name, ApplyTo writes an empty map, and the next load resurrects the
+    /// legacy names under the V2 Pro as if they had never been deleted.</para></summary>
     private void MigrateProfileNames()
     {
-        if (Settings.ProfileNames.Count == 0 || Settings.ProfileNamesByMouse.Count > 0) return;
-        Settings.ProfileNamesByMouse["Naga V2 Pro"] = new Dictionary<byte, string>(Settings.ProfileNames);
+        if (Settings.ProfileNames.Count == 0) return;
+        if (Settings.ProfileNamesByMouse.Count == 0)
+            Settings.ProfileNamesByMouse["Naga V2 Pro"] = new Dictionary<byte, string>(Settings.ProfileNames);
         Settings.ProfileNames.Clear();
         Save();
     }

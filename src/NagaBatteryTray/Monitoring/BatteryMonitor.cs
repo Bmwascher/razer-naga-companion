@@ -149,11 +149,18 @@ public sealed class BatteryMonitor : IDisposable
     /// defect.</para>
     /// <para>createdSlots null = inventory unknown, which never blocks; a known inventory that lacks
     /// the slot refuses before any write.</para>
+    /// <para>expectedModel is the mouse the CALLER's cache and undo snapshots describe. A non-null
+    /// value that does not match the model observed inside the lock refuses before any device call:
+    /// the bytes would otherwise land on the other mouse and only THEN be reported wrong, which is
+    /// no protection at all for a raw undo restore (hard rule 2, spec §4.10 points 3-4). Refusing on
+    /// the MODEL cannot fire on an ordinary same-model reconnect - that is why the id may not be
+    /// used here. Null expectedModel never blocks, the same rule the unknown-inventory case follows:
+    /// nothing was seeded, so there is no snapshot to protect.</para>
     /// <para>On the path where the lock was never entered (the WaitAsync failure) Connection is a
     /// best-effort read of whatever mouse is current, tied to nothing this operation did; Verified is
     /// false there, so no caller acts on it.</para></summary>
     public async Task<ButtonWriteResult> WriteButtonVerifiedAsync(
-        byte[]? createdSlots, byte buttonId, byte category, byte[] data)
+        byte[]? createdSlots, string? expectedModel, byte buttonId, byte category, byte[] data)
     {
         try { await _readLock.WaitAsync(_cts.Token); }
         catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return new(false, null, false, _device.ConnectionId, _device.ConnectedModel); }
@@ -168,6 +175,12 @@ public sealed class BatteryMonitor : IDisposable
         string? entryModel = _device.ConnectedModel;
         try
         {
+            // The identity check runs HERE, before the first device call, because a check after the
+            // write only reports damage already done. A hop that landed before this lock was taken
+            // means the caller's snapshots describe the other mouse, so nothing may be written at
+            // all. Inside the try so the lock is still released on the refusal path.
+            if (expectedModel is { } want && !string.Equals(entryModel, want, StringComparison.Ordinal))
+                return new(false, null, false, entry, entryModel);
             if (await _device.GetActiveProfileAsync(_cts.Token) is not { } slot)
                 return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, entryModel);
             if (createdSlots is not null && Array.IndexOf(createdSlots, slot) < 0)

@@ -83,7 +83,8 @@ The 2026-08-19 probe confirmed the V3 Pro speaks the identical command protocol 
 - `ScanPids` is a flat, hand-spelled `int[]`: every model's `WiredPid` first (in `SupportedMice`
   order), then every model's `WirelessPid`. The order matters, not just the membership — a wired
   mouse must always win device selection over a still-plugged-in wireless receiver that can no
-  longer reach it (see `RazerDevice.EnsureConnectedAsync` below), and that has to hold **across
+  longer reach it (`MouseConnection.ConnectAsync` adopts the first candidate that verifies — see
+  "Preference-ordered scan" below), and that has to hold **across
   every model**, not just within one, so all wired PIDs are tried before any wireless PID. Kept as
   a literal (no LINQ derivation) by deliberate choice — `RazerProtocol.cs` uses no LINQ anywhere.
   `RazerProtocolTests.cs` closes the resulting maintenance gap from the test side: a test derives
@@ -99,7 +100,8 @@ The 2026-08-19 probe confirmed the V3 Pro speaks the identical command protocol 
   and no model is known — the same fallback-on-offline shape as `DeviceState.Wired`.
 - What actually picks the control collection during device open is **not** the interface number —
   it's the **91-byte feature-report length** (`GetMaxFeatureReportLength()==91`, checked in
-  `RazerDevice.EnsureConnectedAsync`). The two models expose that collection on different
+  `HidControlCollectionSource.Open`, which is the only place the app enumerates HID devices). The
+  two models expose that collection on different
   interfaces (MI_00 on the V2 Pro, MI_03 on the V3 Pro), so hardcoding an interface number would
   have silently broken one model; scanning by report length works for both without knowing which
   interface a given model uses.

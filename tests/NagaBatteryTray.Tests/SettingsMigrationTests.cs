@@ -33,6 +33,25 @@ public sealed class SettingsMigrationTests
         Assert.False(store.Settings.ProfileNamesByMouse.ContainsKey("Naga V2 Pro"));
     }
 
+    /// <summary>The migration must be one-time in the FILE, not just in the run: a legacy dictionary
+    /// left behind re-migrates on every later load, so deleting all per-mouse names brings the old
+    /// ones back under the V2 as if they had never been deleted.</summary>
+    [Fact]
+    public void MigratedLegacyNamesCannotComeBackAfterTheUserDeletesThem()
+    {
+        string path = WriteTemp("""
+            {"ProfileNames":{"1":"Legacy"},"ProfileNamesByMouse":{"Naga V3 Pro":{"1":"Kept"}}}
+            """);
+        var store = new JsonSettingsStore(path);
+
+        // the user renames every slot back to its default: ApplyTo writes an empty per-mouse map
+        store.Settings.ProfileNamesByMouse = new Dictionary<string, Dictionary<byte, string>>();
+        store.Save();
+
+        var reloaded = new JsonSettingsStore(path);
+        Assert.Empty(reloaded.Settings.ProfileNamesByMouse);
+    }
+
     [Fact]
     public void PreferredMouseDefaultsToNullAndRoundTrips()
     {

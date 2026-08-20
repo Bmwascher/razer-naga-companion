@@ -160,10 +160,19 @@ public sealed class AppHost
         // Task.Run is load-bearing, not decoration: DiscoverMiceAsync takes the read lock, and when
         // the lock is free the wait completes synchronously, so enumeration, CreateFile and the first
         // feature reports would run on the UI thread this was called from (hard rule 1)
+        //
+        // Discovery ends in a battery read, so it can publish a model change from inside itself, and
+        // OnDeviceStateChanged then resets the UI and starts its own reseed. The sweep generation is
+        // the record of that: OnDeviceStateChanged bumps it in the same breath as the reseed it
+        // starts, so an unmoved generation means nothing reseeded underneath us and this open owes
+        // the device its one seed. Reseeding anyway would run two DPI reads, two profile refreshes
+        // and two twelve-read sweeps against a mouse in the user's hand (hard rule 1). No new flag:
+        // the counter that supersedes duplicated sweeps already says exactly this.
+        int sweep = Volatile.Read(ref _gridSweep);
         var mice = await Task.Run(() => _monitor.DiscoverMiceAsync());
         if (!ReferenceEquals(_dashboardVm, vm)) return; // closed while the sweep ran — nothing to paint
         Dispatch(() => vm.SetMice(mice, _monitor.State.Model));
-        await ReseedDeviceAsync(vm);
+        if (Volatile.Read(ref _gridSweep) == sweep) await ReseedDeviceAsync(vm);
     }
 
     /// <summary>Reload everything that describes the CONNECTED mouse. No reachability probe: the
@@ -513,21 +522,27 @@ public sealed class AppHost
     private async Task<bool> WriteVerifiedAsync(byte buttonId, byte category, byte[] data)
     {
         bool resolvedOnDemand = _scoped.ActiveSlot is null;
+        // SeededModel goes DOWN with the write: it is the mouse the cache and every chip's undo
+        // snapshot describe, and the monitor refuses the write outright if that is not the mouse
+        // answering inside the lock. That refusal is what PREVENTS the wrong bytes landing on the
+        // wrong mouse (hard rule 2); the staleness test below only REPORTS.
         var r = await Task.Run(() => _monitor.WriteButtonVerifiedAsync(
-            _scoped.CreatedSlots, buttonId, category, data));
+            _scoped.CreatedSlots, _scoped.SeededModel, buttonId, category, data));
 
         if (r.Slot is { } used) _scoped.ActiveSlot = used;
-        // Two ways the cache can be stale, and both land in the same branch.
+        // Two ways the write's result can be untrustworthy, and both land in the same branch. This
+        // is the REPORTING half — by the time it runs the device work is over, so its job is to
+        // clean up: drop the cache, void the undo snapshots, and hand off to recovery.
         // r.ConnectionChanged: the mouse was adopted DURING the write, inside the lock — the
-        // WITHIN-operation question, where the connection id is the right answer.
+        // WITHIN-operation question, where the connection id is the right answer, and the one case
+        // no pre-write check can prevent.
         // r.Model != SeededModel: a hop onto the OTHER mouse landed BEFORE the lock, between the
-        // grid sweep that armed the undo snapshots and this click. The write itself is fine — it
-        // went to the slot it read from the mouse in front of it — but every chip snapshot
-        // describes a different mouse, and offering undo against one would restore the wrong
-        // binding onto this one (hard rule 2, spec §4.10). This is the ACROSS-TIME question, so it
-        // is asked of the MODEL: comparing ids here failed landed writes whenever any unrelated USB
-        // event bumped the id. A null SeededModel means nothing was seeded, so there is no
-        // snapshot to be wrong about.
+        // grid sweep that armed the undo snapshots and this click. The monitor refuses that write
+        // rather than issuing it, so this arm is the same verdict read from the outside — and it
+        // still has to run, because it is what clears the stale cache and the snapshots. This is
+        // the ACROSS-TIME question, so it is asked of the MODEL: comparing ids here failed landed
+        // writes whenever any unrelated USB event bumped the id. A null SeededModel means nothing
+        // was seeded, so there is no snapshot to be wrong about.
         bool stale = r.ConnectionChanged
             || (_scoped.SeededModel is { } seeded && !string.Equals(r.Model, seeded, StringComparison.Ordinal));
         if (stale)

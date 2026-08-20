@@ -19,7 +19,7 @@ public sealed class MouseSelectorTests
 
         Assert.Equal(new[] { "Naga V3 Pro", "Naga V2 Pro" }, vm.Mice);
         Assert.Equal("Naga V2 Pro", vm.SelectedMouse);
-        Assert.True(vm.MiceLoaded);
+        Assert.True(vm.CanPickMouse);   // two listed mice: the box is a real selector
     }
 
     [Fact]
@@ -30,7 +30,7 @@ public sealed class MouseSelectorTests
 
         Assert.Equal(new[] { "Naga V3 Pro" }, vm.Mice);
         Assert.Equal("Naga V3 Pro", vm.SelectedMouse);
-        Assert.False(vm.MiceLoaded);   // still disabled: nothing has been probed yet
+        Assert.False(vm.CanPickMouse);   // one mouse is nothing to pick between: it reads as a label
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class MouseSelectorTests
         vm.SetMice(Array.Empty<string>(), "Naga V3 Pro");
 
         Assert.Equal(new[] { "Naga V3 Pro" }, vm.Mice);
-        Assert.False(vm.MiceLoaded);
+        Assert.False(vm.CanPickMouse);   // the connected mouse alone is not a choice
     }
 
     [Fact]
@@ -186,6 +186,18 @@ public sealed class MouseSelectorTests
         Assert.False(chip.CanUndo);
         await chip.UndoAsync();
         Assert.Equal("…", chip.BindingText);
+    }
+
+    [Fact]
+    public void ResetForNewMouseClearsTheDpiVerdict()
+    {
+        var vm = Build();
+        vm.SetDpiStatus("Couldn't confirm — wiggle the mouse and retry");
+
+        vm.ResetForNewMouse();
+
+        // the note was about the OLD mouse's failed apply; it must not sit over the new one's card
+        Assert.Equal("", vm.DpiStatus);
     }
 
     [Fact]
