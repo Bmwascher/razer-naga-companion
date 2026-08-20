@@ -122,9 +122,15 @@ public sealed class BatteryMonitor : IDisposable
     }
 
     /// <summary>Outcome of one atomic button write. Slot is the slot actually used (null = it could
-    /// not be established). ConnectionChanged = the mouse underneath changed mid-operation, so the
-    /// caller must re-seed rather than trust anything it cached.</summary>
-    public readonly record struct ButtonWriteResult(bool Verified, byte? Slot, bool ConnectionChanged);
+    /// not be established). ConnectionChanged = the mouse underneath changed between the entry id
+    /// (see below) and the id observed just before returning, so the caller must re-seed rather than
+    /// trust anything it cached. Connection is the id the operation actually ran under - the final id
+    /// observed inside the lock, equal to the entry id whenever nothing was adopted.
+    /// <para>ConnectionChanged only covers the interval inside THIS lock acquisition; it cannot see a
+    /// hop that landed before the lock was taken. A caller holding an undo snapshot must instead
+    /// compare Connection against the id its snapshot was taken under - that catches a pre-lock hop
+    /// too, which ConnectionChanged alone would miss.</para></summary>
+    public readonly record struct ButtonWriteResult(bool Verified, byte? Slot, bool ConnectionChanged, int Connection);
 
     /// <summary>Read the active slot, write, and read back to verify - all inside ONE read-lock
     /// acquisition. Split across three acquisitions (as it was before 2026-08-19) a reselect can land
@@ -141,14 +147,20 @@ public sealed class BatteryMonitor : IDisposable
         byte[]? createdSlots, byte buttonId, byte category, byte[] data)
     {
         try { await _readLock.WaitAsync(_cts.Token); }
-        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return new(false, null, false); }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return new(false, null, false, _device.ConnectionId); }
+
+        // captured BEFORE the slot read, because the slot read is itself the device call that can
+        // trigger a reconnect: a dropped handle re-scans on the next call, possibly onto a different
+        // mouse, and that can happen even when the read then fails to parse. Every return path below
+        // reports ConnectionChanged against THIS id, never a later one, so an adoption that happens
+        // during a failed slot read is never reported as "connection unchanged".
+        int entry = _device.ConnectionId;
         try
         {
-            // this read also forces any pending reconnect, so the id captured after it is the
-            // connection the write will actually use
-            if (await _device.GetActiveProfileAsync(_cts.Token) is not { } slot) return new(false, null, false);
-            int connection = _device.ConnectionId;
-            if (createdSlots is not null && Array.IndexOf(createdSlots, slot) < 0) return new(false, slot, false);
+            if (await _device.GetActiveProfileAsync(_cts.Token) is not { } slot)
+                return new(false, null, _device.ConnectionId != entry, _device.ConnectionId);
+            if (createdSlots is not null && Array.IndexOf(createdSlots, slot) < 0)
+                return new(false, slot, _device.ConnectionId != entry, _device.ConnectionId);
 
             bool ok = await _device.SetButtonAsync(slot, buttonId, category, data, _cts.Token);
             if (ok)
@@ -156,10 +168,10 @@ public sealed class BatteryMonitor : IDisposable
                 var readBack = await _device.GetButtonAsync(slot, buttonId, _cts.Token);
                 ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
             }
-            bool changed = _device.ConnectionId != connection;
-            return new(ok && !changed, slot, changed);
+            bool changed = _device.ConnectionId != entry;
+            return new(ok && !changed, slot, changed, _device.ConnectionId);
         }
-        catch (OperationCanceledException) { return new(false, null, false); }
+        catch (OperationCanceledException) { return new(false, null, _device.ConnectionId != entry, _device.ConnectionId); }
         finally { _readLock.Release(); }
     }
 
