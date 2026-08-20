@@ -2685,14 +2685,6 @@ Nothing here is verified code. The plan remains unexecuted, `dotnet test` has no
 it, and hardware acceptance (spec §7, plus the probe-suite gate at the end of Task 3b) is still what
 decides whether it works.
 
-### The escalated question, and how it was settled Every finding across the four
-rounds was checked against the live repo before being accepted; all fifteen were real. Two of the
-session's own claims were refuted with evidence and are recorded as such: that `_lastActive` had a
-single assignment site, and that discovery could re-enter the model-change handler.
-
-Nothing here is verified code. The plan remains unexecuted, and hardware acceptance (spec §7) is
-still the gate.
-
 ### The escalated question, and how it was settled
 
 The reviewer recommended isolating the Win32 handle lifecycle behind an injectable connector so that
