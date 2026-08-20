@@ -20,6 +20,7 @@ public sealed class DeviceScopedStateTests
 
         Assert.False(s.Observe("Naga V3 Pro"));
         Assert.Equal((byte)1, s.ActiveSlot);
+        Assert.Equal(new byte[] { 1 }, s.CreatedSlots);
     }
 
     [Fact]
@@ -44,6 +45,14 @@ public sealed class DeviceScopedStateTests
 
         Assert.True(s.Observe(null));
         Assert.Null(s.ActiveSlot);
+
+        // Re-seed the cache after going offline, then observe going back online.
+        s.ActiveSlot = 3;
+        s.CreatedSlots = new byte[] { 1, 2, 3 };
+
+        Assert.True(s.Observe("Naga V2 Pro"));
+        Assert.Null(s.ActiveSlot);
+        Assert.Null(s.CreatedSlots);
     }
 
     [Fact]
