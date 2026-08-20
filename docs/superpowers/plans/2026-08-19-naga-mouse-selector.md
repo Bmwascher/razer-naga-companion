@@ -1270,7 +1270,7 @@ Then update every former `_lastActive` use:
         {
             _scoped.Clear();
             Interlocked.Increment(ref _gridSweep);
-            if (_dashboardVm is { } changedVm) _ = ReseedDeviceAsync(changedVm);
+            if (_dashboardVm is { } changedVm) _ = RecoverFromReconnectAsync(changedVm);
             return false;
         }
         // the slot was only just learned (the card said "state unknown"): let the card + grid
@@ -1340,6 +1340,26 @@ connection is gone:
     }
 ```
 
+Both connection-change branches recover through one helper, and the ORDER in it is the point. A
+probe-free reseed straight after an unannounced reconnect reads the new mouse's DPI and profiles
+while `State.Model` — and therefore the profile-name key and the scoped cache — still names the old
+one, so the new mouse's data gets filed under the old model. Republishing identity has to come
+first:
+
+```csharp
+    /// <summary>Recover from a reconnect that nothing announced. A lock-waiting battery read
+    /// republishes the connection's identity FIRST; only then is it safe to reload anything, because
+    /// State.Model is what keys the scoped cache and the profile names. If the model did change,
+    /// OnDeviceStateChanged has already reset and reseeded, so this does not do it twice.</summary>
+    private async Task RecoverFromReconnectAsync(DashboardViewModel vm)
+    {
+        string? before = _monitor.State.Model;
+        await Task.Run(() => _monitor.RefreshNowWaitingAsync());
+        if (!ReferenceEquals(_dashboardVm, vm)) return;
+        if (string.Equals(_monitor.State.Model, before, StringComparison.Ordinal)) await ReseedDeviceAsync(vm);
+    }
+```
+
 Apply the same guard in `RefreshProfileAsync`: capture `_monitor.ConnectionId` before the two
 profile reads and return without touching `_scoped` or the view model if it changed.
 
@@ -1363,7 +1383,7 @@ beside the existing generation check:
                 // rather than mixing two mice in it, drop the snapshots, and start over
                 _scoped.Clear();
                 Dispatch(() => vm.ResetForNewMouse());
-                _ = ReseedDeviceAsync(vm);
+                _ = RecoverFromReconnectAsync(vm);
                 return;
             }
             Dispatch(() => vm.Callout(p).SetFromDevice(raw));

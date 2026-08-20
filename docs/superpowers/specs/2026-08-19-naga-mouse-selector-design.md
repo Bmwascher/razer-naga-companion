@@ -192,18 +192,27 @@ Two consequences:
    inside one `_readLock` acquisition, in one `BatteryMonitor` method. Split across three
    acquisitions, a reselect can land between resolve and write, and the app writes one mouse's slot
    number onto another — the exact failure this whole pass exists to prevent.
-2. **Late results are discarded.** The DPI read and the profile read carry the `ConnectionId` they
-   ran under; a result whose id no longer matches is dropped rather than painted onto the UI. The
-   grid sweep already has an equivalent generation counter and keeps it.
+2. **Late results are discarded.** The DPI read, the profile read and every button read in the grid
+   sweep carry the `ConnectionId` they ran under; a result whose id no longer matches is dropped
+   rather than painted onto the UI. The sweep's existing generation counter is not a substitute for
+   this: it moves on a *published* model change, a dashboard close, or a new sweep, and an
+   unannounced reconnect is none of those.
+3. **Recovery republishes identity before reloading.** When a connection change is detected, a
+   lock-waiting battery read runs first, so `State.Model` names the mouse now connected. Reloading
+   before that would file the new mouse's DPI, profiles and profile names under the old model.
 
 ### 4.7 Write-slot guard
 
-`AppHost` retains the created-slot list from the last profile-list read, cleared with the rest of
-the per-device state. `ResolveWriteSlotAsync` returns `null` — a visible failure, no write — when
-that list is **known** and the resolved slot is absent from it. An unknown list never blocks a
-write: the dashboard resolves the active slot on demand before its first profile read, and that
-path must keep working. With 4.6 in place this guard should never fire; it exists so a write can
-never again be aimed into a slot the mouse does not have.
+A write never targets a remembered slot. The atomic write (4.10) reads the active slot from the
+device inside its own lock acquisition and writes to that, so the target always belongs to the mouse
+being written to and an unreadable slot fails the write outright rather than falling back on a
+cached number.
+
+On top of that, `AppHost` retains the created-slot list from the last profile-list read, cleared with
+the rest of the per-device state, and the write is refused before it starts when that list is
+**known** and the slot is absent from it. An unknown list never blocks a write. With 4.6 and 4.10 in
+place this guard should never fire; it exists so a write can never again be aimed into a slot the
+mouse does not have.
 
 ### 4.8 Unset-button display
 
