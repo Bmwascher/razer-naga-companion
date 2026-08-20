@@ -4,8 +4,22 @@ public sealed class FakeRazerDevice : IRazerDevice
 {
     private readonly Queue<BatteryReading> _queue = new();
     public void Enqueue(BatteryReading r) => _queue.Enqueue(r);
-    public Task<BatteryReading> ReadAsync(CancellationToken ct) =>
-        Task.FromResult(_queue.Count > 0 ? _queue.Dequeue() : BatteryReading.Absent(DateTimeOffset.Now));
+
+    /// <summary>Opt-in: when set, ReadAsync completes it the instant it is entered, letting a test
+    /// know a read is in flight without polling. Null (the default) is a no-op.</summary>
+    public TaskCompletionSource<bool>? ReadEntered { get; set; }
+
+    /// <summary>Opt-in: when set, ReadAsync awaits it before returning, letting a test hold a read
+    /// open to create real lock contention. Null (the default) is a no-op — every existing test
+    /// that never sets this reads synchronously as before.</summary>
+    public TaskCompletionSource<bool>? ReadGate { get; set; }
+
+    public async Task<BatteryReading> ReadAsync(CancellationToken ct)
+    {
+        ReadEntered?.TrySetResult(true);
+        if (ReadGate is not null) await ReadGate.Task;
+        return _queue.Count > 0 ? _queue.Dequeue() : BatteryReading.Absent(DateTimeOffset.Now);
+    }
 
     public DpiSetting? Dpi { get; set; }
     public bool SetDpiResult { get; set; } = true;
