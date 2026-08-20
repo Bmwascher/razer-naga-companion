@@ -27,8 +27,18 @@ public sealed class AppSettings
     /// <summary>App-side one-click DPI presets shown in the dashboard's DPI card.</summary>
     public List<int> DpiPresets { get; set; } = new() { 800, 1600, 3200 };
 
-    /// <summary>App-side labels for the mouse's onboard profile slots, keyed by slot number (1..5).
-    /// The firmware stores no names — a slot is a number + LED colour — so these exist only in the
-    /// dashboard's Profile card. Absent key = default "Slot N".</summary>
+    /// <summary>Retired (2026-08-19): profile names are per-mouse now (ProfileNamesByMouse) — a slot
+    /// number means a different slot on a different model. Kept only so older settings.json files
+    /// round-trip; migrated once at load, then never read or written.</summary>
     public Dictionary<byte, string> ProfileNames { get; set; } = new();
+
+    /// <summary>App-side labels for onboard profile slots, keyed by mouse display name
+    /// (RazerProtocol.SupportedMice) then slot number (1..5). The firmware stores no names — a slot
+    /// is a number + LED colour — so these exist only in the dashboard's Profile card.</summary>
+    public Dictionary<string, Dictionary<byte, string>> ProfileNamesByMouse { get; set; } = new();
+
+    /// <summary>Which mouse the app should talk to, as a RazerProtocol.SupportedMice display name.
+    /// Null (the default) means "use scan order", which already prefers the newest model. An unknown
+    /// name behaves as null (spec 2026-08-19 §4.1).</summary>
+    public string? PreferredMouse { get; set; } = null;
 }
