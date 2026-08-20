@@ -2799,6 +2799,28 @@ Nothing here is verified code. The plan remains unexecuted, `dotnet test` has no
 it, and hardware acceptance (spec §7, plus the probe-suite gate at the end of Task 3b) is still what
 decides whether it works.
 
+### Second lane — Fable, three rounds, PASS
+
+A same-vendor reviewer (`parallax:fable-panel-reviewer`) reviewed the plan after the cross-vendor
+lane closed, at the product owner's direction. Each round ran in a fresh seat, so every claim was
+re-verified against the tree rather than carried in memory. It found six things the cross-vendor
+lane did not:
+
+| Finding | Adjudication | Where it landed |
+| --- | --- | --- |
+| All nine new test files omitted `using Xunit;`; the project's `ImplicitUsings` does not cover xUnit and there is no global-usings file, so nothing would compile | Accepted | added to every file, plus a standing line in Global Constraints |
+| Three EXISTING tests assert behaviour this pass abolishes, so the plan's own "all green" gates could not pass: the legacy profile-name round-trip, two dashboard name assertions, and the 1-byte-stub-as-Synapse test | Accepted | explicit rewrite steps in Task 3c and Task 7 |
+| The header selector never resynced after an unannounced hop, so it would claim the V3 over the V2's battery and profile card, and re-picking the shown value is a no-op so the user could not correct it | Accepted | `ApplyState` resyncs under the sync guard, with two tests |
+| A probe that found nothing left an empty ComboBox where the model label used to be | Accepted | `SetMice` keeps the connected model; `MiceLoaded` follows the probe, not the box |
+| Task 6 deliberately committed a tree that does not build | Accepted | `ResetForNewMouse` moved into Task 6; its commit builds |
+| `DisplayRaw` sent ANY non-2-byte `0x02` reply to "Not set", including longer ones never measured — telling the user an assigned button is empty invites an overwrite | Accepted | strictly `< 2`; longer shapes keep the Synapse label, with a test |
+
+Two judgment calls were put to it and both came back PASS: recovery through a full rescan is
+correct rather than wasteful, and the `RefreshNowWaitingAsync` reset semantics match every other
+explicit refresh.
+
+Round 3 verdict: PASS at commit `cac78f2`. Both lanes have now passed the plan.
+
 ### The escalated question, and how it was settled
 
 The reviewer recommended isolating the Win32 handle lifecycle behind an injectable connector so that

@@ -281,7 +281,8 @@ recommendation over the session's advice to defer.)
 - model change clears the active slot, the created-slot list, the DPI reading and the sweep
   generation
 - the write-slot guard refuses a slot the known inventory does not contain
-- `DisplayRaw` renders 1-byte category `0x02` as "Not set" without setting `Failed`
+- `DisplayRaw` renders category `0x02` shorter than 2 bytes as "Not set" without setting `Failed`,
+  and leaves a longer one on the "Synapse action" label
 - legacy `ProfileNames` migrate to the V2 and per-mouse names round-trip
 
 README screenshots regenerate through the UI probe on this branch (hard rule 4).
