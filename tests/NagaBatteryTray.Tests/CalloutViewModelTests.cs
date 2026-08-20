@@ -292,13 +292,9 @@ public class CalloutViewModelTests
         Assert.Equal("Synapse action (0x01)", vm.BindingTip);
     }
 
-    [Fact]
-    public void SetFromDevice_keyboard_with_wrong_length_falls_back_to_synapse_label()
-    {
-        var (vm, _, _) = NewVm(3);
-        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x01 })); // truncated keyboard frame
-        Assert.Equal("Synapse action (0x02)", vm.BindingText);
-    }
+    // the one-byte category-0x02 reply is now the firmware's "nothing assigned" form, covered by
+    // CalloutDisplayTests.TheOneByteStubReadsAsNotSet; the category-0x01 test above still covers
+    // the genuine Synapse label.
 
     [Fact]
     public void SetFromDevice_null_shows_read_failed_with_explanatory_tooltip()

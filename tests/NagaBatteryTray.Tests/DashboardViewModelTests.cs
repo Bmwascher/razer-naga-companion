@@ -133,8 +133,9 @@ public class DashboardViewModelTests
     public void Slot_names_seed_from_settings_and_default_when_absent()
     {
         var src = new AppSettings();
-        src.ProfileNames[2] = "Work";
+        src.ProfileNamesByMouse["Naga V2 Pro"] = new Dictionary<byte, string> { [2] = "Work" };
         var vm = NewVm(src);
+        vm.ApplyState(DeviceState.Online(80, false, false, "Naga V2 Pro"));
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 1);
 
         Assert.Equal("Slot 1", vm.ProfileSlots.Single(p => p.Number == 1).Name);
@@ -252,7 +253,7 @@ public class DashboardViewModelTests
         Assert.Equal("Work", vm.ProfileSlots.Single(p => p.Number == 2).Name);
         var target = new AppSettings();
         vm.ApplyTo(target);
-        Assert.Equal("Work", target.ProfileNames[2]);
+        Assert.Equal("Work", target.ProfileNamesByMouse[vm.ModelName][2]);
     }
 
     [Fact]

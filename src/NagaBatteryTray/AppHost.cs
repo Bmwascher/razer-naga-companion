@@ -133,6 +133,7 @@ public sealed class AppHost
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
         win.ProfileRefreshRequested += () => _ = RefreshProfileAsync(vm);
         vm.SwitchRequested += slot => _ = SwitchProfileAsync(vm, slot); // dropdown pick (spec §13.1)
+        vm.MouseSelectRequested += name => _ = SelectMouseAsync(vm, name);
         win.SettingsOverlayRequested += () => ShowSettingsOverlay(win, vm);
         EventHandler<DeviceState> onState = (_, state) => Dispatch(() => vm.ApplyState(state));
         _monitor.StateChanged += onState;
@@ -154,8 +155,15 @@ public sealed class AppHost
 
     // Task.Run keeps the blocking HidD_*Feature calls off the UI thread (no UI freeze; supports the
     // lightweight + zero-latency invariant). Results marshal back via Dispatch.
-    // Task 7 puts the reachability probe in front of this call; the reload itself is ReseedDeviceAsync.
-    private Task SeedDashboardAsync(DashboardViewModel vm) => ReseedDeviceAsync(vm);
+    private async Task SeedDashboardAsync(DashboardViewModel vm)
+    {
+        // Task.Run is load-bearing, not decoration: DiscoverMiceAsync takes the read lock, and when
+        // the lock is free the wait completes synchronously, so enumeration, CreateFile and the first
+        // feature reports would run on the UI thread this was called from (hard rule 1)
+        var mice = await Task.Run(() => _monitor.DiscoverMiceAsync());
+        Dispatch(() => vm.SetMice(mice, _monitor.State.Model));
+        await ReseedDeviceAsync(vm);
+    }
 
     /// <summary>Reload everything that describes the CONNECTED mouse. No reachability probe: the
     /// probe reconnects when it finishes, which would re-enter OnDeviceStateChanged and loop.
@@ -373,6 +381,32 @@ public sealed class AppHost
         {
             _activating = false;
         }
+    }
+
+    /// <summary>Header dropdown pick (spec §4.5): remember the choice, reconnect, and re-seed. The
+    /// new mouse holds entirely different DPI, profiles and bindings, so nothing from the old one
+    /// survives — OnDeviceStateChanged clears the cache as soon as the model change lands.</summary>
+    private async Task SelectMouseAsync(DashboardViewModel vm, string name)
+    {
+        _settings.Settings.PreferredMouse = name;
+        _settings.Save();
+        _monitor.PreferredMouse = name;
+
+        // WAITS for the read lock: the ordinary refresh skips when a read is in flight, which would
+        // report the mouse the user just picked as unreachable (spec §4.5). Task.Run for the same
+        // reason as in SeedDashboardAsync - an uncontended lock keeps the HID work on this thread.
+        await Task.Run(() => _monitor.RefreshNowWaitingAsync());
+
+        if (!string.Equals(_monitor.State.Model, name, StringComparison.Ordinal))
+        {
+            Dispatch(() =>
+            {
+                vm.SetProfileNote("Couldn't reach that mouse — wiggle it and retry");
+                vm.ResyncMouse();
+            });
+            return;
+        }
+        await SeedDashboardAsync(vm);
     }
 
     private void ShowSettingsOverlay(DashboardWindow win, DashboardViewModel vm)

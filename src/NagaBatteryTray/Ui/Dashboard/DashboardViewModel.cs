@@ -52,7 +52,8 @@ public sealed class DashboardViewModel : ObservableObject
         _pollSeconds = _seededPollSeconds = source.PollIntervalSeconds;
         _pollChargingSeconds = _seededPollChargingSeconds = source.PollIntervalChargingSeconds;
         _theme = source.Theme;
-        _profileNames = new Dictionary<byte, string>(source.ProfileNames);
+        foreach (var (mouse, names) in source.ProfileNamesByMouse)
+            _namesByMouse[mouse] = new Dictionary<byte, string>(names);
 
         // chips start on the factory display and adopt hardware truth when the first sweep
         // lands (~1 s; spec §13.2 — the settings table no longer seeds or records bindings)
@@ -113,6 +114,18 @@ public sealed class DashboardViewModel : ObservableObject
         HeaderSubtitle = !DeviceOnline ? "offline" : s.Wired ? "Wired" : "Wireless";
         BatteryChipText = DeviceOnline ? $"{s.Percent}%{(s.Charging ? " ⚡" : "")}" : "—";
         ModelName = s.Model ?? "Razer Naga";
+        _namesKey = ModelName;
+        // The box IS the header's model indicator now, so it has to follow the mouse actually
+        // connected — before the probe lands (it reads like the label it replaced) and after an
+        // unannounced hop (otherwise it says "Naga V3 Pro" over the V2's battery and profile card,
+        // and re-picking the displayed value is a no-op, so the user cannot even correct it).
+        if (s.Model is { } connected && !string.Equals(SelectedMouse, connected, StringComparison.Ordinal))
+        {
+            if (!Mice.Contains(connected)) Mice.Add(connected);
+            _syncingMouse = true;
+            try { SelectedMouse = connected; }
+            finally { _syncingMouse = false; }
+        }
     }
 
     internal static string SlotColour(int slot) => slot switch
@@ -209,6 +222,56 @@ public sealed class DashboardViewModel : ObservableObject
         CanSavePreset = DevicePresent && !Presets.Any(p => p.Value == Dpi);
     }
 
+    // ---- header: mouse selector (spec 2026-08-19 §4.5) ----
+
+    /// <summary>Mice that answered the reachability probe, in SupportedMice order. Only reachable
+    /// mice are listed, so a sleeping mouse never appears (user decision, 2026-08-19).</summary>
+    public ObservableCollection<string> Mice { get; } = new();
+
+    /// <summary>False until the first probe lands — the ComboBox stays disabled and shows the
+    /// connected model, so it reads exactly like the old label while discovery runs.</summary>
+    public bool MiceLoaded { get => _miceLoaded; private set => Set(ref _miceLoaded, value); }
+    private bool _miceLoaded;
+
+    public event Action<string>? MouseSelectRequested;
+
+    /// <summary>Two-way ComboBox binding, same guard as the profile dropdown: programmatic syncs run
+    /// under _syncingMouse, so only a USER pick raises MouseSelectRequested.</summary>
+    public string? SelectedMouse
+    {
+        get => _selectedMouse;
+        set
+        {
+            if (!Set(ref _selectedMouse, value)) return;
+            if (_syncingMouse || value is null) return;
+            if (string.Equals(value, ModelName, StringComparison.Ordinal)) return;
+            MouseSelectRequested?.Invoke(value);
+        }
+    }
+    private string? _selectedMouse;
+    private bool _syncingMouse;
+
+    /// <summary>Feed the header a fresh reachability probe plus the model actually connected.</summary>
+    public void SetMice(IReadOnlyList<string> mice, string? connected)
+    {
+        Mice.Clear();
+        foreach (var m in mice) Mice.Add(m);
+        // a probe that found nothing must not leave an empty box where the model label used to be
+        if (Mice.Count == 0 && connected is not null) Mice.Add(connected);
+        _syncingMouse = true;
+        try { SelectedMouse = connected is not null && Mice.Contains(connected) ? connected : Mice.FirstOrDefault(); }
+        finally { _syncingMouse = false; }
+        MiceLoaded = mice.Count > 0;   // the PROBE's result, not the box's contents
+    }
+
+    /// <summary>Snap the dropdown back to the mouse actually connected, after a failed pick.</summary>
+    public void ResyncMouse()
+    {
+        _syncingMouse = true;
+        try { SelectedMouse = Mice.Contains(ModelName) ? ModelName : null; }
+        finally { _syncingMouse = false; }
+    }
+
     // ---- profile card: slot dropdown (spec §13.2 v2.3) ----
     private byte? _activeSlot; // last active-slot read (0x05/0x84); null = never known / currently unreachable
     private bool _profileChecked; // true once SetProfileInventory has run at least once
@@ -288,6 +351,8 @@ public sealed class DashboardViewModel : ObservableObject
         ProfileSlots.Clear();
         _activeSlot = null;
         SetProfileNote("");
+        _profileChecked = false; // nothing has been read from the NEW mouse yet, so the card is not
+                                 // entitled to call it unreachable until a read actually fails
         RefreshProfileDetail();
         SetCurrentDpi(null); // the old mouse's number must not stay on screen until the reseed lands
         foreach (var c in Callouts) c.SetPending(); // also voids each chip's undo snapshot
@@ -313,7 +378,18 @@ public sealed class DashboardViewModel : ObservableObject
     }
 
     // ---- profile card: rename (dashboard-polish §5.4 — app-side label, the firmware has no names) ----
-    private readonly Dictionary<byte, string> _profileNames;
+    // profile names are per-mouse: slot 1 on a V2 is not slot 1 on a V3 (spec 2026-08-19 §4.9)
+    private readonly Dictionary<string, Dictionary<byte, string>> _namesByMouse = new();
+    private string _namesKey = "Razer Naga";
+    private Dictionary<byte, string> _profileNames
+    {
+        get
+        {
+            if (!_namesByMouse.TryGetValue(_namesKey, out var names))
+                _namesByMouse[_namesKey] = names = new Dictionary<byte, string>();
+            return names;
+        }
+    }
     internal const int MaxProfileNameLength = 24;
     public bool IsRenamingProfile { get => _isRenaming; private set => Set(ref _isRenaming, value); }
     private bool _isRenaming;
@@ -379,7 +455,9 @@ public sealed class DashboardViewModel : ObservableObject
             PollChargingSeconds == _seededPollChargingSeconds ? _seededPollChargingSeconds : Math.Max(15, PollChargingSeconds);
         target.Theme = Ui.ThemeManager.Resolve(Theme);
         target.DpiPresets = Presets.Select(p => p.Value).ToList();
-        target.ProfileNames = new Dictionary<byte, string>(_profileNames);
+        target.ProfileNamesByMouse = new Dictionary<string, Dictionary<byte, string>>();
+        foreach (var (mouse, names) in _namesByMouse)
+            if (names.Count > 0) target.ProfileNamesByMouse[mouse] = new Dictionary<byte, string>(names);
     }
 
 }
