@@ -102,6 +102,8 @@ public sealed class DashboardViewModel : ObservableObject
     public string StatusDotBrushKey { get => _statusDotBrushKey; private set => Set(ref _statusDotBrushKey, value); }
     public string HeaderSubtitle { get => _headerSubtitle; private set => Set(ref _headerSubtitle, value); }
     public string BatteryChipText { get => _batteryChipText; private set => Set(ref _batteryChipText, value); }
+    private string _modelName = "Razer Naga";
+    public string ModelName { get => _modelName; private set => Set(ref _modelName, value); }
 
     public void ApplyState(DeviceState s)
     {
@@ -110,6 +112,7 @@ public sealed class DashboardViewModel : ObservableObject
         // link state only - slot identity lives solely in the Profile card (it was shown twice)
         HeaderSubtitle = !DeviceOnline ? "offline" : s.Wired ? "Wired" : "Wireless";
         BatteryChipText = DeviceOnline ? $"{s.Percent}%{(s.Charging ? " ⚡" : "")}" : "—";
+        ModelName = s.Model ?? "Razer Naga";
     }
 
     internal static string SlotColour(int slot) => slot switch

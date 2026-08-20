@@ -72,6 +72,38 @@ Pure 90-byte report build/parse + XOR CRC (over bytes `[2..87]`).
   (`AppHost.RefreshProfileAsync` read on open/refresh, `SwitchProfileAsync` write-on-action via
   the card's slot dropdown) and the `--probe-profile` tools.
 
+### Multi-model support (V2 Pro + V3 Pro)
+
+The 2026-08-19 probe confirmed the V3 Pro speaks the identical command protocol as the V2 Pro
+(spec §3), so both models are represented as data rather than a branch in the protocol code:
+
+- `MouseModel` is a `readonly record struct (WiredPid, WirelessPid, DisplayName)` — one row per
+  supported mouse. `SupportedMice` is the table of them, in preference order (V3 first, the daily
+  driver; V2 second).
+- `ScanPids` is a flat, hand-spelled `int[]`: every model's `WiredPid` first (in `SupportedMice`
+  order), then every model's `WirelessPid`. The order matters, not just the membership — a wired
+  mouse must always win device selection over a still-plugged-in wireless receiver that can no
+  longer reach it (see `RazerDevice.EnsureConnectedAsync` below), and that has to hold **across
+  every model**, not just within one, so all wired PIDs are tried before any wireless PID. Kept as
+  a literal (no LINQ derivation) by deliberate choice — `RazerProtocol.cs` uses no LINQ anywhere.
+  `RazerProtocolTests.cs` closes the resulting maintenance gap from the test side: a test derives
+  the expected sequence from `SupportedMice` and asserts it equals `ScanPids`, so a new model row
+  added without a matching `ScanPids` update fails a test instead of just silently never being
+  detected.
+- `ModelNameForPid(pid)` / `IsWiredPid(pid)` are the two lookup helpers over `SupportedMice` — name
+  resolution (either link) and wired/wireless classification, respectively.
+- The resolved model name flows: `RazerDevice` sets `BatteryReading.Model` from
+  `ModelNameForPid` on whichever PID it connected to → `BatteryMonitor` copies it onto
+  `DeviceState.Model` → four UI consumers read it (dashboard header, popup header, tray tooltip,
+  low-battery toast), each falling back to the literal `"Razer Naga"` when the device is offline
+  and no model is known — the same fallback-on-offline shape as `DeviceState.Wired`.
+- What actually picks the control collection during device open is **not** the interface number —
+  it's the **91-byte feature-report length** (`GetMaxFeatureReportLength()==91`, checked in
+  `RazerDevice.EnsureConnectedAsync`). The two models expose that collection on different
+  interfaces (MI_00 on the V2 Pro, MI_03 on the V3 Pro), so hardcoding an interface number would
+  have silently broken one model; scanning by report length works for both without knowing which
+  interface a given model uses.
+
 ### `ButtonBinding.cs`
 
 The button model: `ButtonBinding` (+`ToWire`; the Default marker itself has no wire form — callers
@@ -90,10 +122,11 @@ Zero-access `CreateFile` + `HidD_Set/GetFeature`.
   class/cmd echo — the grid sweep's 12 reads land in ~a second instead of ~5 s.
 - `EnsureConnectedAsync` picks the **live** collection (the one whose
   `GetMaxFeatureReportLength()==91`, **not** usage page 0xFF00 — none exposed) by trying candidates
-  **wired `0x00A7` first, then wireless `0x00A8`**, and **verifying each actually answers a battery
-  query** before committing: the dock's wireless receiver stays enumerated when the mouse switches
-  to wired, so first-enumerated alone would lock onto a dead collection (this was the wired/USB-C
-  "no response" bug, `932398e`).
+  in `RazerProtocol.ScanPids` order (every supported model's wired PID before any wireless one; V3
+  before V2 within a link), and **verifying each actually answers a battery query** before
+  committing: the dock's wireless receiver stays enumerated when the mouse switches to wired, so
+  first-enumerated alone would lock onto a dead collection (this was the wired/USB-C "no response"
+  bug, `932398e`).
 - A read returning null drops the handle so the next poll re-selects (self-heals on plug/unplug).
   Explicit refreshes (`RefreshNowAsync`) additionally call **`Reset()`** so they re-select
   *immediately* — the null-drop self-heal is too slow on a wired plug, where the stale wireless

@@ -1,8 +1,8 @@
 # Razer Naga Companion — project guide
 
 Featherweight Windows system-tray app — a minimal **Razer Synapse replacement** for the
-**Razer Naga V2 Pro**: tray battery %, hardware DPI read/set, 12-button thumb-grid remapping
-(onboard), onboard profile switching, themed dashboard.
+**Razer Naga V2 Pro and Naga V3 Pro**: tray battery %, hardware DPI read/set, 12-button
+thumb-grid remapping (onboard), onboard profile switching, themed dashboard.
 .NET 10 (`net10.0-windows10.0.19041.0`), C#, WPF + WinForms, WPF-UI 4.3.0 (Fluent), HidSharp,
 CommunityToolkit.WinUI.Notifications, xUnit. Public repo:
 https://github.com/Bmwascher/razer-naga-companion
@@ -98,14 +98,13 @@ Shipped (spec links = the full story):
 - Dashboard polish: CardTitle role, segmented DPI presets + type-in readout + failure line,
   slot rename/LED dots/adaptive caption, rail datum, preset-✕ crash fix (2026-07-19/20,
   `specs/2026-07-19-naga-dashboard-polish-design.md`)
+- Naga V3 Pro dual support — probed the V3 Pro on real hardware, confirmed battery / DPI /
+  button-remap / profile protocol parity with the `--probe*` suite, device layer now
+  auto-detects either model (2026-08-19,
+  `specs/2026-08-19-naga-v3pro-dual-support-design.md`)
 
 Next:
 
-- [ ] **Naga V3 Pro migration — FIRST, before any other feature work** (user, 2026-08-19) —
-  probe the V3 Pro (discover its PIDs; V2 Pro constants live in `Hid/RazerProtocol.cs`), verify
-  battery / DPI / button-remap / profile protocol parity with the `--probe*` suite on real
-  hardware, then swap the device layer. Open user decisions: dual-support vs clean swap;
-  stage art (`naga-thumb.png` is a V2 Pro render), app naming, and README/screenshots follow.
 - [ ] **DPI stages + polling rate** — onboard 5-stage table (+ stage up/down), polling-rate
   get/set (openrazer-validated, write-on-action only). Carries two deferred riders: the preset
   row likely becomes the onboard stage table (user, 2026-07-17), and the right-rail relayout

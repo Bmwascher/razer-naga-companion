@@ -50,7 +50,7 @@ public sealed class AppHost
         _monitor = new BatteryMonitor(_device, _settings, Dispatch);
         _tray = new TrayIconController(_monitor);
 
-        _monitor.LowBatteryCrossed += (_, pct) => Notifications.LowBattery(pct);
+        _monitor.LowBatteryCrossed += (_, pct) => Notifications.LowBattery(pct, _monitor.State.Model);
         _tray.LeftClicked += TogglePopup;
         _tray.RefreshRequested += () => _ = _monitor.RefreshNowAsync();
         _tray.StartupToggled += SetStartup;

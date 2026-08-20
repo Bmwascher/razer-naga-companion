@@ -539,4 +539,24 @@ public class DashboardViewModelTests
         vm.DpiSliderPos = 0.37;
         Assert.Equal(0, vm.Dpi % 50);
     }
+
+    [Fact]
+    public void Header_shows_detected_model_when_online()
+    {
+        var vm = NewVm();
+        vm.ApplyState(DeviceState.Online(50, charging: false, wired: true, model: "Naga V3 Pro"));
+        Assert.Equal("Naga V3 Pro", vm.ModelName);
+    }
+
+    [Fact]
+    public void Header_falls_back_to_razer_naga_when_offline_or_unnamed()
+    {
+        var vm = NewVm();
+        vm.ApplyState(DeviceState.Online(50, charging: false, wired: true, model: "Naga V3 Pro"));
+        vm.ApplyState(DeviceState.Unknown);
+        Assert.Equal("Razer Naga", vm.ModelName);
+
+        vm.ApplyState(DeviceState.Online(50, charging: false)); // online but no model name
+        Assert.Equal("Razer Naga", vm.ModelName);
+    }
 }

@@ -170,4 +170,13 @@ public class BatteryMonitorTests
         Assert.True(await m.SetActiveProfileAsync(2));
         Assert.Equal((byte)2, fake.ActiveProfileSets.Single());
     }
+
+    [Fact]
+    public void Model_name_flows_from_reading_to_state()
+    {
+        var m = NewMonitor(out _);
+        m.ProcessReading(new BatteryReading(70, false, true, DateTimeOffset.Now, IsWired: true, Model: "Naga V3 Pro"));
+        Assert.Equal("Naga V3 Pro", m.State.Model);
+        Assert.True(m.State.Wired);
+    }
 }

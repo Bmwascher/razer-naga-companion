@@ -2,7 +2,7 @@
 
 # 🐍 Razer Naga Companion
 
-### Your Razer Naga V2 Pro battery, right in the system tray — **no Razer Synapse required.**
+### Your Razer Naga V2 Pro and Naga V3 Pro battery, right in the system tray — **no Razer Synapse required.**
 
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
@@ -27,8 +27,12 @@ services just to tell you your mouse's battery level. Razer Naga Companion does 
 **one job** — and does it in **~23 MB of RAM at 0% idle CPU**, reading the mouse
 directly over HID with no Synapse, no driver, and no admin rights.
 
-> Built for the **Razer Naga V2 Pro** (wireless). Other Razer mice may work if they
-> speak the same HID battery protocol, but only the Naga V2 Pro is verified.
+> Built for the **Razer Naga V2 Pro and Naga V3 Pro** (wireless). Other Razer mice may work if
+> they speak the same HID battery protocol, but only the Naga V2 Pro and Naga V3 Pro are
+> verified.
+
+Supported mice: Razer Naga V2 Pro (wired 0x00A7 / wireless 0x00A8) and Razer Naga V3 Pro
+(wired 0x00E7 / wireless 0x00E8) — auto-detected, model name shown in the dashboard.
 
 ---
 
@@ -179,7 +183,7 @@ prints the raw battery reply:
 
 ```mermaid
 flowchart LR
-    HID["Razer Naga V2 Pro<br/>HID feature reports"] --> Dev["RazerDevice<br/>open · probe · read · DPI"]
+    HID["Razer Naga V2 Pro / V3 Pro<br/>HID feature reports"] --> Dev["RazerDevice<br/>open · probe · read · DPI"]
     Dev --> Mon["BatteryMonitor<br/>poll timer + state machine"]
     Mon --> Tray["TrayIcon<br/>GUID-stable icon"]
     Mon --> Popup["PopupWindow<br/>compact card"]
@@ -247,8 +251,9 @@ Full design and implementation notes live in [`docs/superpowers/`](docs/superpow
 - [x] **Dashboard polish**: slot renaming, a segmented DPI preset control with a
       click-to-type readout, failed-apply surfacing, and an off-screen screenshot probe for
       iterating on layout without installing.
-- [ ] **Razer Naga V3 Pro support** (next up): probe the V3 Pro's protocol with the existing
-      `--probe*` suite and migrate the device layer to it.
+- [x] **Razer Naga V3 Pro support**: probed the V3 Pro on real hardware with the existing
+      `--probe*` suite, confirmed full protocol parity (battery, DPI, button remap, profiles),
+      and the device layer now auto-detects either model.
 - [ ] **DPI stages + polling rate**: program the onboard 5-stage DPI table (+ stage
       up/down) and the polling rate — the preset row likely becomes the onboard stage table.
 - [ ] **Lighting**: thumb-grid / scroll-wheel zone effects + brightness, theme-sync

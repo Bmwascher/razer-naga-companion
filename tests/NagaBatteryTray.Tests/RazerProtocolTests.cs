@@ -487,4 +487,44 @@ public class RazerProtocolTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             RazerProtocol.BuildSetActiveProfileBuffer(0x1f, 0x02, 0x0a));
     }
+
+    [Fact]
+    public void Scan_order_is_all_wired_then_all_wireless_v3_first()
+    {
+        Assert.Equal(new[] { 0x00E7, 0x00A7, 0x00E8, 0x00A8 }, RazerProtocol.ScanPids);
+    }
+
+    // Guards against the maintenance trap where a new SupportedMice row is added but ScanPids
+    // (hand-spelled, no LINQ, in RazerProtocol.cs by design) is forgotten — that new mouse would
+    // compile fine and simply never be detected. Derives the expected scan order FROM
+    // SupportedMice instead of hardcoding it, so this test fails the moment the two tables drift.
+    [Fact]
+    public void ScanPids_matches_every_wired_pid_then_every_wireless_pid_from_SupportedMice()
+    {
+        var expected = new List<int>();
+        foreach (var m in RazerProtocol.SupportedMice) expected.Add(m.WiredPid);
+        foreach (var m in RazerProtocol.SupportedMice) expected.Add(m.WirelessPid);
+
+        Assert.Equal(expected, RazerProtocol.ScanPids);
+    }
+
+    [Fact]
+    public void IsWiredPid_matches_only_wired_pids()
+    {
+        Assert.True(RazerProtocol.IsWiredPid(0x00E7));
+        Assert.True(RazerProtocol.IsWiredPid(0x00A7));
+        Assert.False(RazerProtocol.IsWiredPid(0x00E8));
+        Assert.False(RazerProtocol.IsWiredPid(0x00A8));
+        Assert.False(RazerProtocol.IsWiredPid(0x00A4)); // dock is not a mouse
+    }
+
+    [Fact]
+    public void ModelNameForPid_maps_both_links_and_rejects_unknown()
+    {
+        Assert.Equal("Naga V3 Pro", RazerProtocol.ModelNameForPid(0x00E7));
+        Assert.Equal("Naga V3 Pro", RazerProtocol.ModelNameForPid(0x00E8));
+        Assert.Equal("Naga V2 Pro", RazerProtocol.ModelNameForPid(0x00A7));
+        Assert.Equal("Naga V2 Pro", RazerProtocol.ModelNameForPid(0x00A8));
+        Assert.Null(RazerProtocol.ModelNameForPid(0x00A4));
+    }
 }
