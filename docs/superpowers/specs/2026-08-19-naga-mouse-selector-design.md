@@ -240,19 +240,25 @@ Old settings files load unchanged: absent fields take their defaults and the mig
 
 Through the `IRazerDevice` seam with `FakeRazerDevice` (hard rule 6):
 
-The connection state machine (which PIDs to try, when to reselect, how to roll back) is extracted
-behind a narrow injectable connector so it can be tested without any Win32 call. Only the HID calls
-themselves stay untested.
+The connection **decision** (which PIDs to try, and whether a live handle may be reselected) is
+extracted into a pure `ConnectionPolicy` and tested directly. The handle **lifecycle** around it
+stays inside `RazerDevice`, where rollback is structural (`try/finally`) rather than conditional,
+and is covered by hardware acceptance. Whether that lifecycle should also move behind an injectable
+connector is an open risk-versus-refactor question recorded in the plan's debate record; the
+reviewer recommends it, this spec does not yet require it.
 
 - preference honoured when the preferred mouse is reachable
 - fallback to another mouse when the preferred one is not
 - a live handle is reselected only on the battery path, never by a button, DPI or profile call
+- an unknown preferred-mouse name normalizes to "no preference" and never causes a probe
 - adoption of the preferred mouse rolls back on failure, on an exception, and on cancellation,
   restoring handle, transaction id, link state and model together, and disposing exactly the
-  losing handle
+  losing handle (structural, verified by acceptance rather than by unit test)
 - `ConnectionId` increases on every adoption, including a reconnect to the same model
-- the atomic write resolves, writes and verifies under one lock, and reports the connection it ran
-  under
+- the atomic write reads the active slot from the mouse it is about to write to, writes and
+  verifies, all under one lock, and reports the connection it ran under
+- a button write is refused outright when the active slot cannot be read
+- the grid sweep abandons its results when the connection changes mid-sweep
 - a DPI or profile result from a superseded connection is discarded, not displayed
 - discovery lists only mice that answered, and republishes the connected model before returning
 - an explicit mouse pick waits for the read lock instead of skipping when busy
