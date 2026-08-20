@@ -151,6 +151,24 @@ public class CalloutViewModelTests
         Assert.False(vm.Failed);                 // no red failure state — nothing failed
     }
 
+    /// <summary>The other refusal: the mouse's own inventory has no such slot, so nothing was written.
+    /// Nothing failed either, so the chip must not go red or send the user off to wiggle a working
+    /// mouse — and it must not borrow the mouse-changed words, because the mouse did not change.</summary>
+    [Fact]
+    public async Task A_missing_slot_reads_as_its_own_refusal_not_a_failure_or_a_mouse_change()
+    {
+        var (vm, rec, _) = NewVm();
+        rec.Outcome = WriteOutcome.SlotMissing;
+
+        var outcome = await vm.DisableAsync();
+
+        Assert.Equal(WriteOutcome.SlotMissing, outcome);
+        Assert.Equal("Not written — that slot isn't on this mouse", vm.Status);
+        Assert.DoesNotContain("wiggle", vm.Status);
+        Assert.DoesNotContain("Mouse changed", vm.Status);
+        Assert.False(vm.Failed);                 // no red failure state — nothing failed
+    }
+
     /// <summary>And the undo path says the same thing. It must also NOT reopen the undo window: the
     /// snapshot describes the mouse that left, so ↶ would write one mouse's raw bytes into another
     /// (hard rule 2). An ordinary failure still reopens it — that difference is the point.</summary>
@@ -273,7 +291,7 @@ public class CalloutViewModelTests
     }
 
     [Fact]
-    public async Task Busy_chip_reports_false_so_reset_all_counts_it_failed()
+    public async Task Busy_chip_reports_Failed_so_reset_all_counts_it_failed()
     {
         var writes = new List<TaskCompletionSource<WriteOutcome>>();
         var vm = new CalloutViewModel(1, (_, _, _, _) =>

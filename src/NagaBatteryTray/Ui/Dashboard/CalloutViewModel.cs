@@ -9,11 +9,15 @@ namespace NagaBatteryTray.Ui.Dashboard;
 /// <item>Failed — the write was issued and did not verify. The user's retry case, and the only one
 /// that may show as a failure.</item>
 /// <item>MouseChanged — NOTHING was written, because the mouse underneath is not the one the caller
-/// was seeded from (or it moved mid-write, voiding the verdict). Not a failure: the mouse is fine,
+/// was seeded from (or it hopped onto the OTHER model mid-write). Not a failure: the mouse is fine,
 /// the dashboard is already reseeding onto the one that IS there, and a bulk run must STOP rather
-/// than write its remaining buttons into it.</item>
+/// than write its remaining buttons into it. A SAME-model reconnect is deliberately not this: it is
+/// the same mouse, so the write is merely unconfirmed — an ordinary Failed.</item>
+/// <item>SlotMissing — NOTHING was written, because the mouse's own slot inventory does not list
+/// the active slot. Also not a failure and also not a mouse change, so it gets its own line:
+/// retrying or wiggling cannot make a slot appear.</item>
 /// </list></summary>
-public enum WriteOutcome { Applied, Failed, MouseChanged }
+public enum WriteOutcome { Applied, Failed, MouseChanged, SlotMissing }
 
 /// <summary>One thumb-grid button chip: instant-apply state machine
 /// (Idle → Capturing → Writing → Confirmed | Failed) with a one-shot undo window after each
@@ -40,6 +44,10 @@ public sealed class CalloutViewModel : ObservableObject
     /// pass exists to remove. AppHost puts the same words on the profile card, which is the one status
     /// line the compact chip row does not have.</summary>
     internal const string MouseChangedText = "Mouse changed — reloading";
+    /// <summary>The other refusal: the mouse has no such slot, so nothing was written. Same rule as
+    /// above — nothing failed, so it must not go red or send the user off to wiggle a working
+    /// mouse — but it is NOT a mouse change and must not borrow those words either.</summary>
+    internal const string SlotMissingText = "Not written — that slot isn't on this mouse";
 
     private ButtonActionKind _kind = ButtonActionKind.Default;
     private byte _mods, _usage;
@@ -198,8 +206,10 @@ public sealed class CalloutViewModel : ObservableObject
         if (outcome != WriteOutcome.Applied)
         {
             bool moved = outcome == WriteOutcome.MouseChanged;
-            Status = moved ? MouseChangedText : WriteFailedText;
-            Failed = !moved; // a refusal is not a failure: nothing was written and nothing is wrong
+            Status = StatusFor(outcome);
+            // ONLY a real failure is red: both refusals wrote nothing and neither means the mouse
+            // is misbehaving
+            Failed = outcome == WriteOutcome.Failed;
             // reopen rather than burn: the snapshot may be the only copy of an unmodelable
             // Synapse action, and it's still valid — the mouse still holds the new binding
             // (review find). One transient failure must not lose the restore forever. A
@@ -223,7 +233,8 @@ public sealed class CalloutViewModel : ObservableObject
 
     /// <summary>Applied = the binding is verified on the mouse (written, or already identical).
     /// Failed = busy-skipped or the write failed. MouseChanged = it was refused because the mouse
-    /// moved. Callers counting outcomes (reset-all) use this, never the display Status string.</summary>
+    /// moved; SlotMissing = it was refused because the mouse has no such slot. Callers counting
+    /// outcomes (reset-all) use this, never the display Status string.</summary>
     private async Task<WriteOutcome> ApplyAsync(ButtonActionKind kind, byte modifiers, byte usage, bool offerUndo)
     {
         if (IsBusy) return WriteOutcome.Failed;
@@ -245,9 +256,10 @@ public sealed class CalloutViewModel : ObservableObject
         IsBusy = false;
         if (outcome != WriteOutcome.Applied)
         {
-            bool moved = outcome == WriteOutcome.MouseChanged;
-            Status = moved ? MouseChangedText : WriteFailedText;
-            Failed = !moved; // a refusal is not a failure: nothing was written and nothing is wrong
+            Status = StatusFor(outcome);
+            // ONLY a real failure is red: both refusals wrote nothing and neither means the mouse
+            // is misbehaving
+            Failed = outcome == WriteOutcome.Failed;
             return outcome;
         }
 
@@ -267,6 +279,15 @@ public sealed class CalloutViewModel : ObservableObject
         if (offerUndo && snapshot is not null && gen == _snapshotGen) _ = OpenUndoWindowAsync();
         return WriteOutcome.Applied;
     }
+
+    /// <summary>The one place a non-Applied outcome becomes words, so the two write paths cannot
+    /// drift apart on what a refusal says.</summary>
+    private static string StatusFor(WriteOutcome outcome) => outcome switch
+    {
+        WriteOutcome.MouseChanged => MouseChangedText,
+        WriteOutcome.SlotMissing => SlotMissingText,
+        _ => WriteFailedText,
+    };
 
     /// <summary>The wire form of a modeled action — what the mouse holds after a verified write
     /// of it (Default = the baked-in factory action for this position).</summary>

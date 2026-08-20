@@ -537,10 +537,17 @@ public sealed class AppHost
         // sides of its slot read — and issued nothing. Read from the flag rather than inferred from
         // r.Model, because the model-change handler can null SeededModel between the write and this
         // line, and the arm below would then miss it and report a refusal as a plain failure.
-        // r.ConnectionChanged: the mouse was adopted DURING the write, inside the lock — the
-        // WITHIN-operation question, where the connection id is the right answer. An adoption caught
-        // before any byte leaves is refused above instead; what reaches here is one that landed once
-        // the write was already on the wire, which no pre-write check can undo.
+        // r.ConnectionChanged: the mouse was adopted DURING the write, inside the lock. An adoption
+        // caught before any byte leaves is refused above instead; what reaches here is one that
+        // landed once the write was already on the wire, which no pre-write check can undo. But the
+        // id rises on a SAME-MODEL reconnect too — any USB blip drops the handle and the next call
+        // re-adopts the very same mouse — and that is not a mouse change: the cache and every undo
+        // snapshot still describe the mouse in front of the user, and a bulk reset may safely carry
+        // on. All it means there is that the write could not be confirmed, which the monitor already
+        // reports as Verified=false, i.e. an ordinary Failed whose "Not applied" copy is truthful.
+        // So the adoption counts as a CHANGE only when the mouse it landed on is a different model —
+        // asked of the MODEL, against the one connected now, because r.Model is the ENTRY model and
+        // says nothing about what displaced it (ReadGridAsync applies the same rule mid-sweep).
         // r.Model != SeededModel: a hop onto the OTHER mouse landed BEFORE the lock, between the
         // grid sweep that armed the undo snapshots and this click. The monitor refuses that write
         // rather than issuing it, so this arm is the same verdict read from the outside — and it
@@ -548,7 +555,9 @@ public sealed class AppHost
         // the ACROSS-TIME question, so it is asked of the MODEL: comparing ids here failed landed
         // writes whenever any unrelated USB event bumped the id. A null SeededModel means nothing
         // was seeded, so there is no snapshot to be wrong about.
-        bool stale = r.Refused || r.ConnectionChanged
+        bool hopped = r.ConnectionChanged
+            && !string.Equals(_monitor.ConnectedModel, r.Model, StringComparison.Ordinal);
+        bool stale = r.Refused || hopped
             || (_scoped.SeededModel is { } seeded && !string.Equals(r.Model, seeded, StringComparison.Ordinal));
         if (stale)
         {
@@ -571,6 +580,18 @@ public sealed class AppHost
                 _ = RecoverFromReconnectAsync(changedVm);
             }
             return WriteOutcome.MouseChanged;
+        }
+        // the known inventory does not list the active slot, so the monitor issued nothing. Same
+        // class as the refusal above — nothing failed and nothing landed — but it is the mouse the
+        // user is looking at, so it gets its own words instead of borrowing "Mouse changed", and
+        // nothing is cleared or reseeded: the cache and every undo snapshot are still true. The
+        // words go on the profile card for the same reason the mouse-change ones do — the chip row
+        // shows Status only on a red chip, and this is deliberately not one.
+        if (r.SlotMissing)
+        {
+            if (_dashboardVm is { } missingVm)
+                Dispatch(() => missingVm.SetProfileNote(CalloutViewModel.SlotMissingText));
+            return WriteOutcome.SlotMissing;
         }
         // the slot was only just learned (the card said "state unknown"): let the card + grid
         // catch up so the other chips stop showing placeholders and gain undo snapshots

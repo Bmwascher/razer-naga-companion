@@ -38,6 +38,10 @@ public sealed class AtomicButtonWriteTests
         Assert.Empty(device.ButtonWrites);   // never guess a slot we could not read
     }
 
+    /// <summary>And it says so: nothing was issued, so the caller must be able to tell this from a
+    /// write that went out and failed — otherwise the chip shows "wiggle the mouse and retry" for a
+    /// mouse that is answering perfectly and simply has no such slot. It is NOT a refusal on
+    /// identity, so it must not raise that flag either.</summary>
     [Fact]
     public async Task ASlotTheMouseDoesNotHaveIsNeverWritten()
     {
@@ -49,6 +53,39 @@ public sealed class AtomicButtonWriteTests
         Assert.False(r.Verified);
         Assert.Equal((byte)3, r.Slot);
         Assert.Empty(device.ButtonWrites);   // refused before any write
+        Assert.True(r.SlotMissing);          // ...and reported as the refusal it is
+        Assert.False(r.Refused);             // the identity refusal is a different verdict
+    }
+
+    /// <summary>The two refusals stay distinct in both directions: a wrong-mouse refusal is not a
+    /// missing slot, so it keeps the reseed-and-reload copy rather than the no-such-slot one.</summary>
+    [Fact]
+    public async Task AnIdentityRefusalIsNotReportedAsAMissingSlot()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2, ConnectedModel = "Naga V3 Pro" };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(new byte[] { 2 }, "Naga V2 Pro", 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.True(r.Refused);
+        Assert.False(r.SlotMissing);
+    }
+
+    /// <summary>An ordinary write must raise neither refusal flag — the guard against a default that
+    /// quietly reports every landed write as "not written".</summary>
+    [Fact]
+    public async Task AWrittenButtonRaisesNeitherRefusal()
+    {
+        var device = new FakeRazerDevice { ActiveProfile = 2 };
+        device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        var monitor = Build(device);
+
+        var r = await monitor.WriteButtonVerifiedAsync(new byte[] { 2 }, null, 0x4b, RazerProtocol.FnKeyboard, F1);
+
+        Assert.True(r.Verified);
+        Assert.False(r.SlotMissing);
+        Assert.False(r.Refused);
     }
 
     [Fact]

@@ -139,9 +139,14 @@ public sealed class BatteryMonitor : IDisposable
     /// stated outright rather than left to be inferred from Model, because the caller's copy of the
     /// expectation can be cleared by an unrelated model-change handler between issuing the write and
     /// reading this result - and a refusal that then reads as an ordinary failure tells the user to
-    /// retry on a mouse that is working perfectly.</para></summary>
+    /// retry on a mouse that is working perfectly.</para>
+    /// <para>SlotMissing = the known inventory does not list the active slot, so NOTHING was written.
+    /// Like Refused it is stated outright, and for the same reason: nothing failed and nothing
+    /// landed, so the caller must not show the retry-and-wiggle copy. It is NOT a mouse change -
+    /// the mouse in front of the user is the one that was asked, it simply has no such slot.</para></summary>
     public readonly record struct ButtonWriteResult(
-        bool Verified, byte? Slot, bool ConnectionChanged, int Connection, string? Model, bool Refused = false);
+        bool Verified, byte? Slot, bool ConnectionChanged, int Connection, string? Model,
+        bool Refused = false, bool SlotMissing = false);
 
     /// <summary>Read the active slot, write, and read back to verify - all inside ONE read-lock
     /// acquisition. Split across three acquisitions (as it was before 2026-08-19) a reselect can land
@@ -200,7 +205,7 @@ public sealed class BatteryMonitor : IDisposable
             if (expectedModel is { } still && !string.Equals(_device.ConnectedModel, still, StringComparison.Ordinal))
                 return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, _device.ConnectedModel, Refused: true);
             if (createdSlots is not null && Array.IndexOf(createdSlots, slot) < 0)
-                return new(false, slot, _device.ConnectionId != entry, _device.ConnectionId, entryModel);
+                return new(false, slot, _device.ConnectionId != entry, _device.ConnectionId, entryModel, SlotMissing: true);
 
             bool ok = await _device.SetButtonAsync(slot, buttonId, category, data, _cts.Token);
             if (ok)
