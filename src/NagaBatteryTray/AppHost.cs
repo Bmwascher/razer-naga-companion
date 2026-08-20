@@ -181,17 +181,32 @@ public sealed class AppHost
     }
 
     // 0 = idle. One recovery at a time: a write-stale hand-off and a sweep abort can fire together,
-    // and each Reset()s under the other. No timer, no thread, no retry loop, no backoff (hard rule 1).
+    // and each Reset()s under the other. No timer, no thread, no backoff, and AT MOST ONE follow-up
+    // pass per acquisition — never an unbounded retry loop (hard rule 1).
     private int _recovering;
 
     // A recovery that arrives while one is already running is COALESCED, not dropped: it sets this
-    // bit and the holder runs one more pass for it. Dropping it re-opened the very mid-state the
-    // hand-off exists to prevent — recovery calls ReseedDeviceAsync while holding the flag, so that
-    // nested reseed's own guard could fire and lose its request with the UI already reset to blank
-    // and nothing left to retry (review round 2). Many drops collapse into ONE follow-up pass, never
-    // a queue: it is a single bit, cleared at the TOP of each pass, so a request arriving during a
-    // pass earns one further round instead of being swallowed by that pass's own clear. It is not
-    // cleared on exit, so a request landing in the release window is picked up by the next holder.
+    // bit and the holder runs at most ONE more pass for it. Dropping it re-opened the very mid-state
+    // the hand-off exists to prevent — recovery calls ReseedDeviceAsync while holding the flag, so
+    // that nested reseed's own guard could fire and lose its request with the UI already reset to
+    // blank and nothing left to retry (review round 2). Many requests collapse into that one
+    // follow-up, never a queue: it is a single bit, cleared at the TOP of each pass.
+    //
+    // The follow-up is HARD-CAPPED at one because the pass generates its own requests: it calls
+    // ReseedDeviceAsync, whose connection-id guard calls straight back in here and re-sets the bit
+    // after the clear. Under a flapping link (V3 cable pulled — the acceptance scenario) an
+    // unbounded loop would re-run refresh + reseed + the twelve-read sweep with no cap and no delay,
+    // which is continuous HID traffic against a mouse in the user's hand (hard rule 1).
+    //
+    // Two residuals are ACCEPTED, not fixed. (1) A request landing between the loop's last check and
+    // the flag release is DROPPED: the bit stays set, but the next holder clears it at the top of its
+    // own pass before reading it, so that request contributes nothing on its own. (2) An exception
+    // escaping the pass releases the flag with the bit possibly set and no follow-up, and every call
+    // site is `_ = Recover…`, so the exception is swallowed into an unobserved Task. In both cases
+    // the dashboard can sit mid-state — blank, via the sweep-abort path — until the next device
+    // change, battery reselect, or dashboard reopen recovers it. Closing them needs a post-release
+    // re-check plus its own re-entry guard: more moving parts than these failures justify in a file
+    // whose first rule is to stay small and quiet.
     private int _recoveryRequested;
 
     /// <summary>Recover from a reconnect that nothing announced. A lock-waiting battery read
@@ -202,22 +217,24 @@ public sealed class AppHost
     {
         if (Interlocked.CompareExchange(ref _recovering, 1, 0) != 0)
         {
-            Volatile.Write(ref _recoveryRequested, 1); // the holder will run one more pass for this
+            Volatile.Write(ref _recoveryRequested, 1); // the holder will run at most one more pass
             return;
         }
         try
         {
-            do
+            // pass 0 = this acquisition's own work; pass 1 = the single follow-up a request earns.
+            // If the bit is STILL set after the follow-up it is left set and we exit — no third pass.
+            for (int pass = 0; pass < 2; pass++)
             {
                 // cleared BEFORE the pass runs, so this pass answers every request made so far and a
-                // request made DURING it survives into the loop check below (no spin, no loss)
+                // request made DURING it survives into the check below (no spin, no loss)
                 Volatile.Write(ref _recoveryRequested, 0);
                 string? before = _monitor.State.Model;
                 await Task.Run(() => _monitor.RefreshNowWaitingAsync());
                 if (!ReferenceEquals(_dashboardVm, vm)) return;
                 if (string.Equals(_monitor.State.Model, before, StringComparison.Ordinal)) await ReseedDeviceAsync(vm);
+                if (Volatile.Read(ref _recoveryRequested) == 0) return;
             }
-            while (Volatile.Read(ref _recoveryRequested) == 1);
         }
         finally { Volatile.Write(ref _recovering, 0); }
     }
