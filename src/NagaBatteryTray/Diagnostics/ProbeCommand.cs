@@ -15,7 +15,7 @@ public static class ProbeCommand
     {
         Console.WriteLine("Naga Battery Tray - HID probe (raw HidD_*, zero-access open)\n");
 
-        foreach (int pid in new[] { RazerProtocol.MousePidWireless, RazerProtocol.MousePidWired })
+        foreach (int pid in RazerProtocol.ScanPids)
         {
             foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
             {
@@ -23,7 +23,7 @@ public static class ProbeCommand
                 try { max = dev.GetMaxFeatureReportLength(); } catch { }
                 if (max != RazerProtocol.BufferLength) continue; // only collections with the 90+1 feature report
 
-                Console.WriteLine($"PID 0x{pid:x4} {Mi(dev.DevicePath)} max={max} -> raw zero-access open");
+                Console.WriteLine($"PID 0x{pid:x4} ({RazerProtocol.ModelNameForPid(pid)}, {(RazerProtocol.IsWiredPid(pid) ? "wired" : "wireless")}) {Mi(dev.DevicePath)} max={max} -> raw zero-access open");
                 using var h = CreateFile(dev.DevicePath, 0, 0x3, IntPtr.Zero, 0x3, 0, IntPtr.Zero);
                 if (h.IsInvalid)
                 {
@@ -50,7 +50,7 @@ public static class ProbeCommand
     public static int RunDpi()
     {
         Console.WriteLine("Naga Battery Tray - GET DPI probe (raw hex for offset verification)\n");
-        foreach (int pid in new[] { RazerProtocol.MousePidWireless, RazerProtocol.MousePidWired })
+        foreach (int pid in RazerProtocol.ScanPids)
             foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
             {
                 int max = -1;
@@ -68,7 +68,7 @@ public static class ProbeCommand
                 reply[0] = 0;
                 if (!HidD_GetFeature(h, reply, reply.Length)) { Console.WriteLine($"GetFeature failed err={Marshal.GetLastWin32Error()}"); continue; }
 
-                Console.WriteLine($"PID 0x{pid:x4} status=0x{reply[1]:x2}");
+                Console.WriteLine($"PID 0x{pid:x4} ({RazerProtocol.ModelNameForPid(pid)}) status=0x{reply[1]:x2}");
                 Console.WriteLine("  reply[0..15]: " + string.Join(" ", reply.Take(16).Select(b => b.ToString("x2"))));
                 int x = (reply[10] << 8) | reply[11];
                 int y = (reply[12] << 8) | reply[13];
@@ -125,7 +125,7 @@ public static class ProbeCommand
             Console.WriteLine("No live mouse collection found (connected? awake? tray app closed?).");
             return 1;
         }
-        Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");
+        Console.WriteLine($"Live collection: {RazerProtocol.ModelNameForPid(s.Pid) ?? "unknown"} PID 0x{s.Pid:x4} ({(RazerProtocol.IsWiredPid(s.Pid) ? "wired" : "wireless")})\n");
 
         var capture = new ButtonCaptureFile();
         CheckDeviceMode(s, capture);
@@ -505,7 +505,7 @@ public static class ProbeCommand
             Console.WriteLine("No live mouse collection found (connected? awake? tray app closed?).");
             return 1;
         }
-        Console.WriteLine($"Live collection: PID 0x{s.Pid:x4}\n");
+        Console.WriteLine($"Live collection: {RazerProtocol.ModelNameForPid(s.Pid) ?? "unknown"} PID 0x{s.Pid:x4} ({(RazerProtocol.IsWiredPid(s.Pid) ? "wired" : "wireless")})\n");
         RunPersistenceTest(s, capture);
         capture.Save();
         RunRestore(s, capture);
@@ -545,7 +545,7 @@ public static class ProbeCommand
     /// battery query before committing - mirrors RazerDevice.EnsureConnectedAsync.</summary>
     private static SafeFileHandle? OpenLiveMouse(out int pidOpened)
     {
-        foreach (int pid in new[] { RazerProtocol.MousePidWired, RazerProtocol.MousePidWireless })
+        foreach (int pid in RazerProtocol.ScanPids)
             foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
             {
                 int max = -1;

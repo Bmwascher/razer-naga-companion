@@ -442,7 +442,7 @@ internal static class ProfileProbeCommand
             if (cachedTid is byte c) tids.Add(c);
             foreach (byte t in RazerProtocol.TransactionIdProbeSet) if (!tids.Contains(t)) tids.Add(t);
 
-            foreach (int pid in new[] { RazerProtocol.MousePidWired, RazerProtocol.MousePidWireless })
+            foreach (int pid in RazerProtocol.ScanPids)
                 foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
                 {
                     int max = -1;
@@ -864,7 +864,7 @@ internal static class ProfileProbeCommand
                 "# --probe-profile capture\n\n" +
                 $"- date: {DateTime.Now:yyyy-MM-dd HH:mm}\n" +
                 $"- app version: {ver}\n" +
-                $"- PID: 0x{pid:x4} ({(pid == RazerProtocol.MousePidWired ? "wired" : "wireless")})\n" +
+                $"- PID: 0x{pid:x4} ({RazerProtocol.ModelNameForPid(pid) ?? "unknown"}, {(RazerProtocol.IsWiredPid(pid) ? "wired" : "wireless")})\n" +
                 $"- transaction id: 0x{tid:x2} (resolved)\n" +
                 $"- SET->GET delay: {delayMs} ms\n" +
                 "- offsets use 90-byte REPORT indexing (args at [8..87]); the 91-byte HID buffer prepends the report id\n");
