@@ -78,8 +78,16 @@ public sealed class AtomicButtonWriteTests
         Assert.False(r.Verified);   // a changed connection is never a verified write
     }
 
+    /// <summary>The point of the single lock acquisition: nothing can run between the write's own
+    /// steps. Two battery polls are queued on the read lock — one before the write's first step
+    /// (covering the resolve-to-write boundary) and one from inside the write itself (covering the
+    /// write-to-verify boundary) — and the fake is loaded with a plainly different reading, so a
+    /// poll that got in would leave a bigger read count and a different State behind it.
+    /// <para>Split the write back into three Wait/Release pairs and this goes red: a queued waiter
+    /// takes the freed lock at the very next release, which is exactly what one acquisition
+    /// prevents.</para></summary>
     [Fact]
-    public async Task TheWriteWaitsBehindAConcurrentBatteryReadHoldingTheLock()
+    public async Task NoBatteryPollCanRunBetweenTheWritesOwnSteps()
     {
         var device = new FakeRazerDevice
         {
@@ -88,24 +96,58 @@ public sealed class AtomicButtonWriteTests
             ReadGate = new TaskCompletionSource<bool>(),
         };
         device.ButtonActions[(2, 0x4b)] = new RawButtonAction(RazerProtocol.FnKeyboard, F1);
+        device.Enqueue(new BatteryReading(50, false, true, DateTimeOffset.Now, false, "Naga V2 Pro"));
+        device.Enqueue(new BatteryReading(11, false, true, DateTimeOffset.Now, false, "Naga V3 Pro"));
+        var baseline = DeviceState.Online(50, false, false, "Naga V2 Pro");
         var monitor = Build(device);
 
+        // What the world looked like at each interior boundary of the write.
+        int readsAtWrite = -1, readsAtVerify = -1;
+        DeviceState stateAtWrite = default, stateAtVerify = default;
+        Task? fromInsideTheWrite = null;
+
+        device.BeforeSetButton = () =>
+        {
+            readsAtWrite = device.ReadCount;
+            stateAtWrite = monitor.State;
+            // queue a poll on the lock: under three acquisitions it would take the lock the moment
+            // the write step releases, i.e. before the verify read.
+            fromInsideTheWrite = monitor.RefreshNowWaitingAsync();
+        };
+        device.BeforeGetButton = () =>
+        {
+            readsAtVerify = device.ReadCount;
+            stateAtVerify = monitor.State;
+        };
+
         // Park a battery read inside the gate so the one read lock is genuinely held by it.
-        var read = monitor.RefreshNowAsync();
-        await device.ReadEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var parked = monitor.RefreshNowAsync();
+        await device.ReadEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         var write = monitor.WriteButtonVerifiedAsync(null, 0x4b, RazerProtocol.FnKeyboard, F1);
+        // queued after the write, so it is first in line the moment the write frees the lock —
+        // under three acquisitions that is the gap between resolving the slot and writing it.
+        var beforeTheWrite = monitor.RefreshNowWaitingAsync();
+
         var early = await Task.WhenAny(write, Task.Delay(TimeSpan.FromMilliseconds(200)));
         Assert.NotSame(write, early); // still blocked behind the read holding the lock, not interleaved
 
-        device.ReadGate.SetResult(true); // let the read finish; the write can now proceed
-        var settled = await Task.WhenAny(Task.WhenAll(read, write), Task.Delay(TimeSpan.FromSeconds(5)));
-        Assert.True(read.IsCompletedSuccessfully);
-        Assert.True(write.IsCompletedSuccessfully);
+        device.ReadGate.SetResult(true); // let the parked read finish; the write can now proceed
+        await write.WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.WhenAll(parked, beforeTheWrite).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.NotNull(fromInsideTheWrite);
+        await fromInsideTheWrite.WaitAsync(TimeSpan.FromSeconds(30));
 
         var r = await write;
         Assert.True(r.Verified);
         Assert.Single(device.ButtonWrites);   // the resolve-write-verify sequence all ran, once the lock freed
         Assert.Equal(1, device.GetButtonCount);
+
+        // Neither queued poll got in: one read served (the parked one) at both interior boundaries,
+        // and the second reading was still unserved, so State never moved off the first mouse.
+        Assert.Equal(1, readsAtWrite);
+        Assert.Equal(1, readsAtVerify);
+        Assert.Equal(baseline, stateAtWrite);
+        Assert.Equal(baseline, stateAtVerify);
     }
 }

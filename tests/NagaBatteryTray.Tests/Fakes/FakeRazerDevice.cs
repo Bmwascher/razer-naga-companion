@@ -14,9 +14,14 @@ public sealed class FakeRazerDevice : IRazerDevice
     /// that never sets this reads synchronously as before.</summary>
     public TaskCompletionSource<bool>? ReadGate { get; set; }
 
+    /// <summary>How many battery reads the device has actually served — lets a test prove that no
+    /// poll slipped into the middle of another operation.</summary>
+    public int ReadCount { get; private set; }
+
     public async Task<BatteryReading> ReadAsync(CancellationToken ct)
     {
         ReadEntered?.TrySetResult(true);
+        ReadCount++;
         if (ReadGate is not null) await ReadGate.Task;
         return _queue.Count > 0 ? _queue.Dequeue() : BatteryReading.Absent(DateTimeOffset.Now);
     }
@@ -37,8 +42,13 @@ public sealed class FakeRazerDevice : IRazerDevice
     public bool SetButtonResult { get; set; } = true;
     public Dictionary<(byte Profile, byte ButtonId), RawButtonAction> ButtonActions { get; } = new();
 
+    /// <summary>Runs just before a button write — lets a test observe, or disturb, the state of the
+    /// world at the moment the write itself is issued.</summary>
+    public Action? BeforeSetButton { get; set; }
+
     public Task<bool> SetButtonAsync(byte profile, byte buttonId, byte category, byte[] data, CancellationToken ct)
     {
+        BeforeSetButton?.Invoke();
         ButtonWrites.Add(new ButtonWrite(profile, buttonId, category, data));
         return Task.FromResult(SetButtonResult);
     }

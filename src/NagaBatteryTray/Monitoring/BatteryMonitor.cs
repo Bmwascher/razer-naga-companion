@@ -142,7 +142,10 @@ public sealed class BatteryMonitor : IDisposable
     /// fails the write - writing a cached slot to a mouse we could not interrogate is the whole
     /// defect.</para>
     /// <para>createdSlots null = inventory unknown, which never blocks; a known inventory that lacks
-    /// the slot refuses before any write.</para></summary>
+    /// the slot refuses before any write.</para>
+    /// <para>On the path where the lock was never entered (the WaitAsync failure) Connection is a
+    /// best-effort read of whatever mouse is current, tied to nothing this operation did; Verified is
+    /// false there, so no caller acts on it.</para></summary>
     public async Task<ButtonWriteResult> WriteButtonVerifiedAsync(
         byte[]? createdSlots, byte buttonId, byte category, byte[] data)
     {

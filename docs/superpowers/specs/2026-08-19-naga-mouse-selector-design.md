@@ -197,7 +197,22 @@ Two consequences:
    rather than painted onto the UI. The sweep's existing generation counter is not a substitute for
    this: it moves on a *published* model change, a dashboard close, or a new sweep, and an
    unannounced reconnect is none of those.
-3. **Recovery republishes identity before reloading.** When a connection change is detected, a
+3. **Identity is compared by MODEL across time, by id within an operation.** The two questions are
+   not the same, and answering both with the raw id re-creates the defect this pass exists to remove.
+   `ConnectionId` increases on EVERY adoption, including a reconnect to the same mouse — and every
+   explicit refresh calls `Reset()` first, so any WM_DEVICECHANGE (a headset, a hub, a resume) bumps
+   it. Comparing ids across time would therefore fail a landed write, red the chip and kick a full
+   recovery because the user plugged in something unrelated.
+
+   - **Within one operation** — a result that returned after a reconnect, an in-flight read, a write
+     whose read-back crossed an adoption — the id is right. Something changed underneath the
+     operation and its outcome is not attributable.
+   - **Across time** — is this cached slot, this profile list, this undo snapshot still about the
+     mouse in front of me — the connected MODEL is right. `MouseConnection.Model` survives `Close()`
+     precisely so this question has an answer after a dropped handle. A same-model reconnect leaves
+     every cached value still true; only a hop to the other mouse invalidates them.
+
+4. **Recovery republishes identity before reloading.** When a connection change is detected, a
    lock-waiting battery read runs first, so `State.Model` names the mouse now connected. Reloading
    before that would file the new mouse's DPI, profiles and profile names under the old model.
 
