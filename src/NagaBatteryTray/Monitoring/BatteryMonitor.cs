@@ -121,9 +121,53 @@ public sealed class BatteryMonitor : IDisposable
         finally { _readLock.Release(); }
     }
 
-    private async Task PollAsync(bool reconnect = false)
+    /// <summary>Which mouse the app should talk to (spec 2026-08-19 §4.1). Set-only plumbing: the
+    /// device acts on it at its next battery read, so this never blocks and never takes the lock.</summary>
+    public string? PreferredMouse
     {
-        if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip
+        get => _device.PreferredModel;
+        set => _device.PreferredModel = value;
+    }
+
+    /// <summary>Which mouse the app is talking to right now, as an identity that changes on every
+    /// adoption (spec §4.10). Callers capture it before a multi-step operation and discard results
+    /// whose id no longer matches.</summary>
+    public int ConnectionId => _device.ConnectionId;
+
+    /// <summary>Which supported mice answer right now, for the dashboard's selector. Blocks for the
+    /// read lock like every other pass-through — this is several device probes, so it must not
+    /// interleave with the battery poll. Called on dashboard open / refresh only, never polled.
+    /// <para>Republishes State before returning: discovery reconnects at the end and can land on a
+    /// different mouse than State names, and State only ever updates from a battery read. Without
+    /// this the selector and the profile-name key describe the wrong mouse (spec §4.4).</para></summary>
+    public async Task<IReadOnlyList<string>> DiscoverMiceAsync()
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return Array.Empty<string>(); }
+        try
+        {
+            var found = await _device.DiscoverReachableAsync(_cts.Token);
+            ProcessReading(await _device.ReadAsync(_cts.Token)); // same acquisition: no one can slip between
+            return found;
+        }
+        catch (OperationCanceledException) { return Array.Empty<string>(); }
+        finally { _readLock.Release(); }
+    }
+
+    /// <summary>Refresh behind an EXPLICIT user action (a mouse pick). Identical to RefreshNowAsync
+    /// except that it WAITS for the read lock instead of skipping when one is busy — the skip is
+    /// right for a timer tick and wrong for a user, who would see a perfectly reachable mouse
+    /// reported as unreachable because a sweep happened to be in flight (spec §4.5).</summary>
+    public Task RefreshNowWaitingAsync() => PollAsync(reconnect: true, waitForLock: true);
+
+    private async Task PollAsync(bool reconnect = false, bool waitForLock = false)
+    {
+        if (waitForLock)
+        {
+            try { await _readLock.WaitAsync(_cts.Token); }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return; }
+        }
+        else if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip
         try
         {
             if (reconnect) _device.Reset(); // re-select the active interface for explicit refreshes
