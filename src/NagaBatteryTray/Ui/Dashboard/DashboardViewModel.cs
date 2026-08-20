@@ -70,6 +70,9 @@ public sealed class DashboardViewModel : ObservableObject
 
         Presets = new ObservableCollection<DpiPresetItem>();
         foreach (int v in source.DpiPresets.Distinct().OrderBy(v => v)) Presets.Add(new DpiPresetItem(v));
+        // the box is only pickable once there is a second mouse to pick, and the list is the only
+        // thing that decides that — so CanPickMouse rides the collection itself, not each writer
+        Mice.CollectionChanged += (_, _) => Notify(nameof(CanPickMouse));
         RefreshProfileDetail();
     }
 
@@ -228,10 +231,16 @@ public sealed class DashboardViewModel : ObservableObject
     /// mice are listed, so a sleeping mouse never appears (user decision, 2026-08-19).</summary>
     public ObservableCollection<string> Mice { get; } = new();
 
-    /// <summary>False until the first probe lands — the ComboBox stays disabled and shows the
-    /// connected model, so it reads exactly like the old label while discovery runs.</summary>
+    /// <summary>False until the first reachability probe lands — the record of whether discovery has
+    /// run at all, kept separate from whether the box is pickable (that is CanPickMouse).</summary>
     public bool MiceLoaded { get => _miceLoaded; private set => Set(ref _miceLoaded, value); }
     private bool _miceLoaded;
+
+    /// <summary>Drives the header ComboBox's IsEnabled. One entry is nothing to pick between, so the
+    /// box reads as the model label it replaced — including before the probe lands, where binding
+    /// enablement to MiceLoaded greyed the app's primary identity element on every open. It becomes
+    /// a real selector the moment a second reachable mouse is listed.</summary>
+    public bool CanPickMouse => Mice.Count > 1;
 
     public event Action<string>? MouseSelectRequested;
 
@@ -244,7 +253,10 @@ public sealed class DashboardViewModel : ObservableObject
         {
             if (!Set(ref _selectedMouse, value)) return;
             if (_syncingMouse || value is null) return;
-            if (string.Equals(value, ModelName, StringComparison.Ordinal)) return;
+            // suppress a re-pick ONLY when it names the mouse the app is actually on. Offline,
+            // ModelName has fallen back to the generic "Razer Naga" while the box still names the
+            // mouse the user last saw, so suppressing there would block the retry the pick IS.
+            if (DeviceOnline && string.Equals(value, ModelName, StringComparison.Ordinal)) return;
             MouseSelectRequested?.Invoke(value);
         }
     }
@@ -259,7 +271,9 @@ public sealed class DashboardViewModel : ObservableObject
         // a probe that found nothing must not leave an empty box where the model label used to be
         if (Mice.Count == 0 && connected is not null) Mice.Add(connected);
         _syncingMouse = true;
-        try { SelectedMouse = connected is not null && Mice.Contains(connected) ? connected : Mice.FirstOrDefault(); }
+        // no connected mouse means the app is talking to nothing, and the box must not claim
+        // otherwise — showing the first probe hit as selected named a mouse we are not on
+        try { SelectedMouse = connected is not null && Mice.Contains(connected) ? connected : null; }
         finally { _syncingMouse = false; }
         MiceLoaded = mice.Count > 0;   // the PROBE's result, not the box's contents
     }
@@ -348,6 +362,10 @@ public sealed class DashboardViewModel : ObservableObject
     /// another (spec §4.6). A fresh seed refills them.</summary>
     public void ResetForNewMouse()
     {
+        // a rename draft belongs to the OLD mouse's slot; carrying it across would land that name on
+        // whatever slot the new mouse selects. Holding by construction here, not by relying on the
+        // ComboBox nulling its selection when the items clear — that protection lives in the view.
+        CancelRename();
         ProfileSlots.Clear();
         _activeSlot = null;
         SetProfileNote("");

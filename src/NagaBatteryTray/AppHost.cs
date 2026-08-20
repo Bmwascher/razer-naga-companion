@@ -161,6 +161,7 @@ public sealed class AppHost
         // the lock is free the wait completes synchronously, so enumeration, CreateFile and the first
         // feature reports would run on the UI thread this was called from (hard rule 1)
         var mice = await Task.Run(() => _monitor.DiscoverMiceAsync());
+        if (!ReferenceEquals(_dashboardVm, vm)) return; // closed while the sweep ran — nothing to paint
         Dispatch(() => vm.SetMice(mice, _monitor.State.Model));
         await ReseedDeviceAsync(vm);
     }
@@ -383,30 +384,53 @@ public sealed class AppHost
         }
     }
 
+    private bool _selecting; // one pick at a time — same shape as _activating, and for the same reason
+
     /// <summary>Header dropdown pick (spec §4.5): remember the choice, reconnect, and re-seed. The
     /// new mouse holds entirely different DPI, profiles and bindings, so nothing from the old one
     /// survives — OnDeviceStateChanged clears the cache as soon as the model change lands.</summary>
     private async Task SelectMouseAsync(DashboardViewModel vm, string name)
     {
-        _settings.Settings.PreferredMouse = name;
-        _settings.Save();
-        _monitor.PreferredMouse = name;
-
-        // WAITS for the read lock: the ordinary refresh skips when a read is in flight, which would
-        // report the mouse the user just picked as unreachable (spec §4.5). Task.Run for the same
-        // reason as in SeedDashboardAsync - an uncontended lock keeps the HID work on this thread.
-        await Task.Run(() => _monitor.RefreshNowWaitingAsync());
-
-        if (!string.Equals(_monitor.State.Model, name, StringComparison.Ordinal))
+        if (_selecting)
         {
-            Dispatch(() =>
-            {
-                vm.SetProfileNote("Couldn't reach that mouse — wiggle it and retry");
-                vm.ResyncMouse();
-            });
+            // a pick during an in-flight pick is DROPPED, never queued: two picks would run two
+            // waiting refreshes, two discovery sweeps and two full seeds, and the loser would then
+            // judge reachability by a State.Model the winner had already moved — reporting a mouse
+            // that IS connected as unreachable. Snap the box back so it doesn't display a mouse
+            // nobody asked the app to move to (the SwitchProfileAsync idiom).
+            Dispatch(() => vm.ResyncMouse());
             return;
         }
-        await SeedDashboardAsync(vm);
+        _selecting = true;
+        try
+        {
+            _settings.Settings.PreferredMouse = name;
+            _settings.Save();
+            _monitor.PreferredMouse = name;
+
+            // WAITS for the read lock: the ordinary refresh skips when a read is in flight, which would
+            // report the mouse the user just picked as unreachable (spec §4.5). Task.Run for the same
+            // reason as in SeedDashboardAsync - an uncontended lock keeps the HID work on this thread.
+            await Task.Run(() => _monitor.RefreshNowWaitingAsync());
+            // the dashboard can close while the lock wait runs; everything below paints a view model
+            // and sweeps the device for it, so a dead one must not get a verdict or a seed
+            if (!ReferenceEquals(_dashboardVm, vm)) return;
+
+            if (!string.Equals(_monitor.State.Model, name, StringComparison.Ordinal))
+            {
+                Dispatch(() =>
+                {
+                    vm.SetProfileNote("Couldn't reach that mouse — wiggle it and retry");
+                    vm.ResyncMouse();
+                });
+                return;
+            }
+            await SeedDashboardAsync(vm);
+        }
+        finally
+        {
+            _selecting = false;
+        }
     }
 
     private void ShowSettingsOverlay(DashboardWindow win, DashboardViewModel vm)
