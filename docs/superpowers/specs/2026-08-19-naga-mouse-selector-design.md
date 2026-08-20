@@ -159,8 +159,10 @@ refill from the new mouse.
 
 `AppHost` retains the created-slot list from the last profile-list read, cleared with the rest of
 the per-device state. `ResolveWriteSlotAsync` returns `null` — a visible failure, no write — when
-the resolved slot is not in that list. With 4.6 in place this should never fire; it exists so a
-write can never again be aimed into a slot the mouse does not have.
+that list is **known** and the resolved slot is absent from it. An unknown list never blocks a
+write: the dashboard resolves the active slot on demand before its first profile read, and that
+path must keep working. With 4.6 in place this guard should never fire; it exists so a write can
+never again be aimed into a slot the mouse does not have.
 
 ### 4.8 Unset-button display
 
