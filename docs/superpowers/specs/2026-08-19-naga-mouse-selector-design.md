@@ -220,6 +220,10 @@ mouse does not have.
 2 data bytes displays as `"Not set"`. It is a normal display state, not a failure, so `Failed`
 stays false and the chip does not turn red.
 
+Strictly fewer than 2. A longer `0x02` reply has never been measured on either mouse, and calling an
+unmodelled binding "Not set" would tell the user an assigned button is empty and invite an
+overwrite. Unmodelled shapes keep the existing "Synapse action" label.
+
 ### 4.9 Per-mouse profile names
 
 `AppSettings.ProfileNames` is keyed by slot number only, so the V2's "World of Warcraft" on slot 1

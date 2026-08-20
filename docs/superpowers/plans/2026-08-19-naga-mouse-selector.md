@@ -2367,6 +2367,16 @@ public sealed class CalloutDisplayTests
 
         Assert.Contains("Synapse", c.BindingText);
     }
+
+    [Fact]
+    public void AnOverlongKeyboardReplyIsNotCalledUnset()
+    {
+        var c = Build();
+        c.SetFromDevice(new RawButtonAction(RazerProtocol.FnKeyboard, new byte[] { 0x00, 0x3a, 0x01 }));
+
+        // never measured on either mouse; saying "Not set" about an assigned button invites an overwrite
+        Assert.Contains("Synapse", c.BindingText);
+    }
 }
 ```
 
@@ -2386,10 +2396,13 @@ In `CalloutViewModel.cs`, replace `DisplayRaw` with:
         { SetApplied(ButtonActionKind.Key, r.Data[0], r.Data[1]); return; }
         if (r.Category == RazerProtocol.FnDisabled)
         { SetApplied(ButtonActionKind.Disabled, 0, 0); return; }
-        // the firmware's short keyboard form: a button with nothing assigned, and every button of a
+        // the firmware's SHORT keyboard form: a button with nothing assigned, and every button of a
         // profile slot the mouse has not created. Not a failure and not a Synapse macro — decoding it
         // as one painted whole grids red on the V3 (spec 2026-08-19 §1.1, §4.8).
-        if (r.Category == RazerProtocol.FnKeyboard)
+        // Strictly shorter than 2: a LONGER 0x02 reply is a shape we have never measured, and calling
+        // an unmodelled binding "Not set" tells the user an assigned button is empty and invites an
+        // overwrite. Unmodelled shapes keep the existing Synapse label.
+        if (r.Category == RazerProtocol.FnKeyboard && r.Data.Length < 2)
         { _deviceText = UnsetText; NotifyBinding(); return; }
         _deviceText = $"Synapse action (0x{r.Category:x2})";
         NotifyBinding();
