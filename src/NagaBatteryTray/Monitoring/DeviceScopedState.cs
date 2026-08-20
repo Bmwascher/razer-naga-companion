@@ -16,6 +16,10 @@ public sealed class DeviceScopedState
     /// <summary>Slots the connected mouse has actually created (0x05/0x81). Null = not read yet.</summary>
     public byte[]? CreatedSlots { get; set; }
 
+    /// <summary>The connection id the cache was last seeded under, so a caller can tell whether a
+    /// hop landed between the seed and now. Null = nothing seeded yet (spec §4.10).</summary>
+    public int? SeededConnection { get; set; }
+
     /// <summary>Feed every observed model name, including null when the mouse goes away. True = the
     /// mouse changed and the cache was dropped, so the caller must supersede in-flight work and
     /// re-seed anything on screen.</summary>
@@ -33,6 +37,7 @@ public sealed class DeviceScopedState
     {
         ActiveSlot = null;
         CreatedSlots = null;
+        SeededConnection = null;
     }
 
     /// <summary>True when the inventory is KNOWN and the slot is absent from it — the one case where

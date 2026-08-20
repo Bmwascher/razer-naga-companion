@@ -280,6 +280,19 @@ public sealed class DashboardViewModel : ObservableObject
     /// <summary>Transient card status ("Switching…", failure text) — detail line only.</summary>
     public void SetProfileNote(string note) => ProfileDetail = note;
 
+    /// <summary>The connected mouse changed: drop everything that described the old one. The profile
+    /// card, the DPI reading and every chip snapshot belong to one mouse and are meaningless on
+    /// another (spec §4.6). A fresh seed refills them.</summary>
+    public void ResetForNewMouse()
+    {
+        ProfileSlots.Clear();
+        _activeSlot = null;
+        SetProfileNote("");
+        RefreshProfileDetail();
+        SetCurrentDpi(null); // the old mouse's number must not stay on screen until the reseed lands
+        foreach (var c in Callouts) c.SetPending(); // also voids each chip's undo snapshot
+    }
+
     /// <summary>Snap the dropdown back to the last-known active slot after a failed switch —
     /// the dropdown never lies about where the mouse is.</summary>
     public void ResyncSelection() => SyncSelection();
