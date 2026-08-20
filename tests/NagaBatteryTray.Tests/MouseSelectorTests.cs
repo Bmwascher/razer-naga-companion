@@ -109,7 +109,13 @@ public sealed class MouseSelectorTests
         var vm = Build();
         vm.ApplyState(DeviceState.Online(80, false, false, "Naga V3 Pro"));
         vm.SetMice(new[] { "Naga V3 Pro", "Naga V2 Pro" }, "Naga V3 Pro");
-        vm.ApplyState(DeviceState.Unknown);   // link dropped: the box still names the V3
+        // offline WITH the model still named, built here instead of taken from DeviceState.Unknown:
+        // that one carries a null Model, so ModelName falls back to the generic label and the
+        // value-vs-ModelName half of the rule fails on the name alone. This state makes the
+        // DeviceOnline half the only thing that can honour the re-pick (round-2 review).
+        vm.ApplyState(new DeviceState(DeviceStatus.Unknown, 0, false, false, "Naga V3 Pro"));
+        Assert.False(vm.DeviceOnline);          // the arrangement itself must hold
+        Assert.Equal("Naga V3 Pro", vm.ModelName);
         string? asked = null;
         vm.MouseSelectRequested += m => asked = m;
 
@@ -117,6 +123,35 @@ public sealed class MouseSelectorTests
         vm.SelectedMouse = "Naga V3 Pro";   // the user retrying the mouse the header shows them
 
         Assert.Equal("Naga V3 Pro", asked); // offline, that is a retry — never a silent no-op
+    }
+
+    [Fact]
+    public void AProbeThatMissedTheConnectedMouseStillShowsIt()
+    {
+        var vm = Build();
+
+        // reachable, per the probe: only the V2. Connected, per the monitor: the V3. The two are
+        // read at different moments and a hop between them produces exactly this disagreement.
+        vm.SetMice(new[] { "Naga V2 Pro" }, "Naga V3 Pro");
+
+        Assert.Contains("Naga V3 Pro", vm.Mice);            // never dropped from the list
+        Assert.Equal("Naga V3 Pro", vm.SelectedMouse);      // and never unnamed in the header
+    }
+
+    [Fact]
+    public void AFailedPickWhileOfflineSnapsBackInsteadOfBlanking()
+    {
+        var vm = Build();
+        vm.ApplyState(DeviceState.Online(80, false, false, "Naga V3 Pro"));
+        vm.SetMice(new[] { "Naga V3 Pro", "Naga V2 Pro" }, "Naga V3 Pro");
+        vm.ApplyState(DeviceState.Unknown);   // link dropped: ModelName is the generic fallback
+        vm.SelectedMouse = "Naga V2 Pro";     // the user's retry — which the host fails to reach
+
+        vm.ResyncMouse();
+
+        // back to the mouse the header was showing. Blank would leave the note "Couldn't reach that
+        // mouse" above a box naming no mouse at all.
+        Assert.Equal("Naga V3 Pro", vm.SelectedMouse);
     }
 
     [Fact]

@@ -125,9 +125,7 @@ public sealed class DashboardViewModel : ObservableObject
         if (s.Model is { } connected && !string.Equals(SelectedMouse, connected, StringComparison.Ordinal))
         {
             if (!Mice.Contains(connected)) Mice.Add(connected);
-            _syncingMouse = true;
-            try { SelectedMouse = connected; }
-            finally { _syncingMouse = false; }
+            SyncSelectedMouse(connected);
         }
     }
 
@@ -253,38 +251,53 @@ public sealed class DashboardViewModel : ObservableObject
         {
             if (!Set(ref _selectedMouse, value)) return;
             if (_syncingMouse || value is null) return;
-            // suppress a re-pick ONLY when it names the mouse the app is actually on. Offline,
-            // ModelName has fallen back to the generic "Razer Naga" while the box still names the
-            // mouse the user last saw, so suppressing there would block the retry the pick IS.
+            // suppress a re-pick ONLY when it names the mouse the app is actually on. Offline, a
+            // re-pick of the displayed mouse IS the user's retry, so it must reach the host — and
+            // the rule may not lean on ModelName's offline fallback to make that happen: whether
+            // the monitor publishes a model with an offline state is the monitor's business, not
+            // this view model's (round-2 review).
             if (DeviceOnline && string.Equals(value, ModelName, StringComparison.Ordinal)) return;
             MouseSelectRequested?.Invoke(value);
         }
     }
     private string? _selectedMouse;
     private bool _syncingMouse;
+    private string? _lastSyncedMouse; // the last value the app itself put in the box — what a failed pick falls back to
+
+    /// <summary>Assign the box WITHOUT raising a pick, and record the value as one the app chose —
+    /// the fallback ResyncMouse snaps to when the connected model is unknown.</summary>
+    private void SyncSelectedMouse(string? value)
+    {
+        _syncingMouse = true;
+        try { SelectedMouse = value; }
+        finally { _syncingMouse = false; }
+        if (value is not null) _lastSyncedMouse = value;
+    }
 
     /// <summary>Feed the header a fresh reachability probe plus the model actually connected.</summary>
     public void SetMice(IReadOnlyList<string> mice, string? connected)
     {
         Mice.Clear();
         foreach (var m in mice) Mice.Add(m);
-        // a probe that found nothing must not leave an empty box where the model label used to be
-        if (Mice.Count == 0 && connected is not null) Mice.Add(connected);
-        _syncingMouse = true;
+        // The connected mouse is always listed and always selected, whatever the probe returned —
+        // the same rule ApplyState follows. The probe and the connection are read at different
+        // moments and can disagree (a hop between the sweep and the dispatch), and a probe result
+        // that simply misses the connected mouse must not drop it from the list and leave the
+        // header naming nothing. A probe that found NOTHING is the same case.
+        if (connected is not null && !Mice.Contains(connected)) Mice.Add(connected);
         // no connected mouse means the app is talking to nothing, and the box must not claim
         // otherwise — showing the first probe hit as selected named a mouse we are not on
-        try { SelectedMouse = connected is not null && Mice.Contains(connected) ? connected : null; }
-        finally { _syncingMouse = false; }
+        SyncSelectedMouse(connected);
         MiceLoaded = mice.Count > 0;   // the PROBE's result, not the box's contents
     }
 
-    /// <summary>Snap the dropdown back to the mouse actually connected, after a failed pick.</summary>
-    public void ResyncMouse()
-    {
-        _syncingMouse = true;
-        try { SelectedMouse = Mice.Contains(ModelName) ? ModelName : null; }
-        finally { _syncingMouse = false; }
-    }
+    /// <summary>Snap the dropdown back after a failed pick: to the mouse actually connected, or —
+    /// offline, where ModelName is the generic fallback and names no real mouse — to the last value
+    /// the app itself put there. The header must never go blank.</summary>
+    public void ResyncMouse() => SyncSelectedMouse(
+        Mice.Contains(ModelName) ? ModelName
+        : _lastSyncedMouse is { } last && Mice.Contains(last) ? last
+        : SelectedMouse);
 
     // ---- profile card: slot dropdown (spec §13.2 v2.3) ----
     private byte? _activeSlot; // last active-slot read (0x05/0x84); null = never known / currently unreachable
