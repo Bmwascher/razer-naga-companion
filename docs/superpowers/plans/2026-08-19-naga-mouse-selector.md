@@ -1936,9 +1936,47 @@ The session verified every finding against the live repo before adjudicating. Al
 | Model-only invalidation misses a reconnect that changes mouse without a battery read | Accepted | `ConnectionId`, spec 4.10 |
 | The connection state machine has no automated coverage | Partially accepted | new `ConnectionPolicy` + Task 3 Step 1 |
 
-The one partial: the reviewer asked for the connection state machine to be isolated behind a
-fakeable transport. The session extracted the decision (`ConnectionPolicy.Decide`) and tests it
-exhaustively, but declined to put the Win32 handle lifecycle behind an injectable seam —
-refactoring transport code proven on hardware costs more risk than the coverage buys, and the
-rollback it would test is instead made structural with `try/finally`. Put to the reviewer in
-round 2.
+### Round 2 — reviewer verdict FIX, four more findings plus one escalation
+
+| Finding | Adjudication | Where it landed |
+| --- | --- | --- |
+| The atomic write only *detects* a mid-write reconnect; `SetButtonAsync` can reconnect internally and the SET already went out | Accepted | Task 4b now always READS the active slot inside the lock, which forces any reconnect before a slot is committed to; `RazerDevice.SetButtonAsync` refuses a SET whose model changed mid-call |
+| Two "never scan" statements still stood in the device doc comment and Task 8 | Accepted | both now say "never reselect a live handle" |
+| The grid sweep has no connection check; `_gridSweep` moves only on *published* changes | Accepted | `ReadGridAsync` captures `ConnectionId` and re-checks after every read |
+| `ConnectionPolicy` returns `ProbePreferred` for an unknown preference name, so a bad settings value probes on every battery read | Accepted — a real defect in the session's own new code, not a doc gap | `RazerProtocol.NormalizeModelName`, applied on `PreferredModel` set, with tests |
+| Spec §6 promised an injectable connector the plan does not build | Accepted | §6 reconciled with the chosen coverage, seam recorded as open |
+| `DiscoverMiceAsync` and `RefreshNowWaitingAsync` are awaited directly from the UI thread, and an uncontended `WaitAsync` completes synchronously, so enumeration and `CreateFile` run on it | Accepted | both wrapped in `Task.Run` |
+| The connector seam itself | ESCALATED to the product owner | see below |
+
+### Round 3 — reviewer verdict FIX, two findings
+
+| Finding | Adjudication | Where it landed |
+| --- | --- | --- |
+| Both connection-change branches reseed *before* republishing identity, so the new mouse's DPI, profiles and profile names get filed under the old model | Accepted; the session had the order backwards | new `RecoverFromReconnectAsync`: lock-waiting battery refresh first, reseed after, and only if the model was unchanged |
+| Spec §4.7 still described the deleted `ResolveWriteSlotAsync`, and §4.10 still called the sweep generation equivalent protection | Accepted | both passages rewritten |
+
+### Round 4 — PASS
+
+Reviewer: "No substantive plan risk remains." Overall verdict PASS. Dry round, no new finding, no
+outstanding contested point. Fix-verify budget: 4 of 4 exchanges used.
+
+### Session's final adjudication
+
+Terminal verdict: **PASS on the plan**, with one open question below. Every finding across the four
+rounds was checked against the live repo before being accepted; all fifteen were real. Two of the
+session's own claims were refuted with evidence and are recorded as such: that `_lastActive` had a
+single assignment site, and that discovery could re-enter the model-change handler.
+
+Nothing here is verified code. The plan remains unexecuted, and hardware acceptance (spec §7) is
+still the gate.
+
+### Open question for the product owner
+
+The reviewer recommends isolating the Win32 handle lifecycle behind an injectable connector so that
+adoption, rollback, disposal of the losing handle, and `ConnectionId` increments get automated
+tests. The session declined it for this pass: `RazerDevice` is proven on real hardware, and hard
+rule 6 makes the HID transport a deliberate no-unit-test exception. The concrete defect the reviewer
+cited to justify the seam — reconnect-before-SET — is now closed by the always-resolve rule, which
+IS covered by tests through the existing fake. What a seam would still add is coverage of
+wrong-loser disposal and missing adoption increments. Undecided; it is a risk-versus-refactor call,
+not something evidence settles.
