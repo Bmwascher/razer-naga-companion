@@ -494,6 +494,20 @@ public class RazerProtocolTests
         Assert.Equal(new[] { 0x00E7, 0x00A7, 0x00E8, 0x00A8 }, RazerProtocol.ScanPids);
     }
 
+    // Guards against the maintenance trap where a new SupportedMice row is added but ScanPids
+    // (hand-spelled, no LINQ, in RazerProtocol.cs by design) is forgotten — that new mouse would
+    // compile fine and simply never be detected. Derives the expected scan order FROM
+    // SupportedMice instead of hardcoding it, so this test fails the moment the two tables drift.
+    [Fact]
+    public void ScanPids_matches_every_wired_pid_then_every_wireless_pid_from_SupportedMice()
+    {
+        var expected = new List<int>();
+        foreach (var m in RazerProtocol.SupportedMice) expected.Add(m.WiredPid);
+        foreach (var m in RazerProtocol.SupportedMice) expected.Add(m.WirelessPid);
+
+        Assert.Equal(expected, RazerProtocol.ScanPids);
+    }
+
     [Fact]
     public void IsWiredPid_matches_only_wired_pids()
     {
