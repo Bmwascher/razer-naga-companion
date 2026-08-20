@@ -120,13 +120,12 @@ Zero-access `CreateFile` + `HidD_Set/GetFeature`.
   battery/DPI/writes + the tid probe, and `FastReadAsync` for idempotent onboard-memory READS
   (button/profile queries): early-poll doubling ladder 50→400 ms, ready = completed status +
   class/cmd echo — the grid sweep's 12 reads land in ~a second instead of ~5 s.
-- `EnsureConnectedAsync` picks the **live** collection (the one whose
-  `GetMaxFeatureReportLength()==91`, **not** usage page 0xFF00 — none exposed) by trying candidates
-  in `RazerProtocol.ScanPids` order (every supported model's wired PID before any wireless one; V3
-  before V2 within a link), and **verifying each actually answers a battery query** before
-  committing: the dock's wireless receiver stays enumerated when the mouse switches to wired, so
-  first-enumerated alone would lock onto a dead collection (this was the wired/USB-C "no response"
-  bug, `932398e`).
+- Connection selection lives one layer down since 2026-08-19 — `RazerDevice` delegates it to
+  `MouseConnection` (next section). The rule it enforces is unchanged: pick the collection whose
+  `GetMaxFeatureReportLength()==91` (**not** usage page 0xFF00 — none exposed), and **verify each
+  candidate actually answers a battery query** before committing, because the dock's wireless
+  receiver stays enumerated when the mouse switches to wired, so first-enumerated alone would lock
+  onto a dead collection (the wired/USB-C "no response" bug, `932398e`).
 - A read returning null drops the handle so the next poll re-selects (self-heals on plug/unplug).
   Explicit refreshes (`RefreshNowAsync`) additionally call **`Reset()`** so they re-select
   *immediately* — the null-drop self-heal is too slow on a wired plug, where the stale wireless
@@ -137,13 +136,158 @@ Zero-access `CreateFile` + `HidD_Set/GetFeature`.
   `TransactionIdProbeSet`) and cached; every battery/DPI call gates on `tid != 0`, returning
   Absent/null silently until it resolves.
 
+## Connection selection & per-device state (2026-08-19)
+
+Two mice are supported, so "which mouse am I talking to" became a real question. Spec:
+`docs/superpowers/specs/2026-08-19-naga-mouse-selector-design.md`. The whole pass exists because
+acceptance testing found three defects (sticky selection, false "Not applied", a red "Synapse
+action (0x02)") that turned out to be **one** defect: state cached for one mouse survived a change
+of the mouse underneath.
+
+### The layering
+
+Win32 used to sit in the same method as the selection logic, so none of the selection logic could
+be tested. It is now three files, top to bottom:
+
+- **`IControlCollection` / `IControlCollectionSource`** — the ONLY place Win32 appears in the
+  connection path. `CreateFile`, `HidD_SetFeature`, `HidD_GetFeature`, and the HidSharp enumeration
+  that finds 91-byte feature collections; nothing else. `IsOpen` goes false the moment a feature
+  call fails, and every exchange (plus the tid probe loop) checks it — the old code got this from
+  nulling a handle, and losing it would have kept calling into a dead collection.
+  `HidControlCollection` is the real implementation; tests substitute a fake source.
+  **This is what shrank hard rule 6's transport exemption**: it now covers only the two Win32
+  wrappers and the WPF windows, not the selection logic above them. (Product-owner decision,
+  2026-08-19, taking a reviewer's recommendation over the session's advice to defer.)
+- **`ConnectionPolicy.Decide`** — the reselect rule as a pure function of four values, no handles:
+  `KeepLive` / `ProbePreferred` / `FullScan`.
+- **`MouseConnection`** — the state machine: preference order, adoption, rollback, disposing
+  exactly the losing collection, and `ConnectionId`. Protocol stays out of it; the caller supplies
+  a `Verify` delegate that resolves a transaction id on a candidate and confirms it answers.
+
+### Preference-ordered scan
+
+`AppSettings.PreferredMouse` holds a display name (`null` = scan order, and `SupportedMice` already
+puts the V3 first, so "default to the V3" needs no special case). `RazerProtocol.ScanPidsFor(name)`
+builds the order: preferred model wired, preferred model wireless, then the other models' wired
+PIDs, then their wireless ones. **Wired-before-wireless still holds within each model** — a cabled
+mouse must beat a still-plugged receiver that can no longer reach it. With no preference it returns
+`ScanPids` unchanged, byte for byte.
+
+An unknown name is normalized to `null` at the property setter (`RazerProtocol.NormalizeModelName`)
+so a stale or hand-edited `settings.json` value behaves *exactly* like no preference. Without that
+normalization every battery read would detach and roll back chasing a mouse that cannot exist.
+
+### Reselect rides the battery path only
+
+`MouseConnection.EnsureAsync` takes `reselect`, and **only the battery read passes `true`**. So
+re-evaluation happens on moments the app already has (the poll, the device-change refresh) — no new
+timer, hard rule 1 intact. When it is true and the live handle is already the preferred model, or
+no preference is set, it returns immediately at zero cost; otherwise it probes *only* the preferred
+model and keeps the current connection if that model does not answer. A sleeping preference must
+never cost the user the mouse that is actually awake.
+
+Adoption detaches the live collection from the field before probing, and restores it in a
+`finally` — an exception or a cancellation between the detach and the adoption would otherwise
+leave the app with no connection **and** leak the detached handle.
+
+Every other call (button, DPI, profile) passes `reselect: false`, so **no other call may reselect a
+live handle**. They can still *reconnect a dropped one* — that is existing, wanted self-healing —
+and that residual is precisely why connection identity is needed.
+
+### Connection identity: id within an operation, model across time
+
+`ConnectionId` rises on every adoption, including a reconnect to the same mouse. It exists because
+an unannounced reconnect is invisible otherwise: `DeviceState.Model` is published only by a battery
+read, `BatteryMonitor` keeps reporting the previous model for three consecutive failed reads, and a
+multi-step operation releases the read lock between steps.
+
+The counter-intuitive part, which a review round forced (spec §4.10 points 3-4) — **the two
+identity questions take different answers**:
+
+- **Within one operation** — did the mouse change under this in-flight read, this write's read-back,
+  this grid sweep — compare the **id**. Something moved underneath and the outcome is not
+  attributable. `RefreshProfileAsync`, `ReadGridAsync` and the DPI read all capture an id and
+  discard results whose id no longer matches.
+- **Across time** — is this cached slot, this profile list, this undo snapshot still about the mouse
+  in front of me — compare the **connected MODEL** (`MouseConnection.Model`, deliberately *not*
+  cleared by `Close()` so the question still has an answer after a dropped handle).
+
+Comparing ids across time would red a landed write whenever the user plugs in anything at all:
+every explicit refresh calls `Reset()` first, so any `WM_DEVICECHANGE` — a headset, a hub, a
+resume — bumps the id while the mouse never changed. A same-model reconnect leaves every cached
+value still true; only a hop to the *other* mouse invalidates them.
+
+Two consequences in the code:
+
+- **The button write is atomic.** `BatteryMonitor.WriteButtonVerifiedAsync` reads the active slot,
+  writes, and reads back **inside one `_readLock` acquisition**. Split across three (as it was
+  before), a reselect could land between resolve and write and put one mouse's slot number onto the
+  other — clearing a cache cannot undo that, the slot is already a local. The slot is always read
+  here, never taken from the caller's cache, which forces any pending reconnect to happen *before* a
+  slot is committed to. A failed slot read fails the write outright.
+- **Recovery republishes identity before reloading.** `AppHost.RecoverFromReconnectAsync` runs a
+  lock-waiting battery refresh FIRST so `State.Model` names the mouse now connected, and only then
+  reseeds. The other order files the new mouse's DPI, profiles and profile names under the old
+  model. It is re-entrancy-guarded and coalesces to at most one follow-up pass.
+
+### Reachability probe (the selector's list)
+
+`DiscoverReachableAsync` tries each supported model's PIDs in turn, collects the display names that
+answered a battery query, then re-runs normal selection so the connection ends on the
+preferred/current mouse. It **republishes `State` before returning** (one battery read processed
+inside the same lock acquisition), because that closing reconnect can land on a different mouse than
+`State` names, and `State.Model` is what keys the scoped cache and the profile-name map.
+
+A HID enumeration cannot replace this: the receiver stays enumerated while the mouse is off, so an
+enumeration-built list would offer a sleeping mouse. The user chose accuracy over the ~1 s cost.
+Called on dashboard open and dashboard refresh only — **never polled**.
+
+`RefreshNowWaitingAsync` is `RefreshNowAsync` that *waits* for the read lock instead of skipping
+when busy. Skip-when-busy is right for a timer tick and wrong behind a user's mouse pick, which
+would otherwise report a perfectly reachable mouse as unreachable because a sweep happened to be in
+flight. Both it and discovery are wrapped in `Task.Run` at the call site — an uncontended
+`WaitAsync` completes synchronously, which would run enumeration and `CreateFile` on the UI thread.
+
+### `DeviceScopedState` — the cache that clears itself
+
+`Monitoring/DeviceScopedState.cs` holds everything the app caches about ONE mouse: the last active
+slot, the created-slot inventory, and `SeededModel` (the model the cache was seeded under).
+`Observe(model)` is fed every published model name including `null`; it returns true when the model
+changed, and clears the cache as it does. `AppHost` then supersedes the grid sweep, resets the
+dashboard's profile inventory / DPI reading / chips / undo snapshots, and — if the dashboard is
+open — reseeds probe-free.
+
+The defect it fixes, measured on the V3 Pro (read-only spike, 2026-08-19; the V3 ships with
+`capacity=5 created=[1] active=1`):
+
+| Slot read | Reply |
+| --- | --- |
+| 0 (direct) | `cat=0x02 len=2 [00 45]` |
+| 1 (created) | `cat=0x02 len=2 [00 45]` |
+| 2, 3, 4, 5 (not created) | `cat=0x02 len=1 [00]` |
+
+**The firmware answers an uncreated-slot read with a 1-byte stub rather than an error**, and that
+one stub caused both remaining defects. The user's V2 sits on slot 3; after the connection flipped
+to the V3 mid-session, `_lastActive` still said 3, the V3 has no slot 3, so the write's read-back
+could never match (false "Not applied") and the 1-byte reply fell through
+`CalloutViewModel.DisplayRaw`'s exactly-2-bytes decode into a red "Synapse action (0x02)".
+`DisplayRaw` now renders `0x02` with **fewer than 2** data bytes as a plain "Not set" with
+`Failed` false — strictly fewer: a longer unmodelled `0x02` keeps the "Synapse action" label,
+because calling an assigned button empty invites the user to overwrite it.
+
+Two hypotheses were killed by measurement and are recorded so they are not re-tried: button reads
+are not flaky (36/36 through the production path, median 61 ms), and the verify read does not race
+the commit (20/20 first reads returned the freshly written value).
+
 ## Monitoring (`Monitoring/BatteryMonitor.cs`)
 
 Poll timer + arming state machine; takes `IRazerDevice`; battery poll + DPI/button/profile
 pass-throughs serialize on one `_readLock` (poll skips if busy, the pass-throughs block). The poll
 itself does battery I/O only. `RefreshNowAsync` (manual button, wake, device-change) calls
 `_device.Reset()` first to re-select the active interface; the frequent background poll reuses the
-handle for efficiency.
+handle for efficiency. Since 2026-08-19 it also owns `WriteButtonVerifiedAsync` (the atomic button
+write), `DiscoverMiceAsync`, `RefreshNowWaitingAsync` and the `PreferredMouse` / `ConnectionId` /
+`ConnectedModel` pass-throughs — see "Connection selection & per-device state" above.
 
 ## Button remapping model (Phase B 2026-07-11, reworked v2.3 2026-07-19)
 
@@ -158,9 +302,12 @@ Phase B never-write-user-slots rule once byte-for-byte reads shipped — button-
 - The active slot is readable AND settable (`0x05/0x84`/`0x05/0x04` — the Profile card's
   ↻/dropdown); the mouse's bottom button (LED colour = slot: white/red/green/blue/cyan) remains
   the hardware fallback.
-- Write path is `AppHost.WriteBindingAsync` → `WriteVerifiedAsync` (per-chip instant apply):
-  resolve active slot → write → read-back verify; "Default" writes the factory action
-  (deterministic, the repair path).
+- Write path is `AppHost.WriteBindingAsync` → `BatteryMonitor.WriteButtonVerifiedAsync` (per-chip
+  instant apply): read active slot → write → read-back verify, **all inside one lock acquisition**
+  since 2026-08-19 so a reselect cannot land mid-write; "Default" writes the factory action
+  (deterministic, the repair path). The result also reports the connection id and model it ran
+  under, and `AppHost` treats a mid-write adoption or a pre-lock hop onto the other mouse as stale
+  rather than as a failed write.
 - Nothing is persisted app-side; the old adopt/seed machinery and the settings `ButtonBindings`
   table are retired (properties kept for JSON back-compat).
 
@@ -169,10 +316,14 @@ Phase B never-write-user-slots rule once byte-for-byte reads shipped — button-
 `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at `%APPDATA%\NagaBatteryTray\settings.json`
 (Roaming — **not** the install dir under `%LOCALAPPDATA%`); holds cadences, low-battery
 threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), the cached transaction id,
-app-side DPI presets, and app-side profile-slot names (`ProfileNames`, keyed by slot number — the
-firmware stores no names, so a rename is a dashboard label only). `ButtonBindings`/`OnboardSlot`
-survive as properties for JSON back-compat but are no longer read or written (v2.3 — the firmware
-holds bindings, the grid reads hardware). Corrupt file → silently resets to defaults.
+app-side DPI presets, `PreferredMouse` (which mouse to talk to; `null` = scan order, V3 first), and
+app-side profile-slot names. The firmware stores no names, so a rename is a dashboard label only.
+Names are keyed **per mouse** since 2026-08-19 (`ProfileNamesByMouse`, model display name → slot →
+name) — the old slot-only `ProfileNames` made the V2's "World of Warcraft" label the V3's slot 1
+too. `JsonSettingsStore` runs a one-time migration at load: non-empty `ProfileNames` with an empty
+`ProfileNamesByMouse` moves the legacy names under `"Naga V2 Pro"`, the only mouse that could have
+written them. `ProfileNames`/`ButtonBindings`/`OnboardSlot` survive as properties for JSON
+back-compat but are no longer read or written. Corrupt file → silently resets to defaults.
 
 ## UI shell (`Ui/`)
 
@@ -230,6 +381,18 @@ Replaces the deleted `SettingsWindow`/`SettingsViewModel`/`ButtonRowViewModel`.
 - `DashboardWindow` — a WPF-UI `FluentWindow` shell; releases on close (the monitor's
   `StateChanged` subscription is removed and the field nulled, same release-on-close discipline
   the old Settings window had).
+- **Header mouse selector** (2026-08-19) — the model-name `TextBlock` is now a `ComboBox` over
+  `DashboardViewModel.Mice`, filled by the reachability probe on open/refresh. It is enabled by
+  `CanPickMouse` (`Mice.Count > 1`), **not** by whether the probe has landed: with one entry it
+  reads exactly like the label it replaced, and gating on the probe greyed the app's primary
+  identity element on every open. A probe that finds nothing keeps the connected model in the box
+  rather than emptying it. Two-way binding is guarded like the profile dropdown — programmatic
+  syncs run under `_syncingMouse`, so only a USER pick raises `MouseSelectRequested` → save
+  `PreferredMouse` → lock-waiting refresh → reload battery, DPI, profile card and grid. A failed
+  pick snaps back via `ResyncMouse`. `ApplyState` also resyncs, so an unannounced hop cannot leave
+  the box naming one mouse over another mouse's battery and profile card. Profile-slot names are
+  read and written per connected model (`ProfileNamesByMouse`); an unknown model gets its own empty
+  map rather than sharing another mouse's.
 - `MouseStageView` — the stage is the user's **product render** of the thumb panel
   (`Assets/naga-thumb.png`, a csproj `<Resource>`; grayscale blank-key AI edit of the real photo,
   decoded at `DecodePixelWidth=560` ≈ 2 MB only while the dashboard is open) clipped to

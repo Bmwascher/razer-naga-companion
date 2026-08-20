@@ -14,7 +14,7 @@
 
 <br/>
 
-<img src="docs/images/dashboard.png" width="85%" alt="The dashboard: instant-apply remap chips around the thumb grid, a DPI card with segmented presets and click-to-type readout, and the onboard-profile card (Ultraviolet theme)"/>
+<img src="docs/images/dashboard.png" width="85%" alt="The dashboard: a mouse selector in the header, instant-apply remap chips around the thumb grid, a DPI card with segmented presets and click-to-type readout, and the onboard-profile card (Ultraviolet theme)"/>
 
 </div>
 
@@ -32,7 +32,8 @@ directly over HID with no Synapse, no driver, and no admin rights.
 > verified.
 
 Supported mice: Razer Naga V2 Pro (wired 0x00A7 / wireless 0x00A8) and Razer Naga V3 Pro
-(wired 0x00E7 / wireless 0x00E8) — auto-detected, model name shown in the dashboard.
+(wired 0x00E7 / wireless 0x00E8) — auto-detected. Own both? The dashboard header lists whichever
+are actually awake and lets you pick; the app remembers the choice and returns to it on its own.
 
 ---
 
@@ -59,9 +60,15 @@ Supported mice: Razer Naga V2 Pro (wired 0x00A7 / wireless 0x00A8) and Razer Nag
   onboard slot back from the hardware. Bindings survive power-cycles and reboots with **no
   software running at all**.
 - 🗂️ **Onboard profile switching** — see and switch the mouse's active onboard slot (1–5)
-  from the dashboard, with each slot's LED colour and your own rename labels. *(The
-  active-slot read/set protocol isn't in openrazer or any public reference — it was found
-  by this project's own hardware probe sweep.)*
+  from the dashboard, with each slot's LED colour and your own rename labels (kept per
+  mouse, so your V2's names never label your V3's slots). *(The active-slot read/set
+  protocol isn't in openrazer or any public reference — it was found by this project's own
+  hardware probe sweep.)*
+- 🖲️ **Two mice, one app** — a selector in the dashboard header lists every supported mouse
+  that's actually awake and lets you choose which one the app drives. The pick sticks, and
+  if that mouse drops off and comes back the app returns to it by itself, on the battery
+  poll it already runs. Nothing one mouse knows — active slot, DPI, profile names, button
+  chips — is ever shown or written for the other.
 - 🔔 **Low-battery toast** — a native Windows notification when you drop to/below your
   threshold (default 15%) while on battery.
 - ⚡ **Charging aware** — polls faster while charging (15 s vs 60 s), suppresses nagging
@@ -203,7 +210,10 @@ flowchart LR
   `CreateFile` + `HidD_SetFeature` / `HidD_GetFeature` (the feature report lives on the
   OS-owned mouse collection, which a normal HID stream can't open), probes transaction
   ids and caches the one that works, picks whichever interface is live (wired or wireless),
-  and reads/writes the active DPI.
+  and reads/writes the active DPI. Which *mouse* it picks is decided one layer down, by
+  `MouseConnection` + `ConnectionPolicy` over the `IControlCollection` Win32 seam: your
+  preferred model first, wired before wireless, and only the battery read is ever allowed to
+  switch a live connection to a different mouse.
 - **`Monitoring/BatteryMonitor.cs`** — polling timer + state machine (online/unknown,
   low-battery edge logic, staleness → unknown); also the DPI and button read/set
   pass-throughs (everything shares one lock — never two concurrent device exchanges).
@@ -254,6 +264,11 @@ Full design and implementation notes live in [`docs/superpowers/`](docs/superpow
 - [x] **Razer Naga V3 Pro support**: probed the V3 Pro on real hardware with the existing
       `--probe*` suite, confirmed full protocol parity (battery, DPI, button remap, profiles),
       and the device layer now auto-detects either model.
+- [x] **Mouse selector + per-device state isolation**: pick which mouse the app drives from the
+      dashboard header (the list only offers mice that are actually awake), the choice persists,
+      and the app finds its way back to it on its own. Underneath, nothing cached for one mouse
+      can leak onto the other — which is what removed the "Not applied" chips and the red
+      "Synapse action (0x02)" seen in V3 Pro acceptance testing.
 - [ ] **DPI stages + polling rate**: program the onboard 5-stage DPI table (+ stage
       up/down) and the polling rate — the preset row likely becomes the onboard stage table.
 - [ ] **Lighting**: thumb-grid / scroll-wheel zone effects + brightness, theme-sync
