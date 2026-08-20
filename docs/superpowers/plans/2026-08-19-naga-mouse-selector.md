@@ -25,6 +25,17 @@
 
 ---
 
+## Execution order
+
+Tasks run in the order they appear here, and that order is not the numbering's original one. The
+product owner gated everything behind the connection restructure (Tasks 3 and 3b), so only its
+genuine prerequisite runs first: Task 2's protocol helpers, which `MouseConnection` calls. The
+settings work is unrelated to the restructure and moved behind it as Task 3c, keeping its original
+content. Labels were left alone so the debate record and the cross-references in each task's
+Interfaces block keep pointing at the same work.
+
+---
+
 ## File Structure
 
 | File | Responsibility |
@@ -46,168 +57,6 @@
 | `src/NagaBatteryTray/Ui/Dashboard/DashboardViewModel.cs` | `Mice`, `SelectedMouse`, per-mouse names, new-mouse reset |
 | `src/NagaBatteryTray/Ui/Dashboard/DashboardWindow.xaml(.cs)` | header ComboBox |
 | `tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs` | implement the two new interface members |
-
----
-
-## Task 1: Settings — preference, per-mouse profile names, migration
-
-**Files:**
-- Modify: `src/NagaBatteryTray/Settings/AppSettings.cs`
-- Modify: `src/NagaBatteryTray/Settings/JsonSettingsStore.cs`
-- Test: `tests/NagaBatteryTray.Tests/SettingsMigrationTests.cs` (create)
-
-**Interfaces:**
-- Consumes: nothing.
-- Produces: `AppSettings.PreferredMouse` (`string?`), `AppSettings.ProfileNamesByMouse` (`Dictionary<string, Dictionary<byte, string>>`). Later tasks read both.
-
-- [ ] **Step 1: Write the failing tests**
-
-Create `tests/NagaBatteryTray.Tests/SettingsMigrationTests.cs`:
-
-```csharp
-using System.Text.Json;
-using NagaBatteryTray.Settings;
-
-public sealed class SettingsMigrationTests
-{
-    private static string WriteTemp(string json)
-    {
-        string path = Path.Combine(Path.GetTempPath(), $"naga-settings-{Guid.NewGuid():N}.json");
-        File.WriteAllText(path, json);
-        return path;
-    }
-
-    [Fact]
-    public void LegacyProfileNamesMigrateToTheV2()
-    {
-        string path = WriteTemp("""{"ProfileNames":{"1":"World of Warcraft"}}""");
-        var store = new JsonSettingsStore(path);
-
-        Assert.Equal("World of Warcraft", store.Settings.ProfileNamesByMouse["Naga V2 Pro"][1]);
-        Assert.Empty(store.Settings.ProfileNames);
-    }
-
-    [Fact]
-    public void MigrationDoesNotOverwriteExistingPerMouseNames()
-    {
-        string path = WriteTemp("""
-            {"ProfileNames":{"1":"Legacy"},"ProfileNamesByMouse":{"Naga V3 Pro":{"1":"Kept"}}}
-            """);
-        var store = new JsonSettingsStore(path);
-
-        Assert.Equal("Kept", store.Settings.ProfileNamesByMouse["Naga V3 Pro"][1]);
-        Assert.False(store.Settings.ProfileNamesByMouse.ContainsKey("Naga V2 Pro"));
-    }
-
-    [Fact]
-    public void PreferredMouseDefaultsToNullAndRoundTrips()
-    {
-        string path = WriteTemp("{}");
-        var store = new JsonSettingsStore(path);
-        Assert.Null(store.Settings.PreferredMouse);
-
-        store.Settings.PreferredMouse = "Naga V3 Pro";
-        store.Save();
-
-        var reloaded = new JsonSettingsStore(path);
-        Assert.Equal("Naga V3 Pro", reloaded.Settings.PreferredMouse);
-    }
-
-    [Fact]
-    public void PerMouseNamesRoundTrip()
-    {
-        string path = WriteTemp("{}");
-        var store = new JsonSettingsStore(path);
-        store.Settings.ProfileNamesByMouse["Naga V3 Pro"] = new Dictionary<byte, string> { [2] = "Raid" };
-        store.Save();
-
-        var reloaded = new JsonSettingsStore(path);
-        Assert.Equal("Raid", reloaded.Settings.ProfileNamesByMouse["Naga V3 Pro"][2]);
-    }
-}
-```
-
-- [ ] **Step 2: Run the tests and confirm they fail**
-
-Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~SettingsMigrationTests"`
-Expected: compile error — `ProfileNamesByMouse` and `PreferredMouse` do not exist.
-
-- [ ] **Step 3: Add the settings fields**
-
-In `AppSettings.cs`, replace the `ProfileNames` block with:
-
-```csharp
-    /// <summary>Retired (2026-08-19): profile names are per-mouse now (ProfileNamesByMouse) — a slot
-    /// number means a different slot on a different model. Kept only so older settings.json files
-    /// round-trip; migrated once at load, then never read or written.</summary>
-    public Dictionary<byte, string> ProfileNames { get; set; } = new();
-
-    /// <summary>App-side labels for onboard profile slots, keyed by mouse display name
-    /// (RazerProtocol.SupportedMice) then slot number (1..5). The firmware stores no names — a slot
-    /// is a number + LED colour — so these exist only in the dashboard's Profile card.</summary>
-    public Dictionary<string, Dictionary<byte, string>> ProfileNamesByMouse { get; set; } = new();
-
-    /// <summary>Which mouse the app should talk to, as a RazerProtocol.SupportedMice display name.
-    /// Null (the default) means "use scan order", which already prefers the newest model. An unknown
-    /// name behaves as null (spec 2026-08-19 §4.1).</summary>
-    public string? PreferredMouse { get; set; } = null;
-```
-
-- [ ] **Step 4: Add the migration**
-
-In `JsonSettingsStore.cs`, add the call at the end of both constructor branches, then the method. The constructor becomes:
-
-```csharp
-    public JsonSettingsStore(string path)
-    {
-        _path = path;
-        if (File.Exists(_path))
-        {
-            try
-            {
-                Settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_path)) ?? new AppSettings();
-            }
-            catch
-            {
-                Settings = new AppSettings(); // corrupt file -> defaults
-            }
-            MigrateProfileNames();
-        }
-        else
-        {
-            Settings = new AppSettings();
-            Save();
-        }
-    }
-
-    /// <summary>One-time move of slot-keyed profile names under the only mouse that could have
-    /// written them. Per-mouse names ship with the 2026-08-19 selector change, so a file carrying
-    /// legacy names predates dual support and belongs to the V2 Pro (spec §4.9).</summary>
-    private void MigrateProfileNames()
-    {
-        if (Settings.ProfileNames.Count == 0 || Settings.ProfileNamesByMouse.Count > 0) return;
-        Settings.ProfileNamesByMouse["Naga V2 Pro"] = new Dictionary<byte, string>(Settings.ProfileNames);
-        Settings.ProfileNames.Clear();
-        Save();
-    }
-```
-
-- [ ] **Step 5: Run the tests and confirm they pass**
-
-Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~SettingsMigrationTests"`
-Expected: 4 passing.
-
-- [ ] **Step 6: Run the whole suite**
-
-Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
-Expected: all green. `DashboardViewModel` still compiles because it reads `source.ProfileNames`, which still exists (Task 6 moves it).
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/NagaBatteryTray/Settings tests/NagaBatteryTray.Tests/SettingsMigrationTests.cs
-git commit -m "feat(settings): preferred mouse + per-mouse profile names with one-time migration"
-```
 
 ---
 
@@ -501,6 +350,12 @@ internal interface IControlCollection : IDisposable
     /// <summary>USB product id this collection was opened from; identifies model and link.</summary>
     int Pid { get; }
 
+    /// <summary>False once a feature call has failed or the collection has been disposed. Callers
+    /// check it before every exchange, exactly as the old code checked its handle for null: a failed
+    /// HID call means the collection is finished, and probing it further is wasted Win32 calls on a
+    /// dead handle that can also make an intermittent failure look like a working candidate.</summary>
+    bool IsOpen { get; }
+
     /// <summary>HidD_SetFeature. False = the call failed and this collection is finished.</summary>
     bool SetFeature(byte[] buffer);
 
@@ -550,14 +405,26 @@ internal sealed class HidControlCollection : IControlCollection
     internal HidControlCollection(int pid, SafeFileHandle handle) { Pid = pid; _handle = handle; }
 
     public int Pid { get; }
-    public bool SetFeature(byte[] buffer) => HidD_SetFeature(_handle, buffer, buffer.Length);
-    public bool GetFeature(byte[] buffer) => HidD_GetFeature(_handle, buffer, buffer.Length);
-    public void Dispose() => _handle.Dispose();
+    public bool IsOpen { get; private set; } = true;
 
+    public bool SetFeature(byte[] buffer) => Feature(HidD_SetFeature(_handle, buffer, buffer.Length));
+    public bool GetFeature(byte[] buffer) => Feature(HidD_GetFeature(_handle, buffer, buffer.Length));
+
+    private bool Feature(bool ok)
+    {
+        if (!ok) IsOpen = false;
+        return ok;
+    }
+
+    public void Dispose() { IsOpen = false; _handle.Dispose(); }
+
+    // the marshalling attributes are load-bearing: they define the native success/failure boundary
     [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
     private static extern bool HidD_SetFeature(SafeFileHandle h, byte[] buffer, int length);
 
     [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
     private static extern bool HidD_GetFeature(SafeFileHandle h, byte[] buffer, int length);
 }
 
@@ -604,9 +471,26 @@ public sealed class FakeControlCollectionSource : IControlCollectionSource
         public FakeCollection(int pid) => Pid = pid;
         public int Pid { get; }
         public bool Disposed { get; private set; }
-        public bool SetFeature(byte[] buffer) => true;
-        public bool GetFeature(byte[] buffer) => true;
-        public void Dispose() => Disposed = true;
+        public bool IsOpen { get; private set; } = true;
+
+        /// <summary>When true every feature call fails and closes the collection, like a dead handle.</summary>
+        public bool FailFeature { get; set; }
+
+        /// <summary>How many feature calls this collection actually received.</summary>
+        public int FeatureCalls { get; private set; }
+
+        public bool SetFeature(byte[] buffer) => Feature();
+        public bool GetFeature(byte[] buffer) => Feature();
+
+        private bool Feature()
+        {
+            FeatureCalls++;
+            if (!FailFeature) return true;
+            IsOpen = false;
+            return false;
+        }
+
+        public void Dispose() { Disposed = true; IsOpen = false; }
     }
 
     /// <summary>PIDs present on the machine. Order here does not matter: Open honours the caller's.</summary>
@@ -614,6 +498,9 @@ public sealed class FakeControlCollectionSource : IControlCollectionSource
 
     /// <summary>PIDs whose collection verifies (i.e. the mouse is awake and answering).</summary>
     public HashSet<int> Answering { get; } = new();
+
+    /// <summary>PIDs whose collection fails every feature call, standing in for a dead handle.</summary>
+    public HashSet<int> FeatureFailing { get; } = new();
 
     /// <summary>Thrown from Open when set, to exercise the rollback path.</summary>
     public Exception? ThrowOnOpen { get; set; }
@@ -628,7 +515,7 @@ public sealed class FakeControlCollectionSource : IControlCollectionSource
         {
             if (!Present.Contains(pid)) continue;
             OpenedPidOrder.Add(pid);
-            var c = new FakeCollection(pid);
+            var c = new FakeCollection(pid) { FailFeature = FeatureFailing.Contains(pid) };
             Handed.Add(c);
             yield return c;
         }
@@ -643,7 +530,10 @@ using NagaBatteryTray.Hid;
 
 public sealed class MouseConnectionTests
 {
-    private const int V3Wired = 0x00E7, V3Wireless = 0x00E8, V2Wired = 0x0085, V2Wireless = 0x0086;
+    // never retype these: the V2's are 0x00A7/0x00A8, and a wrong literal makes every scenario below
+    // silently unreachable through ScanPidsFor
+    private const int V3Wired = RazerProtocol.MousePidV3Wired, V3Wireless = RazerProtocol.MousePidV3Wireless;
+    private const int V2Wired = RazerProtocol.MousePidWired, V2Wireless = RazerProtocol.MousePidWireless;
 
     private static MouseConnection Build(FakeControlCollectionSource source, Func<int, bool>? answers = null)
     {
@@ -771,12 +661,12 @@ public sealed class MouseConnectionTests
     {
         var source = new FakeControlCollectionSource();
         source.Present.Add(V2Wireless); source.Answering.Add(V2Wireless);
-        source.Present.Add(V3Wireless); source.Answering.Add(V3Wireless);
         var conn = new MouseConnection(source, (c, ct) =>
             c.Pid == V3Wireless ? Task.FromCanceled<byte>(new CancellationToken(true)) : Task.FromResult((byte)0x1f));
         conn.PreferredModel = "Naga V3 Pro";
-        await conn.EnsureAsync(CancellationToken.None);
+        await conn.EnsureAsync(CancellationToken.None);   // adopts the V2 while the V3 is absent
         var live = source.Handed.Single(c => c.Pid == V2Wireless);
+        source.Present.Add(V3Wireless);                  // only now can the hop be attempted, and cancel
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => conn.EnsureAsync(CancellationToken.None, reselect: true));
@@ -1128,10 +1018,21 @@ In `RazerDevice.cs`, delete the `_handle`, `_tid`, `_wired`, `_model` fields, th
 
 `ExchangeAsync`, `FastReadAsync`, `QueryAsync` and `ResolveTransactionIdAsync` take an `IControlCollection` instead of reading the field, and their bodies change only in how the bytes are handed over:
 
-- `if (_handle is null || _handle.IsInvalid) return null;` becomes nothing — the caller passes a live collection.
+- `if (_handle is null || _handle.IsInvalid) return null;` becomes `if (!collection.IsOpen) return null;` — the same guard, asked of the collection instead of the handle. Dropping it entirely would change behaviour: today a failed HID call nulls the handle and every later exchange returns immediately, so a dead collection receives no further Win32 calls.
 - `HidD_SetFeature(_handle, request, request.Length)` becomes `collection.SetFeature(request)`.
 - `HidD_GetFeature(_handle, reply, reply.Length)` becomes `collection.GetFeature(reply)`.
 - `CloseHandle()` on a failed call becomes `_conn.Close()`.
+
+`ResolveTransactionIdAsync` needs the same stop, and it is the one place where losing it would bite: it probes the transaction-id set in a loop, so on a dead collection it would keep calling into Windows and could accept a candidate after an intermittent failure. Add the check to its loop:
+
+```csharp
+        foreach (byte tid in RazerProtocol.TransactionIdProbeSet)
+        {
+            if (!collection.IsOpen) return 0;   // transport is gone; this candidate is finished
+            var value = await QueryAsync(collection, tid, RazerProtocol.CommandIdBattery, ct);
+            ...
+        }
+```
 
 Every public method gains the same two lines at the top of its `try`, replacing `byte tid = await EnsureConnectedAsync(ct);`:
 
@@ -1214,12 +1115,66 @@ with, beside `GetButtonCount`:
     public Action? BeforeGetButton { get; set; }
 ```
 
-- [ ] **Step 7: Run the whole suite**
+- [ ] **Step 7: Test the transport-loss path**
+
+This test only became possible with the seam, and it pins the one behaviour the move could quietly
+change. Create `tests/NagaBatteryTray.Tests/RazerDeviceTransportTests.cs`:
+
+```csharp
+using NagaBatteryTray.Hid;
+using NagaBatteryTray.Settings;
+
+public sealed class RazerDeviceTransportTests
+{
+    private static JsonSettingsStore FreshStore() =>   // no cached transaction id: probing must run
+        new(Path.Combine(Path.GetTempPath(), $"naga-{Guid.NewGuid():N}.json"));
+
+    [Fact]
+    public async Task ADeadCollectionIsNotProbedFurther()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(RazerProtocol.MousePidV3Wireless);
+        source.FeatureFailing.Add(RazerProtocol.MousePidV3Wireless);
+        using var device = new RazerDevice(FreshStore(), source);
+
+        var reading = await device.ReadAsync(CancellationToken.None);
+
+        Assert.False(reading.IsPresent);
+        var dead = source.Handed.Single();
+        Assert.Equal(1, dead.FeatureCalls);   // one failed call, then no more Win32 on a dead handle
+        Assert.True(dead.Disposed);
+    }
+
+    [Fact]
+    public async Task AWorkingCollectionIsReportedWithItsModelAndLink()
+    {
+        var source = new FakeControlCollectionSource();
+        source.Present.Add(RazerProtocol.MousePidV3Wired);
+        source.Answering.Add(RazerProtocol.MousePidV3Wired);
+        using var device = new RazerDevice(FreshStore(), source);
+
+        // the fake's feature calls succeed but return an all-zero buffer, so the reading is not
+        // present; what this asserts is that the collection was adopted rather than discarded
+        await device.ReadAsync(CancellationToken.None);
+
+        Assert.Equal(1, device.ConnectionId);
+    }
+}
+```
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~RazerDeviceTransportTests"`
+Expected: 2 passing. If the second fails because the fake's zero-filled reply cannot verify a
+candidate, extend `FakeControlCollectionSource` so an answering collection writes a plausible reply
+(status `0x02`, the request's class/cmd echoed, a battery byte) rather than leaving the buffer as it
+found it — and say so in the commit message, because it changes what "answering" means for every
+test above.
+
+- [ ] **Step 8: Run the whole suite**
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
 Expected: all green.
 
-- [ ] **Step 8: Verify on hardware before going further**
+- [ ] **Step 9: Verify on hardware before going further**
 
 This task rewrote the transport's plumbing, so prove it against a real mouse before any UI work builds on it. With the V3 connected, run the probe suite from a fresh build and confirm each still reports what it did before:
 
@@ -1229,11 +1184,173 @@ This task rewrote the transport's plumbing, so prove it against a real mouse bef
 
 then run `--probe`, `--probe-dpi`, `--probe-buttons` and `--probe-profile` against the built binary. A difference in any of them means the plumbing move changed behaviour and must be fixed here, not later.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add src/NagaBatteryTray/Hid tests/NagaBatteryTray.Tests/Fakes/FakeRazerDevice.cs
+git add src/NagaBatteryTray/Hid tests/NagaBatteryTray.Tests
 git commit -m "refactor(hid): RazerDevice drives MouseConnection; protocol unchanged"
+```
+
+---
+
+## Task 3c: Settings — preference, per-mouse profile names, migration
+
+**Files:**
+- Modify: `src/NagaBatteryTray/Settings/AppSettings.cs`
+- Modify: `src/NagaBatteryTray/Settings/JsonSettingsStore.cs`
+- Test: `tests/NagaBatteryTray.Tests/SettingsMigrationTests.cs` (create)
+
+**Interfaces:**
+- Consumes: nothing. Placed after the restructure because the product owner gated everything behind it; it has no dependency on Tasks 2, 3 or 3b.
+- Produces: `AppSettings.PreferredMouse` (`string?`), `AppSettings.ProfileNamesByMouse` (`Dictionary<string, Dictionary<byte, string>>`). Later tasks read both.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `tests/NagaBatteryTray.Tests/SettingsMigrationTests.cs`:
+
+```csharp
+using System.Text.Json;
+using NagaBatteryTray.Settings;
+
+public sealed class SettingsMigrationTests
+{
+    private static string WriteTemp(string json)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"naga-settings-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, json);
+        return path;
+    }
+
+    [Fact]
+    public void LegacyProfileNamesMigrateToTheV2()
+    {
+        string path = WriteTemp("""{"ProfileNames":{"1":"World of Warcraft"}}""");
+        var store = new JsonSettingsStore(path);
+
+        Assert.Equal("World of Warcraft", store.Settings.ProfileNamesByMouse["Naga V2 Pro"][1]);
+        Assert.Empty(store.Settings.ProfileNames);
+    }
+
+    [Fact]
+    public void MigrationDoesNotOverwriteExistingPerMouseNames()
+    {
+        string path = WriteTemp("""
+            {"ProfileNames":{"1":"Legacy"},"ProfileNamesByMouse":{"Naga V3 Pro":{"1":"Kept"}}}
+            """);
+        var store = new JsonSettingsStore(path);
+
+        Assert.Equal("Kept", store.Settings.ProfileNamesByMouse["Naga V3 Pro"][1]);
+        Assert.False(store.Settings.ProfileNamesByMouse.ContainsKey("Naga V2 Pro"));
+    }
+
+    [Fact]
+    public void PreferredMouseDefaultsToNullAndRoundTrips()
+    {
+        string path = WriteTemp("{}");
+        var store = new JsonSettingsStore(path);
+        Assert.Null(store.Settings.PreferredMouse);
+
+        store.Settings.PreferredMouse = "Naga V3 Pro";
+        store.Save();
+
+        var reloaded = new JsonSettingsStore(path);
+        Assert.Equal("Naga V3 Pro", reloaded.Settings.PreferredMouse);
+    }
+
+    [Fact]
+    public void PerMouseNamesRoundTrip()
+    {
+        string path = WriteTemp("{}");
+        var store = new JsonSettingsStore(path);
+        store.Settings.ProfileNamesByMouse["Naga V3 Pro"] = new Dictionary<byte, string> { [2] = "Raid" };
+        store.Save();
+
+        var reloaded = new JsonSettingsStore(path);
+        Assert.Equal("Raid", reloaded.Settings.ProfileNamesByMouse["Naga V3 Pro"][2]);
+    }
+}
+```
+
+- [ ] **Step 2: Run the tests and confirm they fail**
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~SettingsMigrationTests"`
+Expected: compile error — `ProfileNamesByMouse` and `PreferredMouse` do not exist.
+
+- [ ] **Step 3: Add the settings fields**
+
+In `AppSettings.cs`, replace the `ProfileNames` block with:
+
+```csharp
+    /// <summary>Retired (2026-08-19): profile names are per-mouse now (ProfileNamesByMouse) — a slot
+    /// number means a different slot on a different model. Kept only so older settings.json files
+    /// round-trip; migrated once at load, then never read or written.</summary>
+    public Dictionary<byte, string> ProfileNames { get; set; } = new();
+
+    /// <summary>App-side labels for onboard profile slots, keyed by mouse display name
+    /// (RazerProtocol.SupportedMice) then slot number (1..5). The firmware stores no names — a slot
+    /// is a number + LED colour — so these exist only in the dashboard's Profile card.</summary>
+    public Dictionary<string, Dictionary<byte, string>> ProfileNamesByMouse { get; set; } = new();
+
+    /// <summary>Which mouse the app should talk to, as a RazerProtocol.SupportedMice display name.
+    /// Null (the default) means "use scan order", which already prefers the newest model. An unknown
+    /// name behaves as null (spec 2026-08-19 §4.1).</summary>
+    public string? PreferredMouse { get; set; } = null;
+```
+
+- [ ] **Step 4: Add the migration**
+
+In `JsonSettingsStore.cs`, add the call at the end of both constructor branches, then the method. The constructor becomes:
+
+```csharp
+    public JsonSettingsStore(string path)
+    {
+        _path = path;
+        if (File.Exists(_path))
+        {
+            try
+            {
+                Settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_path)) ?? new AppSettings();
+            }
+            catch
+            {
+                Settings = new AppSettings(); // corrupt file -> defaults
+            }
+            MigrateProfileNames();
+        }
+        else
+        {
+            Settings = new AppSettings();
+            Save();
+        }
+    }
+
+    /// <summary>One-time move of slot-keyed profile names under the only mouse that could have
+    /// written them. Per-mouse names ship with the 2026-08-19 selector change, so a file carrying
+    /// legacy names predates dual support and belongs to the V2 Pro (spec §4.9).</summary>
+    private void MigrateProfileNames()
+    {
+        if (Settings.ProfileNames.Count == 0 || Settings.ProfileNamesByMouse.Count > 0) return;
+        Settings.ProfileNamesByMouse["Naga V2 Pro"] = new Dictionary<byte, string>(Settings.ProfileNames);
+        Settings.ProfileNames.Clear();
+        Save();
+    }
+```
+
+- [ ] **Step 5: Run the tests and confirm they pass**
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~SettingsMigrationTests"`
+Expected: 4 passing.
+
+- [ ] **Step 6: Run the whole suite**
+
+Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test`
+Expected: all green. `DashboardViewModel` still compiles because it reads `source.ProfileNames`, which still exists (Task 6 moves it).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/NagaBatteryTray/Settings tests/NagaBatteryTray.Tests/SettingsMigrationTests.cs
+git commit -m "feat(settings): preferred mouse + per-mouse profile names with one-time migration"
 ```
 
 ---
@@ -1745,7 +1862,7 @@ git commit -m "feat(monitoring): per-mouse state cache that clears on a model ch
 - Modify: `src/NagaBatteryTray/AppHost.cs` (`Start`, `RefreshProfileAsync`, `ResolveWriteSlotAsync`, `WriteVerifiedAsync`, the `_lastActive` field)
 
 **Interfaces:**
-- Consumes: `DeviceScopedState` (Task 5), `BatteryMonitor.PreferredMouse` (Task 4), `AppSettings.PreferredMouse` (Task 1).
+- Consumes: `DeviceScopedState` (Task 5), `BatteryMonitor.PreferredMouse` (Task 4), `AppSettings.PreferredMouse` (Task 3c).
 - Produces: `AppHost.OnDeviceStateChanged(DeviceState)`, and `_scoped` replacing `_lastActive`. Task 7 calls into the same handler for the selector.
 
 No new unit tests: `AppHost` constructs WPF windows and is outside the suite by design (hard rule 6). Its logic now lives in `DeviceScopedState`, which Task 5 covers.
@@ -1948,7 +2065,7 @@ git commit -m "feat(host): scope cached slot state to the connected mouse, guard
 - Test: `tests/NagaBatteryTray.Tests/CalloutDisplayTests.cs` (create if absent, else append)
 
 **Interfaces:**
-- Consumes: `BatteryMonitor.DiscoverMiceAsync`, `BatteryMonitor.PreferredMouse` (Task 4); `AppSettings.ProfileNamesByMouse` (Task 1); `DeviceScopedState` (Tasks 5, 6).
+- Consumes: `BatteryMonitor.DiscoverMiceAsync`, `BatteryMonitor.PreferredMouse` (Task 4); `AppSettings.ProfileNamesByMouse` (Task 3c); `DeviceScopedState` (Tasks 5, 6).
 - Produces: `DashboardViewModel.Mice`, `.SelectedMouse`, `.MiceLoaded`, `.MouseSelectRequested`, `.SetMice(...)`, `.ResetForNewMouse()`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2517,3 +2634,19 @@ exception and on cancellation, plus wrong-loser disposal and the `ConnectionId` 
 
 Because this rewrites plumbing the hardware depends on, Task 3b ends with a probe-suite run against
 a real mouse before any UI work builds on it.
+
+### Round 5 — reviewer verdict FIX, five findings on the restructure
+
+Authorized by the product owner beyond the declared budget, specifically to check the change the
+session had argued against. It found five defects, every one confirmed against the repo:
+
+| Finding | Adjudication | Where it landed |
+| --- | --- | --- |
+| The state-machine tests declared the V2's PIDs as `0x0085`/`0x0086`; they are `0x00A7`/`0x00A8`, so most scenarios were unreachable and the suite could not pass | Accepted | tests now use the `RazerProtocol` constants |
+| `ACancelledHopKeepsTheLiveConnection` had the V3 present from the start, so the injected cancellation fired during the FIRST `EnsureAsync` and the test never established the connection it asserts about | Accepted | the V3 appears only after the V2 is adopted |
+| The executable order still ran settings and protocol work before the restructure the owner gated everything behind | Accepted | settings moved behind it as Task 3c; only Task 2, a real prerequisite, runs first |
+| `[return: MarshalAs(UnmanagedType.U1)]` was dropped from the moved P/Invoke declarations, changing the native success boundary on a "verbatim" move | Accepted | both attributes restored, with a comment saying they are load-bearing |
+| Transport loss changed behaviour: today a failed HID call nulls the handle so nothing probes it again, but a candidate is not owned by the connection yet, so tid probing would keep calling into a dead collection | Accepted | `IControlCollection.IsOpen`, checked by every exchange and by the tid probe loop, plus a new `RazerDeviceTransportTests` asserting exactly one feature call reaches a dead collection |
+
+The last one is the clearest argument for the restructure the session opposed: it is a real
+behavioural regression in the move, and the seam is what makes the test for it possible at all.
