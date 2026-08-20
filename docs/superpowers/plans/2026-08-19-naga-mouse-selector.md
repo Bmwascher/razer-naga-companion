@@ -463,10 +463,13 @@ Create `tests/NagaBatteryTray.Tests/Fakes/FakeControlCollectionSource.cs`:
 using NagaBatteryTray.Hid;
 
 /// <summary>A scriptable stand-in for the Windows HID layer: which PIDs exist, which of them answer,
-/// and which blow up. Records every collection it hands out so a test can assert disposal.</summary>
-public sealed class FakeControlCollectionSource : IControlCollectionSource
+/// and which blow up. Records every collection it hands out so a test can assert disposal.
+/// <para>internal, not public: it implements the internal IControlCollectionSource, and a public type
+/// cannot implement a less accessible interface. The test project reaches it through
+/// InternalsVisibleTo, same as every other internal it touches.</para></summary>
+internal sealed class FakeControlCollectionSource : IControlCollectionSource
 {
-    public sealed class FakeCollection : IControlCollection
+    internal sealed class FakeCollection : IControlCollection
     {
         public FakeCollection(int pid) => Pid = pid;
         public int Pid { get; }
@@ -479,8 +482,40 @@ public sealed class FakeControlCollectionSource : IControlCollectionSource
         /// <summary>How many feature calls this collection actually received.</summary>
         public int FeatureCalls { get; private set; }
 
-        public bool SetFeature(byte[] buffer) => Feature();
-        public bool GetFeature(byte[] buffer) => Feature();
+        /// <summary>True for a collection whose mouse is awake: its replies parse.</summary>
+        public bool Answers { get; set; }
+
+        private byte[] _lastRequest = Array.Empty<byte>();
+
+        public bool SetFeature(byte[] buffer)
+        {
+            if (!Feature()) return false;
+            _lastRequest = (byte[])buffer.Clone();
+            return true;
+        }
+
+        public bool GetFeature(byte[] buffer)
+        {
+            if (!Feature()) return false;
+            if (!Answers) return true;   // leaves the buffer as it found it: nothing will parse
+            WriteCompletedReply(buffer);
+            return true;
+        }
+
+        /// <summary>Echo the request back as a completed reply the production parsers accept: status
+        /// 0x02, the class/cmd echo they check, a mid-scale data byte, and a valid CRC. A zero-filled
+        /// buffer parses as nothing, so without this an "answering" collection can never be adopted.</summary>
+        private void WriteCompletedReply(byte[] buffer)
+        {
+            Array.Copy(_lastRequest, buffer, Math.Min(_lastRequest.Length, buffer.Length));
+            buffer[1] = 0x02;    // status: command completed
+            buffer[10] = 0x80;   // ~50% for a power query; harmless filler for other classes
+
+            var report = new byte[RazerProtocol.ReportLength];
+            Array.Copy(buffer, 1, report, 0, RazerProtocol.ReportLength);
+            report[88] = RazerProtocol.ComputeCrc(report);
+            Array.Copy(report, 0, buffer, 1, RazerProtocol.ReportLength);
+        }
 
         private bool Feature()
         {
@@ -515,7 +550,11 @@ public sealed class FakeControlCollectionSource : IControlCollectionSource
         {
             if (!Present.Contains(pid)) continue;
             OpenedPidOrder.Add(pid);
-            var c = new FakeCollection(pid) { FailFeature = FeatureFailing.Contains(pid) };
+            var c = new FakeCollection(pid)
+            {
+                FailFeature = FeatureFailing.Contains(pid),
+                Answers = Answering.Contains(pid),
+            };
             Handed.Add(c);
             yield return c;
         }
@@ -1153,21 +1192,36 @@ public sealed class RazerDeviceTransportTests
         source.Answering.Add(RazerProtocol.MousePidV3Wired);
         using var device = new RazerDevice(FreshStore(), source);
 
-        // the fake's feature calls succeed but return an all-zero buffer, so the reading is not
-        // present; what this asserts is that the collection was adopted rather than discarded
-        await device.ReadAsync(CancellationToken.None);
+        var reading = await device.ReadAsync(CancellationToken.None);
 
+        Assert.True(reading.IsPresent);
+        Assert.Equal("Naga V3 Pro", reading.Model);
+        Assert.True(reading.IsWired);
         Assert.Equal(1, device.ConnectionId);
+    }
+
+    [Fact]
+    public async Task ThePreferredMouseIsAdoptedThroughTheRealDevice()
+    {
+        var source = new FakeControlCollectionSource();
+        foreach (int pid in new[] { RazerProtocol.MousePidWireless, RazerProtocol.MousePidV3Wireless })
+        {
+            source.Present.Add(pid);
+            source.Answering.Add(pid);
+        }
+        using var device = new RazerDevice(FreshStore(), source) { PreferredModel = "Naga V2 Pro" };
+
+        var reading = await device.ReadAsync(CancellationToken.None);
+
+        Assert.Equal("Naga V2 Pro", reading.Model);
     }
 }
 ```
 
 Run: `& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test --filter "FullyQualifiedName~RazerDeviceTransportTests"`
-Expected: 2 passing. If the second fails because the fake's zero-filled reply cannot verify a
-candidate, extend `FakeControlCollectionSource` so an answering collection writes a plausible reply
-(status `0x02`, the request's class/cmd echoed, a battery byte) rather than leaving the buffer as it
-found it — and say so in the commit message, because it changes what "answering" means for every
-test above.
+Expected: 3 passing. `Answers` is what makes this work: an answering fake collection echoes the
+request back as a completed reply with a valid CRC, because the production parsers reject a
+zero-filled buffer and no candidate could ever be adopted.
 
 - [ ] **Step 8: Run the whole suite**
 
@@ -2650,3 +2704,10 @@ session had argued against. It found five defects, every one confirmed against t
 
 The last one is the clearest argument for the restructure the session opposed: it is a real
 behavioural regression in the move, and the seam is what makes the test for it possible at all.
+
+### Round 6 — four PASS, two more findings, both in the session's own new test code
+
+| Finding | Adjudication | Where it landed |
+| --- | --- | --- |
+| `FakeControlCollectionSource` was declared public while implementing the internal `IControlCollectionSource`, so the test project would not compile | Accepted | the fake and its nested collection are internal, reached through `InternalsVisibleTo` |
+| `AWorkingCollectionIsReportedWithItsModelAndLink` assumed a zero-filled reply could verify a candidate, but the production parsers require status `0x02` and a valid CRC, so it could never pass | Accepted | the fake gained `Answers`, echoing the request back as a completed reply with a real CRC; the test now asserts `IsPresent`, `Model` and `IsWired` as well, and a third case covers preference through the real device |
