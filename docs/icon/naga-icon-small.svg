@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Razer Naga Companion">
+  <title>Razer Naga Companion (small sizes)</title>
+
+  <!-- The 16, 20 and 24 px entries. The seam and the twelve keys are sub-pixel here and go, which
+       leaves the silhouette doing all the work - so it is drawn HARDER than the master's, not
+       softer. The top slant is steeper, the bottom finishes on an actual corner rather than a
+       smooth curve, and the body is narrower, because a smooth oval is what this shape collapses
+       into otherwise. Be honest about the limit: inside a 20-unit ring, a 16 px icon leaves about
+       nine pixels of interior, and no mouse is legible in nine pixels. What survives down there is
+       the arc; this shape is what keeps 24 and 32 from being a bare ring. -->
+
+  <defs>
+    <radialGradient id="coinS" cx="0.25" cy="0" r="1.25">
+      <stop offset="0"   stop-color="#1A1C21"/>
+      <stop offset="0.6" stop-color="#0E0F12"/>
+      <stop offset="1"   stop-color="#090A0C"/>
+    </radialGradient>
+    <linearGradient id="arcS" x1="0.5" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DEB6D"/>
+      <stop offset="1" stop-color="#36C021"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="128" cy="128" r="126" fill="url(#coinS)"/>
+
+  <circle cx="128" cy="128" r="100" fill="none" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="20"/>
+  <path d="M 128 28 A 100 100 0 1 1 31.4 153.9"
+        fill="none" stroke="url(#arcS)" stroke-width="20" stroke-linecap="round"/>
+
+  <path d="M 99 84
+           C 100 77, 102 73, 106 71
+           L 137 57
+           C 145 54, 153 58, 155 66
+           C 162 83, 169 104, 170 127
+           C 171 143, 168 155, 163 166
+           C 157 179, 149 190, 141 198
+           C 134 204, 127 207, 121 207
+           C 115 206, 110 201, 106 194
+           C 99 181, 95 162, 93 143
+           C 92 129, 92 115, 94 105
+           C 95 95, 97 88, 99 84 Z"
+        fill="#FFFFFF" fill-opacity="0.88"/>
+
+</svg>
