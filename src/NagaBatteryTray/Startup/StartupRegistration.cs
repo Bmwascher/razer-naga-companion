@@ -31,7 +31,9 @@ public sealed class StartupRegistration
 
     public void Enable()
     {
-        var tmp = Path.Combine(Path.GetTempPath(), $"naga-task-{Guid.NewGuid():N}.xml");
+        string tempDirectory = Path.GetTempPath();
+        Directory.CreateDirectory(tempDirectory);
+        var tmp = Path.Combine(tempDirectory, $"naga-task-{Guid.NewGuid():N}.xml");
         // schtasks /XML requires a UTF-16 file matching the prolog's encoding declaration.
         File.WriteAllText(tmp, BuildTaskXml(), Encoding.Unicode);
         try

@@ -40,7 +40,7 @@
           <TextBlock Style="{DynamicResource BodyText}" Text="Run at startup" VerticalAlignment="Center"/>
           <ui:ToggleSwitch DockPanel.Dock="Right" HorizontalAlignment="Right"
                            IsChecked="{Binding RunAtStartup, Mode=TwoWay}"
-                           Checked="OnStartupToggled" Unchecked="OnStartupToggled"/>
+                           Click="OnStartupToggled"/>
         </DockPanel>
         <DockPanel Margin="0,6">
           <TextBlock Style="{DynamicResource BodyText}" Text="Low-battery alert at (%)" VerticalAlignment="Center"/>

@@ -52,7 +52,8 @@ public sealed class DashboardViewModel : ObservableObject
         _pollSeconds = _seededPollSeconds = source.PollIntervalSeconds;
         _pollChargingSeconds = _seededPollChargingSeconds = source.PollIntervalChargingSeconds;
         _theme = source.Theme;
-        _profileNames = new Dictionary<byte, string>(source.ProfileNames);
+        foreach (var (mouse, names) in source.ProfileNamesByMouse)
+            _namesByMouse[mouse] = new Dictionary<byte, string>(names);
 
         // chips start on the factory display and adopt hardware truth when the first sweep
         // lands (~1 s; spec §13.2 — the settings table no longer seeds or records bindings)
@@ -69,6 +70,9 @@ public sealed class DashboardViewModel : ObservableObject
 
         Presets = new ObservableCollection<DpiPresetItem>();
         foreach (int v in source.DpiPresets.Distinct().OrderBy(v => v)) Presets.Add(new DpiPresetItem(v));
+        // the box is only pickable once there is a second mouse to pick, and the list is the only
+        // thing that decides that — so CanPickMouse rides the collection itself, not each writer
+        Mice.CollectionChanged += (_, _) => Notify(nameof(CanPickMouse));
         RefreshProfileDetail();
     }
 
@@ -82,19 +86,28 @@ public sealed class DashboardViewModel : ObservableObject
     private bool _anyCapturing;
 
     /// <summary>Settings-overlay "Reset all to factory": Default-write every grid button in position
-    /// order via each chip's own instant-apply pipeline, counting verified successes (Status ==
-    /// "Applied") vs failures — so the caller can report a countable outcome instead of silence
-    /// while the several seconds of HID I/O run behind the overlay/scrim.</summary>
-    public async Task<(int Ok, int Failed)> ResetAllAsync()
+    /// order via each chip's own instant-apply pipeline, counting verified successes vs failures — so
+    /// the caller can report a countable outcome instead of silence while the several seconds of HID
+    /// I/O run behind the overlay/scrim.
+    /// <para>Skipped &gt; 0 means the run ABORTED partway because the mouse changed underneath it; the
+    /// caller must say so rather than report a tally as if the whole grid had been attempted.</para></summary>
+    public async Task<(int Ok, int Failed, int Skipped)> ResetAllAsync()
     {
         int ok = 0, failed = 0;
-        foreach (var c in Callouts)
+        for (int i = 0; i < Callouts.Count; i++)
         {
             // count the write's own verdict, not the display Status string — a busy chip's
             // in-flight write would otherwise leave a stale "Applied"/"Writing…" miscount
-            if (await c.DefaultAsync()) ok++; else failed++;
+            var outcome = await Callouts[i].DefaultAsync();
+            // A refused write ABORTS the run, it does not merely score zero. By the time the refusal
+            // is reported the host has already cleared the scoped state, so the expected model is
+            // null again — and a null expectation is deliberately permissive. Carrying on would
+            // therefore write factory defaults onto the mouse that was just adopted, one button at a
+            // time, with every later write reported as applied (review find).
+            if (outcome == WriteOutcome.MouseChanged) return (ok, failed, Callouts.Count - i);
+            if (outcome == WriteOutcome.Applied) ok++; else failed++;
         }
-        return (ok, failed);
+        return (ok, failed, 0);
     }
 
     // ---- header ----
@@ -113,6 +126,16 @@ public sealed class DashboardViewModel : ObservableObject
         HeaderSubtitle = !DeviceOnline ? "offline" : s.Wired ? "Wired" : "Wireless";
         BatteryChipText = DeviceOnline ? $"{s.Percent}%{(s.Charging ? " ⚡" : "")}" : "—";
         ModelName = s.Model ?? "Razer Naga";
+        _namesKey = ModelName;
+        // The box IS the header's model indicator now, so it has to follow the mouse actually
+        // connected — before the probe lands (it reads like the label it replaced) and after an
+        // unannounced hop (otherwise it says "Naga V3 Pro" over the V2's battery and profile card,
+        // and re-picking the displayed value is a no-op, so the user cannot even correct it).
+        if (s.Model is { } connected && !string.Equals(SelectedMouse, connected, StringComparison.Ordinal))
+        {
+            if (!Mice.Contains(connected)) Mice.Add(connected);
+            SyncSelectedMouse(connected);
+        }
     }
 
     internal static string SlotColour(int slot) => slot switch
@@ -209,6 +232,76 @@ public sealed class DashboardViewModel : ObservableObject
         CanSavePreset = DevicePresent && !Presets.Any(p => p.Value == Dpi);
     }
 
+    // ---- header: mouse selector (spec 2026-08-19 §4.5) ----
+
+    /// <summary>Mice that answered the reachability probe, in SupportedMice order. Only reachable
+    /// mice are listed, so a sleeping mouse never appears (user decision, 2026-08-19).</summary>
+    public ObservableCollection<string> Mice { get; } = new();
+
+    /// <summary>Drives the header ComboBox's IsEnabled. One entry is nothing to pick between, so the
+    /// box reads as the model label it replaced — including before the probe lands, where binding
+    /// enablement to "has the probe run" greyed the app's primary identity element on every open.
+    /// It becomes a real selector the moment a second reachable mouse is listed.</summary>
+    public bool CanPickMouse => Mice.Count > 1;
+
+    public event Action<string>? MouseSelectRequested;
+
+    /// <summary>Two-way ComboBox binding, same guard as the profile dropdown: programmatic syncs run
+    /// under _syncingMouse, so only a USER pick raises MouseSelectRequested.</summary>
+    public string? SelectedMouse
+    {
+        get => _selectedMouse;
+        set
+        {
+            if (!Set(ref _selectedMouse, value)) return;
+            if (_syncingMouse || value is null) return;
+            // suppress a re-pick ONLY when it names the mouse the app is actually on. Offline, a
+            // re-pick of the displayed mouse IS the user's retry, so it must reach the host — and
+            // the rule may not lean on ModelName's offline fallback to make that happen: whether
+            // the monitor publishes a model with an offline state is the monitor's business, not
+            // this view model's (round-2 review).
+            if (DeviceOnline && string.Equals(value, ModelName, StringComparison.Ordinal)) return;
+            MouseSelectRequested?.Invoke(value);
+        }
+    }
+    private string? _selectedMouse;
+    private bool _syncingMouse;
+    private string? _lastSyncedMouse; // the last value the app itself put in the box — what a failed pick falls back to
+
+    /// <summary>Assign the box WITHOUT raising a pick, and record the value as one the app chose —
+    /// the fallback ResyncMouse snaps to when the connected model is unknown.</summary>
+    private void SyncSelectedMouse(string? value)
+    {
+        _syncingMouse = true;
+        try { SelectedMouse = value; }
+        finally { _syncingMouse = false; }
+        if (value is not null) _lastSyncedMouse = value;
+    }
+
+    /// <summary>Feed the header a fresh reachability probe plus the model actually connected.</summary>
+    public void SetMice(IReadOnlyList<string> mice, string? connected)
+    {
+        Mice.Clear();
+        foreach (var m in mice) Mice.Add(m);
+        // The connected mouse is always listed and always selected, whatever the probe returned —
+        // the same rule ApplyState follows. The probe and the connection are read at different
+        // moments and can disagree (a hop between the sweep and the dispatch), and a probe result
+        // that simply misses the connected mouse must not drop it from the list and leave the
+        // header naming nothing. A probe that found NOTHING is the same case.
+        if (connected is not null && !Mice.Contains(connected)) Mice.Add(connected);
+        // no connected mouse means the app is talking to nothing, and the box must not claim
+        // otherwise — showing the first probe hit as selected named a mouse we are not on
+        SyncSelectedMouse(connected);
+    }
+
+    /// <summary>Snap the dropdown back after a failed pick: to the mouse actually connected, or —
+    /// offline, where ModelName is the generic fallback and names no real mouse — to the last value
+    /// the app itself put there. The header must never go blank.</summary>
+    public void ResyncMouse() => SyncSelectedMouse(
+        Mice.Contains(ModelName) ? ModelName
+        : _lastSyncedMouse is { } last && Mice.Contains(last) ? last
+        : SelectedMouse);
+
     // ---- profile card: slot dropdown (spec §13.2 v2.3) ----
     private byte? _activeSlot; // last active-slot read (0x05/0x84); null = never known / currently unreachable
     private bool _profileChecked; // true once SetProfileInventory has run at least once
@@ -280,6 +373,26 @@ public sealed class DashboardViewModel : ObservableObject
     /// <summary>Transient card status ("Switching…", failure text) — detail line only.</summary>
     public void SetProfileNote(string note) => ProfileDetail = note;
 
+    /// <summary>The connected mouse changed: drop everything that described the old one. The profile
+    /// card, the DPI reading and every chip snapshot belong to one mouse and are meaningless on
+    /// another (spec §4.6). A fresh seed refills them.</summary>
+    public void ResetForNewMouse()
+    {
+        // a rename draft belongs to the OLD mouse's slot; carrying it across would land that name on
+        // whatever slot the new mouse selects. Holding by construction here, not by relying on the
+        // ComboBox nulling its selection when the items clear — that protection lives in the view.
+        CancelRename();
+        ProfileSlots.Clear();
+        _activeSlot = null;
+        SetProfileNote("");
+        _profileChecked = false; // nothing has been read from the NEW mouse yet, so the card is not
+                                 // entitled to call it unreachable until a read actually fails
+        RefreshProfileDetail();
+        SetCurrentDpi(null); // the old mouse's number must not stay on screen until the reseed lands
+        SetDpiStatus("");    // and neither must its verdict — "Couldn't confirm" was about that mouse
+        foreach (var c in Callouts) c.SetPending(); // also voids each chip's undo snapshot
+    }
+
     /// <summary>Snap the dropdown back to the last-known active slot after a failed switch —
     /// the dropdown never lies about where the mouse is.</summary>
     public void ResyncSelection() => SyncSelection();
@@ -300,7 +413,18 @@ public sealed class DashboardViewModel : ObservableObject
     }
 
     // ---- profile card: rename (dashboard-polish §5.4 — app-side label, the firmware has no names) ----
-    private readonly Dictionary<byte, string> _profileNames;
+    // profile names are per-mouse: slot 1 on a V2 is not slot 1 on a V3 (spec 2026-08-19 §4.9)
+    private readonly Dictionary<string, Dictionary<byte, string>> _namesByMouse = new();
+    private string _namesKey = "Razer Naga";
+    private Dictionary<byte, string> _profileNames
+    {
+        get
+        {
+            if (!_namesByMouse.TryGetValue(_namesKey, out var names))
+                _namesByMouse[_namesKey] = names = new Dictionary<byte, string>();
+            return names;
+        }
+    }
     internal const int MaxProfileNameLength = 24;
     public bool IsRenamingProfile { get => _isRenaming; private set => Set(ref _isRenaming, value); }
     private bool _isRenaming;
@@ -366,7 +490,9 @@ public sealed class DashboardViewModel : ObservableObject
             PollChargingSeconds == _seededPollChargingSeconds ? _seededPollChargingSeconds : Math.Max(15, PollChargingSeconds);
         target.Theme = Ui.ThemeManager.Resolve(Theme);
         target.DpiPresets = Presets.Select(p => p.Value).ToList();
-        target.ProfileNames = new Dictionary<byte, string>(_profileNames);
+        target.ProfileNamesByMouse = new Dictionary<string, Dictionary<byte, string>>();
+        foreach (var (mouse, names) in _namesByMouse)
+            if (names.Count > 0) target.ProfileNamesByMouse[mouse] = new Dictionary<byte, string>(names);
     }
 
 }

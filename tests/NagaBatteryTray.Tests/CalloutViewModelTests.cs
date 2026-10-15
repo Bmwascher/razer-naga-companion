@@ -8,12 +8,16 @@ public class CalloutViewModelTests
     {
         public readonly List<(int Pos, ButtonActionKind Kind, byte Mods, byte Usage)> Writes = new();
         public readonly List<(int Pos, RawButtonAction Raw)> RawWrites = new();
+        // the bools stay the ordinary applied/failed switch every existing test uses; Outcome is the
+        // opt-in override for the third case, a write REFUSED because the mouse changed
         public bool Result = true;
         public bool RawResult = true;
-        public Task<bool> Write(int p, ButtonActionKind k, byte m, byte u)
-        { Writes.Add((p, k, m, u)); return Task.FromResult(Result); }
-        public Task<bool> WriteRaw(int p, RawButtonAction raw)
-        { RawWrites.Add((p, raw)); return Task.FromResult(RawResult); }
+        public WriteOutcome? Outcome;
+        public WriteOutcome? RawOutcome;
+        public Task<WriteOutcome> Write(int p, ButtonActionKind k, byte m, byte u)
+        { Writes.Add((p, k, m, u)); return Task.FromResult(Outcome ?? (Result ? WriteOutcome.Applied : WriteOutcome.Failed)); }
+        public Task<WriteOutcome> WriteRaw(int p, RawButtonAction raw)
+        { RawWrites.Add((p, raw)); return Task.FromResult(RawOutcome ?? (RawResult ? WriteOutcome.Applied : WriteOutcome.Failed)); }
     }
 
     private static (CalloutViewModel vm, Recorder rec, TaskCompletionSource undo) NewVm(int pos = 1)
@@ -104,14 +108,14 @@ public class CalloutViewModelTests
     [Fact]
     public async Task Apply_shows_Writing_status_during_the_device_round_trip()
     {
-        var tcs = new TaskCompletionSource<bool>();
+        var tcs = new TaskCompletionSource<WriteOutcome>();
         var undo = new TaskCompletionSource();
-        var vm = new CalloutViewModel(1, (_, _, _, _) => tcs.Task, (_, _) => Task.FromResult(true), () => undo.Task);
+        var vm = new CalloutViewModel(1, (_, _, _, _) => tcs.Task, (_, _) => Task.FromResult(WriteOutcome.Applied), () => undo.Task);
 
         var apply = vm.CaptureAsync(0x00, 0x04); // A
         Assert.Equal("Writing…", vm.Status);
 
-        tcs.SetResult(true);
+        tcs.SetResult(WriteOutcome.Applied);
         await apply;
         Assert.Equal("Applied", vm.Status);
     }
@@ -119,15 +123,84 @@ public class CalloutViewModelTests
     [Fact]
     public async Task Apply_shows_Writing_status_then_failure_message()
     {
-        var tcs = new TaskCompletionSource<bool>();
-        var vm = new CalloutViewModel(1, (_, _, _, _) => tcs.Task, (_, _) => Task.FromResult(true));
+        var tcs = new TaskCompletionSource<WriteOutcome>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) => tcs.Task, (_, _) => Task.FromResult(WriteOutcome.Applied));
 
         var apply = vm.CaptureAsync(0x00, 0x04); // A
         Assert.Equal("Writing…", vm.Status);
 
-        tcs.SetResult(false);
+        tcs.SetResult(WriteOutcome.Failed);
         await apply;
         Assert.Contains("Not applied", vm.Status);
+    }
+
+    /// <summary>A refusal is not a failure. Nothing was written, the mouse is fine, and the dashboard
+    /// is already reseeding onto the mouse that IS there — so the chip must not go red and must not
+    /// tell the user to wiggle a working mouse.</summary>
+    [Fact]
+    public async Task A_refused_write_reads_as_a_mouse_change_not_a_failure()
+    {
+        var (vm, rec, _) = NewVm();
+        rec.Outcome = WriteOutcome.MouseChanged;
+
+        var outcome = await vm.DisableAsync();
+
+        Assert.Equal(WriteOutcome.MouseChanged, outcome);
+        Assert.Equal("Mouse changed — reloading", vm.Status);
+        Assert.DoesNotContain("wiggle", vm.Status);
+        Assert.False(vm.Failed);                 // no red failure state — nothing failed
+    }
+
+    /// <summary>The other refusal: the mouse's own inventory has no such slot, so nothing was written.
+    /// Nothing failed either, so the chip must not go red or send the user off to wiggle a working
+    /// mouse — and it must not borrow the mouse-changed words, because the mouse did not change.</summary>
+    [Fact]
+    public async Task A_missing_slot_reads_as_its_own_refusal_not_a_failure_or_a_mouse_change()
+    {
+        var (vm, rec, _) = NewVm();
+        rec.Outcome = WriteOutcome.SlotMissing;
+
+        var outcome = await vm.DisableAsync();
+
+        Assert.Equal(WriteOutcome.SlotMissing, outcome);
+        Assert.Equal("Not written — that slot isn't on this mouse", vm.Status);
+        Assert.DoesNotContain("wiggle", vm.Status);
+        Assert.DoesNotContain("Mouse changed", vm.Status);
+        Assert.False(vm.Failed);                 // no red failure state — nothing failed
+    }
+
+    /// <summary>And the undo path says the same thing. It must also NOT reopen the undo window: the
+    /// snapshot describes the mouse that left, so ↶ would write one mouse's raw bytes into another
+    /// (hard rule 2). An ordinary failure still reopens it — that difference is the point.</summary>
+    [Fact]
+    public async Task A_refused_undo_reads_as_a_mouse_change_and_does_not_re_arm()
+    {
+        var (vm, rec, _) = NewVm(2);
+        vm.SetFromDevice(Key(0x00, 0x3a));       // on-mouse: F1
+        await vm.CaptureAsync(0x01, 0x06);       // now Ctrl+C, undo window open
+        Assert.True(vm.CanUndo);
+
+        rec.RawOutcome = WriteOutcome.MouseChanged;
+        await vm.UndoAsync();
+
+        Assert.Equal("Mouse changed — reloading", vm.Status);
+        Assert.False(vm.Failed);
+        Assert.False(vm.CanUndo);                // not re-armed onto the mouse that is here now
+    }
+
+    [Fact]
+    public async Task A_failed_undo_still_reopens_the_window_so_the_snapshot_is_not_lost()
+    {
+        var (vm, rec, _) = NewVm(2);
+        vm.SetFromDevice(Key(0x00, 0x3a));
+        await vm.CaptureAsync(0x01, 0x06);
+
+        rec.RawResult = false;                   // a real, transient write failure
+        await vm.UndoAsync();
+
+        Assert.True(vm.Failed);
+        Assert.Contains("wiggle", vm.Status);
+        Assert.True(vm.CanUndo);                 // the restore is still offered
     }
 
     [Fact]
@@ -178,7 +251,7 @@ public class CalloutViewModelTests
     {
         var (vm, rec, _) = NewVm(5);
         await vm.DisableAsync();                 // Default -> Disabled: real write
-        Assert.True(await vm.DisableAsync());    // Disabled -> Disabled: verified no-op
+        Assert.Equal(WriteOutcome.Applied, await vm.DisableAsync()); // Disabled -> Disabled: verified no-op
         Assert.Single(rec.Writes);
         Assert.Equal("Applied", vm.Status);
     }
@@ -187,23 +260,23 @@ public class CalloutViewModelTests
     public async Task Default_is_exempt_from_noop_suppression_as_the_repair_path()
     {
         var (vm, rec, _) = NewVm(4);             // untouched chip is already "Default"
-        Assert.True(await vm.DefaultAsync());
+        Assert.Equal(WriteOutcome.Applied, await vm.DefaultAsync());
         Assert.Single(rec.Writes);               // still writes the factory action
     }
 
     [Fact]
     public async Task Undo_clicked_while_another_write_is_in_flight_is_not_consumed()
     {
-        var writes = new List<TaskCompletionSource<bool>>();
+        var writes = new List<TaskCompletionSource<WriteOutcome>>();
         var raws = new List<(int, RawButtonAction)>();
         var vm = new CalloutViewModel(1, (_, _, _, _) =>
-        { var tcs = new TaskCompletionSource<bool>(); writes.Add(tcs); return tcs.Task; },
-        (p, r) => { raws.Add((p, r)); return Task.FromResult(true); },
+        { var tcs = new TaskCompletionSource<WriteOutcome>(); writes.Add(tcs); return tcs.Task; },
+        (p, r) => { raws.Add((p, r)); return Task.FromResult(WriteOutcome.Applied); },
         () => new TaskCompletionSource().Task);
         vm.SetFromDevice(Key(0x00, 0x1e));        // snapshot so the undo window opens
 
         var applyA = vm.CaptureAsync(0x00, 0x04); // A
-        writes[0].SetResult(true);
+        writes[0].SetResult(WriteOutcome.Applied);
         await applyA;
         Assert.True(vm.CanUndo);
 
@@ -213,22 +286,22 @@ public class CalloutViewModelTests
         Assert.Equal(2, writes.Count);            // A + B only
         Assert.Empty(raws);                       // no undo write happened
 
-        writes[1].SetResult(true);
+        writes[1].SetResult(WriteOutcome.Applied);
         await applyB;
     }
 
     [Fact]
-    public async Task Busy_chip_reports_false_so_reset_all_counts_it_failed()
+    public async Task Busy_chip_reports_Failed_so_reset_all_counts_it_failed()
     {
-        var writes = new List<TaskCompletionSource<bool>>();
+        var writes = new List<TaskCompletionSource<WriteOutcome>>();
         var vm = new CalloutViewModel(1, (_, _, _, _) =>
-        { var tcs = new TaskCompletionSource<bool>(); writes.Add(tcs); return tcs.Task; },
-        (_, _) => Task.FromResult(true));
+        { var tcs = new TaskCompletionSource<WriteOutcome>(); writes.Add(tcs); return tcs.Task; },
+        (_, _) => Task.FromResult(WriteOutcome.Applied));
 
         var inFlight = vm.DisableAsync();
-        Assert.False(await vm.DefaultAsync());    // busy-skip = not reset
+        Assert.Equal(WriteOutcome.Failed, await vm.DefaultAsync());  // busy-skip = not reset
 
-        writes[0].SetResult(true);
+        writes[0].SetResult(WriteOutcome.Applied);
         await inFlight;
     }
 
@@ -292,13 +365,9 @@ public class CalloutViewModelTests
         Assert.Equal("Synapse action (0x01)", vm.BindingTip);
     }
 
-    [Fact]
-    public void SetFromDevice_keyboard_with_wrong_length_falls_back_to_synapse_label()
-    {
-        var (vm, _, _) = NewVm(3);
-        vm.SetFromDevice(new RawButtonAction(0x02, new byte[] { 0x01 })); // truncated keyboard frame
-        Assert.Equal("Synapse action (0x02)", vm.BindingText);
-    }
+    // the one-byte category-0x02 reply is now the firmware's "nothing assigned" form, covered by
+    // CalloutDisplayTests.TheOneByteStubReadsAsNotSet; the category-0x01 test above still covers
+    // the genuine Synapse label.
 
     [Fact]
     public void SetFromDevice_null_shows_read_failed_with_explanatory_tooltip()
@@ -312,16 +381,16 @@ public class CalloutViewModelTests
     [Fact]
     public async Task Sweep_never_clobbers_a_busy_or_capturing_chip()
     {
-        var writes = new List<TaskCompletionSource<bool>>();
+        var writes = new List<TaskCompletionSource<WriteOutcome>>();
         var vm = new CalloutViewModel(1, (_, _, _, _) =>
-        { var tcs = new TaskCompletionSource<bool>(); writes.Add(tcs); return tcs.Task; },
-        (_, _) => Task.FromResult(true));
+        { var tcs = new TaskCompletionSource<WriteOutcome>(); writes.Add(tcs); return tcs.Task; },
+        (_, _) => Task.FromResult(WriteOutcome.Applied));
 
         var inFlight = vm.DisableAsync();          // busy
         vm.SetPending();
         vm.SetFromDevice(Key(0x00, 0x04));
         Assert.NotEqual("…", vm.BindingText);      // pending marker skipped
-        writes[0].SetResult(true);
+        writes[0].SetResult(WriteOutcome.Applied);
         await inFlight;
         Assert.Equal("Disabled", vm.BindingText);  // the edit won, not the stale sweep value
 
@@ -347,7 +416,7 @@ public class CalloutViewModelTests
         await vm.DisableAsync();                    // write 1: edit state = Disabled
         vm.SetFromDevice(new RawButtonAction(0x01, new byte[] { 0x01 })); // Synapse rebound it
 
-        Assert.True(await vm.DisableAsync());       // same as edit state, but the display disagrees
+        Assert.Equal(WriteOutcome.Applied, await vm.DisableAsync());       // same as edit state, but the display disagrees
         Assert.Equal(2, rec.Writes.Count);          // → must reach the mouse, not be suppressed
         Assert.Equal("Disabled", vm.BindingText);
     }
@@ -427,15 +496,15 @@ public class CalloutViewModelTests
     [Fact]
     public async Task A_sweep_starting_mid_write_prevents_arming_undo_from_the_old_slot()
     {
-        var writes = new List<TaskCompletionSource<bool>>();
+        var writes = new List<TaskCompletionSource<WriteOutcome>>();
         var vm = new CalloutViewModel(1, (_, _, _, _) =>
-        { var tcs = new TaskCompletionSource<bool>(); writes.Add(tcs); return tcs.Task; },
-        (_, _) => Task.FromResult(true), () => new TaskCompletionSource().Task);
+        { var tcs = new TaskCompletionSource<WriteOutcome>(); writes.Add(tcs); return tcs.Task; },
+        (_, _) => Task.FromResult(WriteOutcome.Applied), () => new TaskCompletionSource().Task);
         vm.SetFromDevice(Key(0x00, 0x1e));       // old slot's raw known
 
         var apply = vm.DisableAsync();           // write in flight
         vm.SetPending();                         // slot switch mid-write (busy → display skip, undo expiry still applies)
-        writes[0].SetResult(true);
+        writes[0].SetResult(WriteOutcome.Applied);
         await apply;
 
         Assert.False(vm.CanUndo);                // pre-switch snapshot must not arm undo
@@ -473,16 +542,16 @@ public class CalloutViewModelTests
     [Fact]
     public async Task Raw_undo_superseded_mid_flight_does_not_repaint_or_repopulate()
     {
-        var rawWrites = new List<TaskCompletionSource<bool>>();
-        var vm = new CalloutViewModel(1, (_, _, _, _) => Task.FromResult(true),
-            (_, _) => { var t = new TaskCompletionSource<bool>(); rawWrites.Add(t); return t.Task; },
+        var rawWrites = new List<TaskCompletionSource<WriteOutcome>>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) => Task.FromResult(WriteOutcome.Applied),
+            (_, _) => { var t = new TaskCompletionSource<WriteOutcome>(); rawWrites.Add(t); return t.Task; },
             () => new TaskCompletionSource().Task);
         vm.SetFromDevice(Key(0x00, 0x3a));       // F1 on slot A
         await vm.CaptureAsync(0x00, 0x04);       // now "A"
 
         var undo = vm.UndoAsync();               // raw restore in flight
         vm.SetPending();                         // slot switch mid-restore (busy → display skip)
-        rawWrites[0].SetResult(true);
+        rawWrites[0].SetResult(WriteOutcome.Applied);
         await undo;
 
         Assert.NotEqual("F1", vm.BindingText);   // no stale repaint of slot A's raw
@@ -493,16 +562,16 @@ public class CalloutViewModelTests
     [Fact]
     public async Task Failed_undo_superseded_mid_flight_does_not_reopen_the_window()
     {
-        var rawWrites = new List<TaskCompletionSource<bool>>();
-        var vm = new CalloutViewModel(1, (_, _, _, _) => Task.FromResult(true),
-            (_, _) => { var t = new TaskCompletionSource<bool>(); rawWrites.Add(t); return t.Task; },
+        var rawWrites = new List<TaskCompletionSource<WriteOutcome>>();
+        var vm = new CalloutViewModel(1, (_, _, _, _) => Task.FromResult(WriteOutcome.Applied),
+            (_, _) => { var t = new TaskCompletionSource<WriteOutcome>(); rawWrites.Add(t); return t.Task; },
             () => new TaskCompletionSource().Task);
         vm.SetFromDevice(Key(0x00, 0x3a));
         await vm.CaptureAsync(0x00, 0x04);
 
         var undo = vm.UndoAsync();
         vm.SetPending();                         // superseded mid-restore
-        rawWrites[0].SetResult(false);           // ...and the restore failed
+        rawWrites[0].SetResult(WriteOutcome.Failed);           // ...and the restore failed
         await undo;
 
         Assert.False(vm.CanUndo);                // a voided snapshot must not be re-armed

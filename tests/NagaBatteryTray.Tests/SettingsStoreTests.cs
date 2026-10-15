@@ -142,7 +142,7 @@ public class SettingsStoreTests
     }
 
     [Fact]
-    public void ProfileNames_round_trip_through_save_and_reload()
+    public void ProfileNames_migrate_to_the_V2_on_reload()
     {
         var path = TempFile();
         var store = new JsonSettingsStore(path);
@@ -151,8 +151,11 @@ public class SettingsStoreTests
         store.Save();
 
         var reloaded = new JsonSettingsStore(path);
-        Assert.Equal(2, reloaded.Settings.ProfileNames.Count);
-        Assert.Equal("Work", reloaded.Settings.ProfileNames[2]);
-        Assert.Equal("MMO night", reloaded.Settings.ProfileNames[5]);
+
+        // slot numbers mean different slots on different mice, so a legacy name belongs to the only
+        // mouse that could have written it (spec §4.9)
+        Assert.Empty(reloaded.Settings.ProfileNames);
+        Assert.Equal("Work", reloaded.Settings.ProfileNamesByMouse["Naga V2 Pro"][2]);
+        Assert.Equal("MMO night", reloaded.Settings.ProfileNamesByMouse["Naga V2 Pro"][5]);
     }
 }

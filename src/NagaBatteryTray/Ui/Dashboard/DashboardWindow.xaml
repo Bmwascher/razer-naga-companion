@@ -18,7 +18,15 @@
         <StackPanel Orientation="Horizontal">
           <Ellipse Width="9" Height="9" VerticalAlignment="Center" x:Name="StatusDot"/>
           <StackPanel Margin="10,0,0,0">
-            <TextBlock Style="{DynamicResource BodyText}" FontSize="14" FontWeight="SemiBold" Text="{Binding ModelName}"/>
+            <!-- the header's identity element: it must carry the model label's own typography
+                 (BodyText targets TextBlock, so the setters are applied here directly), and it
+                 stays enabled-looking until there is a second mouse to pick — see CanPickMouse -->
+            <ComboBox MinWidth="160" ItemsSource="{Binding Mice}"
+                      SelectedItem="{Binding SelectedMouse, Mode=TwoWay}"
+                      IsEnabled="{Binding CanPickMouse}"
+                      FontSize="14" FontWeight="SemiBold"
+                      Foreground="{DynamicResource App.TextPrimary}"
+                      ToolTip="Which mouse this app is controlling"/>
             <TextBlock Style="{DynamicResource SubtleText}" Text="{Binding HeaderSubtitle}"/>
           </StackPanel>
         </StackPanel>

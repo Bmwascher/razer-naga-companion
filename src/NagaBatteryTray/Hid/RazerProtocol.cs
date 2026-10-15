@@ -28,6 +28,53 @@ public static class RazerProtocol
     public static int[] ScanPids { get; } =
         { MousePidV3Wired, MousePidWired, MousePidV3Wireless, MousePidWireless };
 
+    /// <summary>Index of a model in SupportedMice by display name, or -1. Case-insensitive because
+    /// the name round-trips through settings.json.</summary>
+    private static int IndexOfModel(string? displayName)
+    {
+        if (displayName is null) return -1;
+        for (int i = 0; i < SupportedMice.Length; i++)
+            if (string.Equals(SupportedMice[i].DisplayName, displayName, StringComparison.OrdinalIgnoreCase))
+                return i;
+        return -1;
+    }
+
+    /// <summary>The two PIDs of one model, wired first. Empty when the name is null or unknown.</summary>
+    public static int[] PidsForModel(string? displayName)
+    {
+        int i = IndexOfModel(displayName);
+        return i < 0 ? Array.Empty<int>() : new[] { SupportedMice[i].WiredPid, SupportedMice[i].WirelessPid };
+    }
+
+    /// <summary>The canonical display name for a model name that came from settings, or null when it
+    /// names no supported mouse. An unknown preference must behave EXACTLY like no preference
+    /// (spec §4.1), and normalizing once at the boundary is what makes that true everywhere.</summary>
+    public static string? NormalizeModelName(string? displayName)
+    {
+        int i = IndexOfModel(displayName);
+        return i < 0 ? null : SupportedMice[i].DisplayName;
+    }
+
+    /// <summary>Scan order under a user preference (spec 2026-08-19 §4.2): the preferred model's
+    /// wired then wireless PID, then every other model's wired PIDs, then their wireless ones. The
+    /// wired-before-wireless rule still holds within each model — a cabled mouse must beat a
+    /// still-plugged receiver that can no longer reach it. Null or unknown = ScanPids unchanged.</summary>
+    public static int[] ScanPidsFor(string? preferredModel)
+    {
+        int p = IndexOfModel(preferredModel);
+        if (p < 0) return ScanPids;
+
+        var order = new int[SupportedMice.Length * 2];
+        int n = 0;
+        order[n++] = SupportedMice[p].WiredPid;
+        order[n++] = SupportedMice[p].WirelessPid;
+        for (int i = 0; i < SupportedMice.Length; i++)
+            if (i != p) order[n++] = SupportedMice[i].WiredPid;
+        for (int i = 0; i < SupportedMice.Length; i++)
+            if (i != p) order[n++] = SupportedMice[i].WirelessPid;
+        return order;
+    }
+
     public static bool IsWiredPid(int pid)
     {
         foreach (var m in SupportedMice) if (m.WiredPid == pid) return true;
@@ -296,6 +343,30 @@ public static class RazerProtocol
             throw new ArgumentOutOfRangeException(nameof(commandId), "get-half ids only (>= 0x80): the profile probe is read-only by construction");
         if (args.Length > 80) throw new ArgumentOutOfRangeException(nameof(args));
         return BuildReport(transactionId, dataSize, CommandClassProfile, commandId, args);
+    }
+
+    /// <summary>Is this reply the ANSWER to this request, or should the caller poll again? This is
+    /// what makes polling a feature report early SAFE: a premature GET sees the device buffer still
+    /// holding our own request echo (status 0x00), a busy marker (0x01), or the PREVIOUS command's
+    /// finished reply - and all three are reported as "not ready" rather than parsed as data.
+    /// <para>Readiness is a completed status PLUS the reply echoing our class and cmd
+    /// (buffer[7]/[8]); hardware confirms the echo (--probe-dpi, 2026-10-15, echoed on both an awake
+    /// and an asleep mouse). echoArgBytes extends the check over the request's leading arg bytes
+    /// (buffer[9..]) for requests whose args ARE echoed rather than replaced by reply data: a button
+    /// read echoes profile/buttonId/hypershift, so a stale finished reply from the previous button
+    /// in a 12-read sweep is caught. Pass 0 where the reply overwrites those bytes with data -
+    /// power queries carry no args, and a DPI/list/active reply puts data there.</para>
+    /// <para>It lives here, not in the transport, because --probe-latency measures the device's
+    /// turnaround against this exact predicate and the fast-read rungs are tuned to that
+    /// measurement. Two copies meant a change to one silently invalidated the other
+    /// (Fable diff r1, F8).</para></summary>
+    public static bool IsReplyReady(byte[] request, byte[] reply, int echoArgBytes = 0)
+    {
+        if (reply[1] is 0x00 or 0x01) return false;
+        if (reply[7] != request[7] || reply[8] != request[8]) return false;
+        for (int i = 0; i < echoArgBytes; i++)
+            if (reply[9 + i] != request[9 + i]) return false;
+        return true;
     }
 
     /// <summary>Validates a 91-byte reply: status byte then XOR CRC over buffer[3..88] vs buffer[89].</summary>

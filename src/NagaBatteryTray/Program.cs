@@ -39,6 +39,12 @@ internal static class Program
                 : Diagnostics.ProbeCommand.RunButtons();
         }
 
+        if (args.Length > 0 && args[0] == "--probe-latency")
+        {
+            AllocConsoleIfNeeded();
+            return Diagnostics.ProbeCommand.RunLatency();
+        }
+
         if (args.Length > 0 && args[0] == "--probe-profile")
         {
             AllocConsoleIfNeeded();

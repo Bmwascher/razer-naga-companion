@@ -43,7 +43,7 @@ public class DpiPillInteractionTests
         { Source = new Uri("pack://application:,,,/NagaBatteryTray;component/Ui/Themes/Porcelain.xaml") });
 
         var vm = new DashboardViewModel(new AppSettings(), runAtStartup: false,
-            (p, k, m, u) => Task.FromResult(true), (p, r) => Task.FromResult(true));
+            (p, k, m, u) => Task.FromResult(WriteOutcome.Applied), (p, r) => Task.FromResult(WriteOutcome.Applied));
         vm.ApplyState(DeviceState.Online(48, charging: false, wired: false));
         vm.SetCurrentDpi(new DpiSetting(1600, 1600));
         vm.AddPreset(1100); // the user's scenario: a freshly saved preset, then its ✕

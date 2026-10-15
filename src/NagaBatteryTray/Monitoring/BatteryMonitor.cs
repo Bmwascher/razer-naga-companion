@@ -121,9 +121,156 @@ public sealed class BatteryMonitor : IDisposable
         finally { _readLock.Release(); }
     }
 
-    private async Task PollAsync(bool reconnect = false)
+    /// <summary>Outcome of one atomic button write. Slot is the slot actually used (null = it could
+    /// not be established). ConnectionChanged = the mouse underneath changed between the entry id
+    /// (see below) and the id observed just before returning, so the caller must re-seed rather than
+    /// trust anything it cached. Connection is the id the operation actually ran under - the final id
+    /// observed inside the lock, equal to the entry id whenever nothing was adopted.
+    /// <para>ConnectionChanged only covers the interval inside THIS lock acquisition; it cannot see a
+    /// hop that landed before the lock was taken. A caller holding an undo snapshot must instead
+    /// compare Connection against the id its snapshot was taken under - that catches a pre-lock hop
+    /// too, which ConnectionChanged alone would miss.</para>
+    /// <para>Model is the connected MODEL the operation ran under, captured at entry inside the lock.
+    /// It is the identity a caller compares ACROSS TIME (is this undo snapshot still about the mouse
+    /// in front of me), because Connection increases on every adoption including a reconnect to the
+    /// same mouse - comparing ids across time reds a landed write over an unrelated USB event
+    /// (spec 4.10 point 3).</para>
+    /// <para>Refused = the expected mouse was not the mouse answering, so NOTHING was written. It is
+    /// stated outright rather than left to be inferred from Model, because the caller's copy of the
+    /// expectation can be cleared by an unrelated model-change handler between issuing the write and
+    /// reading this result - and a refusal that then reads as an ordinary failure tells the user to
+    /// retry on a mouse that is working perfectly.</para>
+    /// <para>SlotMissing = the known inventory does not list the active slot, so NOTHING was written.
+    /// Like Refused it is stated outright, and for the same reason: nothing failed and nothing
+    /// landed, so the caller must not show the retry-and-wiggle copy. It is NOT a mouse change -
+    /// the mouse in front of the user is the one that was asked, it simply has no such slot.</para></summary>
+    public readonly record struct ButtonWriteResult(
+        bool Verified, byte? Slot, bool ConnectionChanged, int Connection, string? Model,
+        bool Refused = false, bool SlotMissing = false);
+
+    /// <summary>Read the active slot, write, and read back to verify - all inside ONE read-lock
+    /// acquisition. Split across three acquisitions (as it was before 2026-08-19) a reselect can land
+    /// between the resolve and the write, and one mouse's slot number gets written to another;
+    /// clearing a cache cannot undo that, because the slot is already a local (spec 4.10).
+    /// <para>The slot is ALWAYS read here rather than taken from the caller's cache. That is what makes
+    /// the target belong to the mouse being written to: the read forces any pending reconnect to happen
+    /// BEFORE a slot is committed to, at the cost of one extra device read per write. A failed read
+    /// fails the write - writing a cached slot to a mouse we could not interrogate is the whole
+    /// defect.</para>
+    /// <para>createdSlots null = inventory unknown, which never blocks; a known inventory that lacks
+    /// the slot refuses before any write.</para>
+    /// <para>expectedModel is the mouse the CALLER's cache and undo snapshots describe. A non-null
+    /// value that does not match the model observed inside the lock refuses before any device call:
+    /// the bytes would otherwise land on the other mouse and only THEN be reported wrong, which is
+    /// no protection at all for a raw undo restore (hard rule 2, spec §4.10 points 3-4). Refusing on
+    /// the MODEL cannot fire on an ordinary same-model reconnect - that is why the id may not be
+    /// used here. Null expectedModel never blocks, the same rule the unknown-inventory case follows:
+    /// nothing was seeded, so there is no snapshot to protect. The comparison is made TWICE, once on
+    /// each side of the slot read, because that read is itself a device call that can adopt the other
+    /// mouse - a single check before it guarantees nothing about the mouse the write lands on.</para>
+    /// <para>On the path where the lock was never entered (the WaitAsync failure) Connection is a
+    /// best-effort read of whatever mouse is current, tied to nothing this operation did; Verified is
+    /// false there, so no caller acts on it.</para></summary>
+    public async Task<ButtonWriteResult> WriteButtonVerifiedAsync(
+        byte[]? createdSlots, string? expectedModel, byte buttonId, byte category, byte[] data)
     {
-        if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return new(false, null, false, _device.ConnectionId, _device.ConnectedModel); }
+
+        // captured BEFORE the slot read, because the slot read is itself the device call that can
+        // trigger a reconnect: a dropped handle re-scans on the next call, possibly onto a different
+        // mouse, and that can happen even when the read then fails to parse. Every return path below
+        // reports ConnectionChanged against THIS id, never a later one, so an adoption that happens
+        // during a failed slot read is never reported as "connection unchanged".
+        // The model is captured in the same breath, and is what the caller compares across time.
+        int entry = _device.ConnectionId;
+        string? entryModel = _device.ConnectedModel;
+        try
+        {
+            // The identity check runs HERE, before the first device call, because a check after the
+            // write only reports damage already done. A hop that landed before this lock was taken
+            // means the caller's snapshots describe the other mouse, so nothing may be written at
+            // all. Inside the try so the lock is still released on the refusal path.
+            if (expectedModel is { } want && !string.Equals(entryModel, want, StringComparison.Ordinal))
+                return new(false, null, false, entry, entryModel, Refused: true);
+            if (await _device.GetActiveProfileAsync(_cts.Token) is not { } slot)
+                return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, entryModel);
+            // ...and AGAIN, because the check above cannot cover the read that has just run. The slot
+            // read is the device call that forces a pending reconnect, and a reconnect can adopt the
+            // OTHER mouse; without this second look the bytes still land there and only the
+            // ConnectionChanged flag reports it afterwards - a verdict, not a protection. Asking the
+            // same question one call later, still inside the lock and still before SetButtonAsync,
+            // costs nothing and closes it. The displacing model is reported, not the entry one, so
+            // the caller is told which mouse it is really on.
+            if (expectedModel is { } still && !string.Equals(_device.ConnectedModel, still, StringComparison.Ordinal))
+                return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, _device.ConnectedModel, Refused: true);
+            if (createdSlots is not null && Array.IndexOf(createdSlots, slot) < 0)
+                return new(false, slot, _device.ConnectionId != entry, _device.ConnectionId, entryModel, SlotMissing: true);
+
+            bool ok = await _device.SetButtonAsync(slot, buttonId, category, data, _cts.Token);
+            if (ok)
+            {
+                var readBack = await _device.GetButtonAsync(slot, buttonId, _cts.Token);
+                ok = readBack is { } r && r.Category == category && r.Data.AsSpan().SequenceEqual(data);
+            }
+            bool changed = _device.ConnectionId != entry;
+            return new(ok && !changed, slot, changed, _device.ConnectionId, entryModel);
+        }
+        catch (OperationCanceledException) { return new(false, null, _device.ConnectionId != entry, _device.ConnectionId, entryModel); }
+        finally { _readLock.Release(); }
+    }
+
+    /// <summary>Which mouse the app should talk to (spec 2026-08-19 §4.1). Set-only plumbing: the
+    /// device acts on it at its next battery read, so this never blocks and never takes the lock.</summary>
+    public string? PreferredMouse
+    {
+        get => _device.PreferredModel;
+        set => _device.PreferredModel = value;
+    }
+
+    /// <summary>Which mouse the app is talking to right now, as an identity that changes on every
+    /// adoption (spec §4.10). Callers capture it before a multi-step operation and discard results
+    /// whose id no longer matches.</summary>
+    public int ConnectionId => _device.ConnectionId;
+
+    /// <summary>Which mouse the app is talking to, by MODEL — the identity to compare ACROSS TIME
+    /// (spec §4.10 point 3). Plain read, no lock, like <see cref="ConnectionId"/>.</summary>
+    public string? ConnectedModel => _device.ConnectedModel;
+
+    /// <summary>Which supported mice answer right now, for the dashboard's selector. Blocks for the
+    /// read lock like every other pass-through — this is several device probes, so it must not
+    /// interleave with the battery poll. Called on dashboard open / refresh only, never polled.
+    /// <para>Republishes State before returning: discovery reconnects at the end and can land on a
+    /// different mouse than State names, and State only ever updates from a battery read. Without
+    /// this the selector and the profile-name key describe the wrong mouse (spec §4.4).</para></summary>
+    public async Task<IReadOnlyList<string>> DiscoverMiceAsync()
+    {
+        try { await _readLock.WaitAsync(_cts.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return Array.Empty<string>(); }
+        try
+        {
+            var found = await _device.DiscoverReachableAsync(_cts.Token);
+            ProcessReading(await _device.ReadAsync(_cts.Token)); // same acquisition: no one can slip between
+            return found;
+        }
+        catch (OperationCanceledException) { return Array.Empty<string>(); }
+        finally { _readLock.Release(); }
+    }
+
+    /// <summary>Refresh behind an EXPLICIT user action (a mouse pick). Identical to RefreshNowAsync
+    /// except that it WAITS for the read lock instead of skipping when one is busy — the skip is
+    /// right for a timer tick and wrong for a user, who would see a perfectly reachable mouse
+    /// reported as unreachable because a sweep happened to be in flight (spec §4.5).</summary>
+    public Task RefreshNowWaitingAsync() => PollAsync(reconnect: true, waitForLock: true);
+
+    private async Task PollAsync(bool reconnect = false, bool waitForLock = false)
+    {
+        if (waitForLock)
+        {
+            try { await _readLock.WaitAsync(_cts.Token); }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return; }
+        }
+        else if (!await _readLock.WaitAsync(0)) return; // a read is already in flight; skip
         try
         {
             if (reconnect) _device.Reset(); // re-select the active interface for explicit refreshes

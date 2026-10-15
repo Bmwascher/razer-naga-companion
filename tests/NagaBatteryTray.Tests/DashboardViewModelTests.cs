@@ -6,8 +6,8 @@ using Xunit;
 
 public class DashboardViewModelTests
 {
-    private static Task<bool> NoWrite(int p, ButtonActionKind k, byte m, byte u) => Task.FromResult(true);
-    private static Task<bool> NoRawWrite(int p, RawButtonAction r) => Task.FromResult(true);
+    private static Task<WriteOutcome> NoWrite(int p, ButtonActionKind k, byte m, byte u) => Task.FromResult(WriteOutcome.Applied);
+    private static Task<WriteOutcome> NoRawWrite(int p, RawButtonAction r) => Task.FromResult(WriteOutcome.Applied);
 
     private static DashboardViewModel NewVm(AppSettings? source = null) =>
         new(source ?? new AppSettings(), runAtStartup: false, NoWrite, NoRawWrite);
@@ -133,8 +133,9 @@ public class DashboardViewModelTests
     public void Slot_names_seed_from_settings_and_default_when_absent()
     {
         var src = new AppSettings();
-        src.ProfileNames[2] = "Work";
+        src.ProfileNamesByMouse["Naga V2 Pro"] = new Dictionary<byte, string> { [2] = "Work" };
         var vm = NewVm(src);
+        vm.ApplyState(DeviceState.Online(80, false, false, "Naga V2 Pro"));
         vm.SetProfileInventory(new byte[] { 1, 2, 3 }, active: 1);
 
         Assert.Equal("Slot 1", vm.ProfileSlots.Single(p => p.Number == 1).Name);
@@ -252,7 +253,7 @@ public class DashboardViewModelTests
         Assert.Equal("Work", vm.ProfileSlots.Single(p => p.Number == 2).Name);
         var target = new AppSettings();
         vm.ApplyTo(target);
-        Assert.Equal("Work", target.ProfileNames[2]);
+        Assert.Equal("Work", target.ProfileNamesByMouse[vm.ModelName][2]);
     }
 
     [Fact]
@@ -454,39 +455,67 @@ public class DashboardViewModelTests
     public async Task ResetAllAsync_counts_all_12_as_ok_when_every_write_succeeds()
     {
         var vm = NewVm();
-        var (ok, failed) = await vm.ResetAllAsync();
+        var (ok, failed, skipped) = await vm.ResetAllAsync();
         Assert.Equal(12, ok);
         Assert.Equal(0, failed);
+        Assert.Equal(0, skipped);
     }
 
     [Fact]
     public async Task ResetAllAsync_counts_failures_for_positions_whose_write_fails()
     {
-        Task<bool> FailTwo(int p, ButtonActionKind k, byte m, byte u) => Task.FromResult(p != 3 && p != 7);
+        Task<WriteOutcome> FailTwo(int p, ButtonActionKind k, byte m, byte u) =>
+            Task.FromResult(p != 3 && p != 7 ? WriteOutcome.Applied : WriteOutcome.Failed);
         var vm = NewVm(FailTwo);
-        var (ok, failed) = await vm.ResetAllAsync();
+        var (ok, failed, skipped) = await vm.ResetAllAsync();
         Assert.Equal(10, ok);
         Assert.Equal(2, failed);
+        Assert.Equal(0, skipped);   // an ordinary failure never stops the run
+    }
+
+    /// <summary>The consequential one: once a write is refused, the host has already cleared the
+    /// scoped state, so the expected model is null again — and a null expectation is deliberately
+    /// permissive. A run that kept going would therefore write factory defaults into the mouse that
+    /// was just adopted, one button at a time. It must STOP at the refusal.</summary>
+    [Fact]
+    public async Task ResetAllAsync_stops_at_a_refusal_instead_of_writing_the_rest()
+    {
+        var attempted = new List<int>();
+        Task<WriteOutcome> Write(int p, ButtonActionKind k, byte m, byte u)
+        {
+            attempted.Add(p);
+            // the mouse changes underneath the run at button 5, and stays changed
+            return Task.FromResult(p >= 5 ? WriteOutcome.MouseChanged : WriteOutcome.Applied);
+        }
+        var vm = NewVm(Write);
+
+        var (ok, failed, skipped) = await vm.ResetAllAsync();
+
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, attempted);  // 6..12 were never written
+        Assert.Equal(4, ok);
+        Assert.Equal(0, failed);
+        Assert.Equal(8, skipped);                          // the refused button plus the 7 behind it
     }
 
     [Fact]
     public async Task ResetAllAsync_counts_a_busy_chip_as_failed_not_reset()
     {
-        var pending = new TaskCompletionSource<bool>();
+        var pending = new TaskCompletionSource<WriteOutcome>();
         bool first = true;
-        Task<bool> Write(int p, ButtonActionKind k, byte m, byte u)
+        Task<WriteOutcome> Write(int p, ButtonActionKind k, byte m, byte u)
         {
             if (first) { first = false; return pending.Task; }
-            return Task.FromResult(true);
+            return Task.FromResult(WriteOutcome.Applied);
         }
         var vm = NewVm(Write);
         var inFlight = vm.Callout(3).DisableAsync(); // occupies chip 3
 
-        var (ok, failed) = await vm.ResetAllAsync();
+        var (ok, failed, skipped) = await vm.ResetAllAsync();
         Assert.Equal(11, ok);
         Assert.Equal(1, failed);
+        Assert.Equal(0, skipped);   // a busy skip is not a mouse change
 
-        pending.SetResult(true);
+        pending.SetResult(WriteOutcome.Applied);
         await inFlight;
     }
 

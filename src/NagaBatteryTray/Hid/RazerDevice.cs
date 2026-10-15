@@ -1,9 +1,6 @@
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using HidSharp;
-using Microsoft.Win32.SafeHandles;
 using NagaBatteryTray.Settings;
 
 namespace NagaBatteryTray.Hid;
@@ -18,97 +15,76 @@ namespace NagaBatteryTray.Hid;
 public sealed class RazerDevice : IRazerDevice
 {
     private readonly ISettingsStore _settings;
-    private SafeFileHandle? _handle;
-    private byte _tid; // transaction id confirmed working on the currently-open collection (0 = not connected)
-    private bool _wired; // true when the live collection is a wired PID (RazerProtocol.IsWiredPid)
-    private string? _model; // display name of the connected model (RazerProtocol.ModelNameForPid)
+    private readonly MouseConnection _conn;
     private bool _loggedError;
 
-    public RazerDevice(ISettingsStore settings) => _settings = settings;
+    public RazerDevice(ISettingsStore settings)
+        : this(settings, new HidControlCollectionSource()) { }
+
+    internal RazerDevice(ISettingsStore settings, IControlCollectionSource source)
+    {
+        _settings = settings;
+        _conn = new MouseConnection(source, VerifyCollectionAsync);
+    }
+
+    public string? PreferredModel
+    {
+        get => _conn.PreferredModel;
+        set => _conn.PreferredModel = value;
+    }
+
+    public int ConnectionId => _conn.ConnectionId;
+
+    public string? ConnectedModel => _conn.Model;
+
+    /// <summary>MouseConnection's protocol hook: resolve a transaction id on a candidate and confirm
+    /// it answers a battery query. Runs against the candidate directly, because it is not the live
+    /// collection yet.</summary>
+    private async Task<byte> VerifyCollectionAsync(IControlCollection candidate, CancellationToken ct)
+    {
+        byte tid = await ResolveTransactionIdAsync(candidate, ct);
+        if (tid == 0) return 0;
+        return await QueryAsync(candidate, tid, RazerProtocol.CommandIdBattery, ct, fast: true) is not null ? tid : (byte)0;
+    }
 
     public async Task<BatteryReading> ReadAsync(CancellationToken ct)
     {
         var now = DateTimeOffset.Now;
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return BatteryReading.Absent(now);
+            byte tid = await _conn.EnsureAsync(ct, reselect: true);
+            if (tid == 0 || _conn.Current is not { } c) return BatteryReading.Absent(now);
 
-            var battery = await QueryAsync(tid, RazerProtocol.CommandIdBattery, ct);
+            var battery = await QueryAsync(c, tid, RazerProtocol.CommandIdBattery, ct, fast: true);
             // A live handle that stops answering (e.g. the wireless receiver after the mouse switches to
             // wired) replies with a timeout status, not a HID error — so drop it here to force the next
             // poll to re-select whichever collection is now live.
-            if (battery is null) { CloseHandle(); return BatteryReading.Absent(now); }
+            if (battery is null) { _conn.Close(); return BatteryReading.Absent(now); }
 
-            var charging = await QueryAsync(tid, RazerProtocol.CommandIdCharging, ct);
+            var charging = await QueryAsync(c, tid, RazerProtocol.CommandIdCharging, ct, fast: true);
             int percent = RazerProtocol.ScaleBattery(battery.Value);
             bool isCharging = charging is not null && charging.Value != 0;
             _loggedError = false;
-            return new BatteryReading(percent, isCharging, true, now, _wired, _model);
+            return new BatteryReading(percent, isCharging, true, now, _conn.Wired, _conn.Model);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return BatteryReading.Absent(now);
         }
     }
 
-    /// <summary>Ensures <see cref="_handle"/> points at a collection that actually answers, and returns its
-    /// working transaction id (0 = none reachable). Reuses a live connection cheaply; on (re)connect it tries
-    /// each candidate collection — wired first — and keeps the first that replies to a battery query. The
-    /// verify step is essential: the wireless receiver stays enumerated when the mouse switches to wired, so
-    /// picking by enumeration order alone would lock onto a collection that can no longer reach the mouse.</summary>
-    private async Task<byte> EnsureConnectedAsync(CancellationToken ct)
-    {
-        if (_handle is { IsInvalid: false } && _tid != 0) return _tid;
-        CloseHandle();
-
-        foreach (var (pid, path) in FindControlPaths())
-        {
-            var h = CreateFile(path, 0, FileShareReadWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
-            if (h.IsInvalid) { h.Dispose(); continue; }
-            _handle = h;
-
-            byte tid = await ResolveTransactionIdAsync(ct);
-            // ResolveTransactionIdAsync short-circuits on a cached id without touching this handle, so confirm
-            // this collection truly answers before committing to it; otherwise fall through to the next.
-            if (tid != 0 && await QueryAsync(tid, RazerProtocol.CommandIdBattery, ct) is not null)
-            {
-                _tid = tid;
-                _wired = RazerProtocol.IsWiredPid(pid);
-                _model = RazerProtocol.ModelNameForPid(pid);
-                return tid;
-            }
-            CloseHandle();
-        }
-        return 0;
-    }
-
-    /// <summary>Mouse HID collections exposing the 90+1 byte feature report (with their PID), in
-    /// RazerProtocol.ScanPids order — every wired PID before any wireless one: a cabled mouse must win
-    /// over a still-plugged-in receiver that can no longer reach it. The PID is returned so the caller
-    /// can report the active link and model.</summary>
-    private static IEnumerable<(int Pid, string Path)> FindControlPaths()
-    {
-        foreach (int pid in RazerProtocol.ScanPids)
-            foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
-            {
-                int max;
-                try { max = dev.GetMaxFeatureReportLength(); } catch { continue; }
-                if (max == RazerProtocol.BufferLength) yield return (pid, dev.DevicePath);
-            }
-    }
-
     /// <summary>Returns cached id, else probes the set and caches the winner. 0 = could not resolve.</summary>
-    private async Task<byte> ResolveTransactionIdAsync(CancellationToken ct)
+    private async Task<byte> ResolveTransactionIdAsync(IControlCollection collection, CancellationToken ct)
     {
         var cached = _settings.GetCachedTransactionId();
         if (cached is not null) return cached.Value;
 
         foreach (byte tid in RazerProtocol.TransactionIdProbeSet)
         {
-            var value = await QueryAsync(tid, RazerProtocol.CommandIdBattery, ct);
+            if (!collection.IsOpen) return 0;   // transport is gone; this candidate is finished
+            var value = await QueryAsync(collection, tid, RazerProtocol.CommandIdBattery, ct);
             if (value is not null && RazerProtocol.ScaleBattery(value.Value) is >= 0 and <= 100)
             {
                 _settings.SetCachedTransactionId(tid);
@@ -119,68 +95,154 @@ public sealed class RazerDevice : IRazerDevice
     }
 
     /// <summary>One SET->wait->GET round-trip with one busy retry. Returns the raw 91-byte reply or null on failure.
-    /// On a failed HID call the handle is closed so the next EnsureOpen re-acquires.</summary>
-    private async Task<byte[]?> ExchangeAsync(byte[] request, CancellationToken ct)
+    /// On a failed HID call the collection is closed so the next EnsureAsync re-acquires.</summary>
+    private async Task<byte[]?> ExchangeAsync(IControlCollection collection, byte[] request, CancellationToken ct)
     {
-        if (_handle is null || _handle.IsInvalid) return null;
-        if (!HidD_SetFeature(_handle, request, request.Length)) { CloseHandle(); return null; }
+        if (!collection.IsOpen) return null;
+        if (!collection.SetFeature(request)) { _conn.Close(); return null; }
 
         for (int attempt = 0; attempt < 2; attempt++)
         {
             await Task.Delay(_settings.Settings.SetReadDelayMs, ct);
             var reply = new byte[RazerProtocol.BufferLength];
             reply[0] = 0x00;
-            if (!HidD_GetFeature(_handle, reply, reply.Length)) { CloseHandle(); return null; }
-            if (reply[1] == 0x01) { await Task.Delay(200, ct); continue; } // Busy: wait, retry GET once
+            if (!collection.GetFeature(reply)) { _conn.Close(); return null; }
+            if (reply[1] == 0x01) { await Task.Delay(ExchangeBusyWaitMs, ct); continue; } // Busy: wait, retry GET once
             return reply;
         }
         return null; // still busy after retries
     }
 
-    private const int FastReadInitialDelayMs = 50;
+    /// <summary>Waits BETWEEN GETs for one fast read. Measured on a V3 Pro (--probe-latency,
+    /// 2026-10-15): every command class - battery, charging, DPI, profile list, active slot, and the
+    /// grid's own button reads - was ready within 22-24 ms. That is an upper bound, since the probe
+    /// cannot observe sooner than Windows' ~15.6 ms timer tick. The first rung used to be 50 ms, so
+    /// every read waited about twice as long as the mouse actually needed, twelve times per sweep.
+    /// <para>30 ms is the practical floor rather than a guess: Task.Delay rounds up to that same
+    /// ~15.6 ms tick for anything from 16 to 31 ms, and raising the system timer resolution to beat
+    /// it would cost idle power (hard rule 1). The later rungs are then chosen so the CUMULATIVE
+    /// wait after each one still matches the old ladder's checkpoints - 30, 50, 150, 350, 750.
+    /// <para>The SIXTH rung belongs to the converted reads alone. It carries their total to 1000 ms,
+    /// which is what ExchangeAsync's flat wait PLUS its busy retry really gave them (see
+    /// ReadPatience). An unbudgeted button or profile read stops after the fifth, because 750 ms is
+    /// where its old four-rung ladder gave up and the sixth rung would have added 250 ms to every
+    /// chip of a sweep whose mouse fell asleep part way through - twelve reads, so up to 3 s before
+    /// the grid finishes showing missing (Fable diff r2, F12).</para>
+    /// <para>So both kinds are strictly faster for a mouse that answers promptly and neither gives up
+    /// sooner than before. The price is one extra GET on a read that needs the whole schedule: five
+    /// against the old ladder's four, six for a converted read that also goes busy.</para></summary>
+    private static readonly int[] FastReadRungs = { 30, 20, 100, 200, 400, 250 };
 
-    /// <summary>Fast SET->GET for idempotent onboard-memory READS (button/profile queries): poll early
-    /// on a doubling ladder (50→100→200→400 ms) instead of paying the battery-cadence SetReadDelayMs
-    /// per read — the grid sweep is 12 reads, so the flat 400 ms wait made it ~5 s (user find). Safe
-    /// because a premature GET is detectable and retryable: the device buffer still holds our request
-    /// echo (status 0x00), a busy marker (0x01), or the PREVIOUS command's finished reply — the
-    /// completed-status + class/cmd echo check treats all three as "not ready, wait longer". Kept
-    /// separate from ExchangeAsync so battery/DPI/writes and the transaction-id probe keep their
-    /// proven timing semantics exactly.</summary>
-    private async Task<byte[]?> FastReadAsync(byte[] request, CancellationToken ct, int echoArgBytes = 0)
+    /// <summary>The wait ExchangeAsync inserts after a BUSY (0x01) reply before retrying its GET.
+    /// Shared with ConvertedReadPatience so the two policies cannot drift apart.</summary>
+    private const int ExchangeBusyWaitMs = 200;
+
+    /// <summary>The patience a read converted from ExchangeAsync gets, as the TWO numbers
+    /// ExchangeAsync really had. It waited SetReadDelayMs once and then looked: on anything but a
+    /// BUSY (0x01) reply it stopped there and the caller got a failed read, and only a 0x01 bought
+    /// another ExchangeBusyWaitMs and a SECOND SetReadDelayMs wait.
+    /// <para>One cap cannot be both, and either one alone is a defect. SetReadDelayMs alone cuts a
+    /// busy mouse's patience from ~1000 ms to 400 ms - and busy/asleep is the state this mouse is in
+    /// most of the time - so a would-be success becomes a null read, which ReadAsync then treats as
+    /// a dead handle (Fable diff r1, F1). The full 1000 ms alone makes a collection that answers
+    /// NOTHING cost 1000 ms where it used to cost 400, because FastReadAsync rightly reads a 0x00
+    /// echo as "not ready yet" where ExchangeAsync took it as the final answer; that is the
+    /// dashboard's discovery path with a dead receiver still plugged in, and the bench measured the
+    /// 600 ms it costs. So the budget starts at BaseMs and is raised to AfterBusyMs only once a 0x01
+    /// has actually been seen, which reproduces both behaviours instead of averaging
+    /// them.</para></summary>
+    private readonly record struct ReadPatience(int BaseMs, int AfterBusyMs);
+
+    private ReadPatience ConvertedReadPatience =>
+        new(_settings.Settings.SetReadDelayMs,
+            _settings.Settings.SetReadDelayMs * 2 + ExchangeBusyWaitMs);
+
+    /// <summary>Fast SET->GET for idempotent READS: poll early on the FastReadRungs schedule
+    /// instead of paying the battery-cadence SetReadDelayMs per read — the grid sweep is 12 reads, so
+    /// the flat 400 ms wait made it ~5 s (user find). Safe because a premature GET is detectable and
+    /// retryable: the device buffer still holds our request echo (status 0x00), a busy marker (0x01),
+    /// or the PREVIOUS command's finished reply — the completed-status + class/cmd echo check treats
+    /// all three as "not ready, wait longer". Writes and the transaction-id probe stay on
+    /// ExchangeAsync: a write ack is not idempotent and the probe is interrogating an UNKNOWN
+    /// transaction id, so both keep their proven timing semantics exactly.
+    /// <para>patience caps the TOTAL wait, so a converted read polls early without ever being LESS
+    /// patient OR slower to give up than the ExchangeAsync policy it replaced - see ReadPatience for
+    /// why that takes two numbers rather than one. A budget at or above the schedule's 1000 ms sum
+    /// runs every rung; a smaller one is clamped rung by rung and always gets at least one GET; a
+    /// larger one is honoured by the last rung, plus the busy tail below. Null is the button and
+    /// profile reads, which never used ExchangeAsync: they keep the first five rungs, the 750 ms
+    /// their own old ladder gave up at.</para></summary>
+    private async Task<byte[]?> FastReadAsync(IControlCollection collection, byte[] request, CancellationToken ct,
+                                              int echoArgBytes = 0, ReadPatience? patience = null)
     {
-        if (_handle is null || _handle.IsInvalid) return null;
-        if (!HidD_SetFeature(_handle, request, request.Length)) { CloseHandle(); return null; }
+        if (!collection.IsOpen) return null;
+        if (!collection.SetFeature(request)) { _conn.Close(); return null; }
 
-        int delay = FastReadInitialDelayMs;
-        for (int attempt = 0; attempt < 4; attempt++)
+        // the readiness rule itself lives in RazerProtocol, shared with --probe-latency so the
+        // probe measures against the same predicate these rungs are tuned to (F8). Returns the
+        // reply, or null when the transport died under us.
+        byte[]? Poll()
         {
-            await Task.Delay(delay, ct);
             var reply = new byte[RazerProtocol.BufferLength];
             reply[0] = 0x00;
-            if (!HidD_GetFeature(_handle, reply, reply.Length)) { CloseHandle(); return null; }
-            // ready = a completed status AND the reply echoes OUR class+cmd (buffer[7]/[8] =
-            // report class/cmd — every Razer reply echoes them; the parses already rely on it).
-            // echoArgBytes extends the check over the request's leading arg bytes (buffer[9..]):
-            // the grid sweep issues 12 same-class/cmd requests back-to-back, so a stale finished
-            // reply from the PREVIOUS button would otherwise pass and read as a hard failure at
-            // the parse layer instead of "wait longer" (review find). Only usable when the
-            // request args are echoed rather than replaced by reply data (button reads echo
-            // profile/buttonId/hypershift; list/active reads carry data there — pass 0).
-            bool pending = reply[1] is 0x00 or 0x01
-                || reply[7] != request[7] || reply[8] != request[8];
-            for (int i = 0; !pending && i < echoArgBytes; i++)
-                if (reply[9 + i] != request[9 + i]) pending = true;
-            if (!pending) return reply;
-            delay = Math.Min(delay * 2, 400);
+            if (collection.GetFeature(reply)) return reply;
+            _conn.Close();
+            return null;
+        }
+
+        int spent = 0;
+        bool sawBusy = false;
+        int rungs = patience is null ? FastReadRungs.Length - 1 : FastReadRungs.Length;
+        for (int i = 0; i < rungs; i++)
+        {
+            int delay = FastReadRungs[i];
+            if (patience is { } p)
+            {
+                int budget = sawBusy ? p.AfterBusyMs : p.BaseMs;
+                // i > 0, so a budget of 0 or less still gets ONE poll: ExchangeAsync always did
+                // Task.Delay(it) and then a GET, and a configured 0 must not mean "never read"
+                // (Fable diff r1, F5).
+                if (i > 0 && spent >= budget) break;
+                delay = i == rungs - 1
+                    ? Math.Max(0, budget - spent)        // last rung absorbs a budget above the schedule
+                    : Math.Clamp(budget - spent, 0, delay);
+            }
+            await Task.Delay(delay, ct);
+            spent += delay;
+            if (Poll() is not { } reply) return null;
+            if (RazerProtocol.IsReplyReady(request, reply, echoArgBytes)) return reply;
+            if (reply[1] == 0x01) sawBusy = true;   // busy earns the second half of the patience
+        }
+
+        // The busy tail. A 0x01 first seen at the LAST rung sets sawBusy with no iteration left to
+        // spend the second half of the patience in, which is every read whose BaseMs alone reaches
+        // the end of the schedule - a SetReadDelayMs above 750. ExchangeAsync waited the remainder
+        // and GETted once more, so that is what happens here, and the guarantee holds at any
+        // setting rather than only up to 750 (Fable diff r2, F9).
+        if (sawBusy && patience is { } tail && spent < tail.AfterBusyMs)
+        {
+            await Task.Delay(tail.AfterBusyMs - spent, ct);
+            if (Poll() is { } reply && RazerProtocol.IsReplyReady(request, reply, echoArgBytes))
+                return reply;
         }
         return null; // never became ready — caller treats like any failed read
     }
 
-    /// <summary>SET->GET a power-class query and return the data byte, or null on failure.</summary>
-    private async Task<byte?> QueryAsync(byte transactionId, byte commandId, CancellationToken ct)
+    /// <summary>SET->GET a power-class query and return the data byte, or null on failure.
+    /// <para>fast polls early (FastReadAsync) within the same total budget the flat wait used. A
+    /// power query is an idempotent read, and the class/cmd echo is what makes early polling safe
+    /// here: battery (0x07/0x80) and charging (0x07/0x84) are issued back to back, so a premature GET
+    /// that still held the battery reply would otherwise be read as the charging flag. Hardware
+    /// confirms the echo — --probe-dpi on 2026-10-15 showed reply[7]/[8] echoed on both an awake and
+    /// an asleep mouse. The transaction-id probe passes false: it is resolving an unknown id, where a
+    /// stale finished reply from the PREVIOUS candidate id would read as that id working.</para></summary>
+    private async Task<byte?> QueryAsync(IControlCollection collection, byte transactionId, byte commandId,
+                                         CancellationToken ct, bool fast = false)
     {
-        var reply = await ExchangeAsync(RazerProtocol.BuildFeatureBuffer(transactionId, commandId), ct);
+        var request = RazerProtocol.BuildFeatureBuffer(transactionId, commandId);
+        var reply = fast
+            ? await FastReadAsync(collection, request, ct, patience: ConvertedReadPatience)
+            : await ExchangeAsync(collection, request, ct);
         if (reply is null) return null;
         return RazerProtocol.ParseReply(reply, out byte value) == ReplyResult.Success ? value : null;
     }
@@ -189,16 +251,19 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return null;
-            var reply = await ExchangeAsync(RazerProtocol.BuildGetDpiBuffer(tid), ct);
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return null;
+            // reply data REPLACES the request args, so echoArgBytes stays 0: the class/cmd echo is
+            // the whole readiness check here, exactly as for the profile list/active reads.
+            var reply = await FastReadAsync(c, RazerProtocol.BuildGetDpiBuffer(tid), ct,
+                                            patience: ConvertedReadPatience);
             if (reply is null) return null;
             if (RazerProtocol.ParseDpiReply(reply, out int x, out int y) != ReplyResult.Success) return null;
             return new DpiSetting(x, y);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return null;
         }
@@ -208,15 +273,15 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return false;
-            var reply = await ExchangeAsync(RazerProtocol.BuildSetDpiBuffer(tid, dpiX, dpiY), ct);
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return false;
+            var reply = await ExchangeAsync(c, RazerProtocol.BuildSetDpiBuffer(tid, dpiX, dpiY), ct);
             if (reply is null) return false;
             return RazerProtocol.ParseDpiReply(reply, out _, out _) == ReplyResult.Success;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return false;
         }
@@ -226,16 +291,22 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return false;
-            var reply = await ExchangeAsync(RazerProtocol.BuildSetButtonBuffer(
+            string? before = _conn.Model;
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return false;
+            // a reconnect inside this call may have landed on ANOTHER mouse, and the caller's profile
+            // number was computed for the previous one. Refuse rather than write it there. Close()
+            // leaves Model set, so a dropped handle still leaves a name to compare against.
+            if (before is not null && !string.Equals(before, _conn.Model, StringComparison.OrdinalIgnoreCase))
+                return false;
+            var reply = await ExchangeAsync(c, RazerProtocol.BuildSetButtonBuffer(
                 tid, profile, buttonId, 0x00, category, data), ct);
             // SET ack: status-only (the spike-proven check); correctness is covered by read-back verify.
             return reply is not null && reply[1] == 0x02;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return false;
         }
@@ -245,9 +316,9 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return null;
-            var reply = await FastReadAsync(RazerProtocol.BuildGetButtonBuffer(
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return null;
+            var reply = await FastReadAsync(c, RazerProtocol.BuildGetButtonBuffer(
                 tid, profile, buttonId, 0x00), ct, echoArgBytes: 3); // profile/buttonId/hypershift echo
             if (reply is null) return null;
             if (RazerProtocol.ParseButtonReply(reply, profile, buttonId, 0x00,
@@ -257,7 +328,7 @@ public sealed class RazerDevice : IRazerDevice
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return null;
         }
@@ -267,9 +338,9 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return null;
-            var reply = await FastReadAsync(RazerProtocol.BuildGetProfileListBuffer(tid), ct);
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return null;
+            var reply = await FastReadAsync(c, RazerProtocol.BuildGetProfileListBuffer(tid), ct);
             if (reply is null) return null;
             if (RazerProtocol.ParseProfileListReply(reply, out byte capacity, out byte[] slots) != ReplyResult.Success)
                 return null;
@@ -277,7 +348,7 @@ public sealed class RazerDevice : IRazerDevice
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return null;
         }
@@ -287,14 +358,14 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return false;
-            var reply = await ExchangeAsync(RazerProtocol.BuildNewProfileBuffer(tid, slot), ct);
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return false;
+            var reply = await ExchangeAsync(c, RazerProtocol.BuildNewProfileBuffer(tid, slot), ct);
             return reply is not null && reply[1] == 0x02;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return false;
         }
@@ -304,16 +375,16 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return null;
-            var reply = await FastReadAsync(RazerProtocol.BuildGetActiveProfileBuffer(tid), ct);
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return null;
+            var reply = await FastReadAsync(c, RazerProtocol.BuildGetActiveProfileBuffer(tid), ct);
             if (reply is null) return null;
             if (RazerProtocol.ParseActiveProfileReply(reply, out byte slot) != ReplyResult.Success) return null;
             return slot;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return null;
         }
@@ -323,25 +394,20 @@ public sealed class RazerDevice : IRazerDevice
     {
         try
         {
-            byte tid = await EnsureConnectedAsync(ct);
-            if (tid == 0) return false;
-            var reply = await ExchangeAsync(RazerProtocol.BuildSetActiveProfileBuffer(tid, slot), ct);
+            byte tid = await _conn.EnsureAsync(ct);
+            if (tid == 0 || _conn.Current is not { } c) return false;
+            var reply = await ExchangeAsync(c, RazerProtocol.BuildSetActiveProfileBuffer(tid, slot), ct);
             return reply is not null && reply[1] == 0x02;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            CloseHandle();
+            _conn.Close();
             LogOnce(ex);
             return false;
         }
     }
 
-    private void CloseHandle()
-    {
-        _handle?.Dispose();
-        _handle = null;
-        _tid = 0;
-    }
+    public Task<IReadOnlyList<string>> DiscoverReachableAsync(CancellationToken ct) => _conn.DiscoverAsync(ct);
 
     private void LogOnce(Exception ex)
     {
@@ -350,23 +416,9 @@ public sealed class RazerDevice : IRazerDevice
         Console.Error.WriteLine($"[RazerDevice] {ex.GetType().Name}: {ex.Message}");
     }
 
-    /// <summary>Drop the cached handle so the next read re-selects whichever interface is now live. Cheap;
-    /// the next <see cref="EnsureConnectedAsync"/> re-acquires (wired-first, verifying it answers).</summary>
-    public void Reset() => CloseHandle();
+    /// <summary>Drop the cached connection so the next call re-selects whichever interface is now live. Cheap;
+    /// the next <see cref="MouseConnection.EnsureAsync"/> re-acquires (wired-first, verifying it answers).</summary>
+    public void Reset() => _conn.Close();
 
-    public void Dispose() => CloseHandle();
-
-    private const uint FileShareReadWrite = 0x3; // FILE_SHARE_READ | FILE_SHARE_WRITE
-    private const uint OpenExisting = 0x3;
-
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
-
-    [DllImport("hid.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    private static extern bool HidD_SetFeature(SafeFileHandle h, byte[] buffer, int length);
-
-    [DllImport("hid.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.U1)]
-    private static extern bool HidD_GetFeature(SafeFileHandle h, byte[] buffer, int length);
+    public void Dispose() => _conn.Dispose();
 }

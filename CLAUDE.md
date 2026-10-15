@@ -33,8 +33,10 @@ reference is `docs/architecture.md`; per-feature design history is `docs/superpo
 6. **TDD**; tests cover logic layers through the `IRazerDevice` seam (`Fakes/FakeRazerDevice`);
    WPF windows/tray/HID transport are exercised by the installed build and the probes — the two
    deliberate exceptions are `DpiPillInteractionTests` (always-on real-window regression) and the
-   gated screenshot probe. Tests reach `internal` via `InternalsVisibleTo.cs` — don't tighten
-   visibility or drop that file.
+   gated screenshot probe. Since 2026-08-19 the transport exemption covers **only the two Win32
+   wrappers** (`IControlCollection`/`IControlCollectionSource`) and the WPF windows — connection
+   selection above that seam is ordinary tested code (`docs/architecture.md`). Tests reach
+   `internal` via `InternalsVisibleTo.cs` — don't tighten visibility or drop that file.
 
 ## Commands (user-local .NET SDK — not on PATH)
 
@@ -58,7 +60,12 @@ reference is `docs/architecture.md`; per-feature design history is `docs/superpo
 
 - HID probes (installed exe): `--probe` battery · `--probe-dpi` · `--probe-buttons
   [--reset|--slot-test]` · `--probe-profile` (capture → `%APPDATA%\NagaBatteryTray\`) ·
-  `--probe-dock`
+  `--probe-dock` · `--probe-latency` (read-only reply timing; the evidence for tuning
+  `RazerDevice.FastReadRungs` — needs the mouse awake)
+- Perf benches (gated `NAGA_PERF=1`, filter `PerfBench`): `PerfBenchIo` times the device pipeline
+  against a latency-modelling emulator and reports round-trip counts beside wall clock;
+  `PerfBenchUi` times window open + settings scrolling; `PerfBenchHost` times the schtasks query.
+  Vars: `NAGA_PERF_OUT` (report path), `NAGA_PERF_LABEL` — a before/after pair is a diff of two runs.
 - UI screenshot probe (layout iteration + README screenshots, no install needed): set
   `NAGA_UI_PROBE=1`, run test filter `DashboardScreenshotProbe`; vars: `NAGA_UI_PROBE_OUT`,
   `NAGA_UI_PROBE_THEME`, `NAGA_UI_PROBE_STATE` (steady|renaming|named|typing|switching|offline),
@@ -68,8 +75,8 @@ reference is `docs/architecture.md`; per-feature design history is `docs/superpo
 
 | Path | What lives there |
 | --- | --- |
-| `src/NagaBatteryTray/Hid/` | Wire protocol (`RazerProtocol`), button model (`ButtonBinding`), transport (`RazerDevice` behind `IRazerDevice`) |
-| `src/NagaBatteryTray/Monitoring/` | `BatteryMonitor` — the one poll timer + device-call serialization |
+| `src/NagaBatteryTray/Hid/` | Wire protocol (`RazerProtocol`), button model (`ButtonBinding`), transport (`RazerDevice` behind `IRazerDevice`), connection selection (`MouseConnection` + `ConnectionPolicy` over the `IControlCollection` Win32 seam) |
+| `src/NagaBatteryTray/Monitoring/` | `BatteryMonitor` — the one poll timer + device-call serialization; `DeviceScopedState` — the per-mouse cache |
 | `src/NagaBatteryTray/Settings/` | `AppSettings` + JSON store (`%APPDATA%\NagaBatteryTray\settings.json`) |
 | `src/NagaBatteryTray/Ui/` | Tray icon renderer/host, popup, device-change watcher, toasts, `AppHost` lifecycle |
 | `src/NagaBatteryTray/Ui/Dashboard/` | The dashboard: mouse stage + remap chips, DPI card, Profile card, settings overlay |
@@ -102,32 +109,38 @@ Shipped (spec links = the full story):
   button-remap / profile protocol parity with the `--probe*` suite, device layer now
   auto-detects either model (2026-08-19,
   `specs/2026-08-19-naga-v3pro-dual-support-design.md`)
+- Mouse selector + per-device state isolation — closes the three V3 acceptance follow-ups, which
+  investigation showed were **one root cause**: state cached for one mouse outliving the mouse
+  underneath it. Ships a dashboard header mouse selector (defaults to the V3, choice persisted),
+  preference-ordered scanning with reselect on the battery path only, a `MouseConnection` +
+  `ConnectionPolicy` state machine over a new `IControlCollection` Win32 seam, connection identity
+  (id within an operation, model across time), an atomic button write, a per-mouse state cache, and
+  per-mouse profile names (2026-08-19, `specs/2026-08-19-naga-mouse-selector-design.md`)
+- Perf pass — the one real gap was the transport waiting on a fixed schedule unrelated to how
+  fast the mouse answered. Every idempotent read (battery, charging, DPI, button, profile) now
+  polls early on a measured rung schedule — `--probe-latency`, added by this pass, found every
+  command class ready in 21-24 ms — under a two-part patience cap (`ReadPatience`) so no read is
+  less patient, or slower to give up, than the flat wait it replaced; `ExchangeAsync` keeps the
+  writes and the transaction-id probe. The run-at-login `schtasks` query came off the tray and
+  dashboard-open paths behind a generation token. Dashboard content 3301→638 ms, startup battery
+  read 1214→93 ms, grid sweep 1149→420 ms, dead-receiver discovery 1212→500 ms, round-trip
+  counts identical to base in all ten scenarios — so this removed waiting, not work. No spec:
+  bounded work, reviewed after the fact (Fable diff gate, PASS at round 2, degraded for want of a
+  second vendor). The story is `docs/architecture.md` § `RazerDevice.cs`; the benches are
+  `PerfBenchIo`/`PerfBenchUi`/`PerfBenchHost`, gated `NAGA_PERF=1` (2026-10-15)
 
 Next:
 
-- [ ] **V3 acceptance follow-ups — FIRST, ahead of DPI stages** (user, 2026-08-19; both found in
-  acceptance testing of the dual-support merge, neither is a regression it introduced). Two
-  device-behaviour defects, measured on real hardware:
-  - **Sticky device selection.** `EnsureConnectedAsync` short-circuits on a live handle, so once
-    it latches a mouse it never re-checks whether a preferred one became reachable. Pulling the
-    V3's cable made it re-scan while the V3's wireless link was still coming up; the V2 answered
-    first and it stayed there indefinitely. A fresh start picks correctly. **User wants a
-    mouse-selector dropdown in the dashboard header, defaulting to the V3**, with automatic
-    re-evaluation underneath. Needs its own design round (selector + persisted choice).
-  - **"Not applied" on writes that actually landed.** `AppHost.WriteVerifiedAsync` writes, then
-    reads back and demands an exact match; the chip goes red on any mismatch. Reads are NOT the
-    cause — 36/36 button reads through the production path succeeded, median 61 ms, on V3
-    wireless. Leading unproven hypothesis: the verify read races the device's commit and returns
-    the stale value. Confirming it needs a write-then-immediately-read probe.
-  - Minor, same pass: an unset V3 button reads as category `0x02` with ONE data byte, and
-    `CalloutViewModel.DisplayRaw` only decodes `0x02` + exactly 2 bytes, so it renders as a red
-    "Synapse action (0x02)". Cosmetic, and invisible once buttons are set.
 - [ ] **DPI stages + polling rate** — onboard 5-stage table (+ stage up/down), polling-rate
   get/set (openrazer-validated, write-on-action only). Carries two deferred riders: the preset
   row likely becomes the onboard stage table (user, 2026-07-17), and the right-rail relayout
   happens when the polling-rate box joins it (user, 2026-07-20).
 - [ ] **Lighting** (last) — thumb-grid / scroll-wheel zone effects + brightness, theme-sync
   candidate; openrazer class 0x03/0x0F.
+- [ ] **Create-profile UI** — unscheduled, no owner date. The V3 Pro ships with a single onboard
+  slot created, so the Profile card can only ever offer that one; the create/delete commands
+  (class `0x05` `0x02`/`0x03`) are already in `RazerProtocol` but nothing calls them. Logged out of
+  the mouse-selector pass as an explicit non-goal (spec §3).
 
 ## Workflow & conventions
 
