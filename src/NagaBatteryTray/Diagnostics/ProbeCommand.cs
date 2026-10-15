@@ -76,7 +76,7 @@ public static class ProbeCommand
             }
         // Same production-class section --probe carries for the battery read, and for the same
         // reason: the raw loop above proves the OFFSETS, not the transport. GetDpiAsync polls early
-        // on the fast-read ladder, so this is the line that says the ladder reads a real DPI off
+        // on the fast-read rung schedule, so this is the line that says the schedule reads a real DPI off
         // real hardware rather than timing out into a null.
         Console.WriteLine("\n--- RazerDevice.GetDpiAsync (production class) ---");
         var store = new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"naga-probe-{Guid.NewGuid():N}.json"));
@@ -558,9 +558,9 @@ public static class ProbeCommand
 
     /// <summary>Reply-latency probe (--probe-latency). Read-only by construction: every request it
     /// builds is a GET. For each command it SETs once and then polls GetFeature every 5 ms until the
-    /// reply satisfies the readiness test the transport's fast-read ladder applies - literally the
+    /// reply satisfies the readiness test the transport's fast-read rung schedule applies - literally the
     /// same code, RazerProtocol.IsReplyReady - reporting when the device actually answered.
-    /// <para>This exists because the ladder's first rung is a guess unless someone measures it. The
+    /// <para>This exists because the schedule's first rung is a guess unless someone measures it. The
     /// grid sweep is twelve of these reads back to back, so the rung is most of what the dashboard's
     /// button grid costs, and tuning it off anything but a measurement would be trading a known wait
     /// for an unknown number of wasted Win32 calls against a mouse in the user's hand (hard rule 1).</para></summary>

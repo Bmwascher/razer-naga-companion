@@ -318,7 +318,7 @@ public sealed class AppHost
     /// <summary>Grid sweep (spec §13.1): read the ACTIVE profile's 12 grid buttons (0x02/0x8c,
     /// hardware-verified) sequentially in position order, updating each chip as its read lands —
     /// hardware truth for whatever slot the mouse is on, including Synapse-configured user slots.
-    /// ~50-100 ms per button via the transport's fast-read ladder (full sweep ≈ 1 s); each read
+    /// ~50-100 ms per button via the transport's fast-read rung schedule (full sweep ≈ 1 s); each read
     /// serializes on the monitor's lock like every other pass-through (the battery poll skips
     /// while busy). Event-driven only — runs solely off RefreshProfileAsync's triggers.</summary>
     private async Task ReadGridAsync(DashboardViewModel vm, byte slot)
