@@ -200,9 +200,11 @@ that the published app ran, read the mouse and rendered a percentage in all 40 R
 ## 9. What became of the work
 
 The measurement ran on `perf/ready-to-run-eval`, which was **deleted on the user's instruction
-once this file existed** — nothing was merged and nothing was pushed. This file is the only thing
-kept. The deleted commits, should the reasoning ever need re-reading inside the gc window (~30
-days):
+once this file existed**. None of that branch's commits were merged or pushed: its two code
+changes — the instrument and the csproj flag — never left it, which is the point. This file is the
+only thing kept, and it was committed to `master` on its own (`0097f36`), which is why you are
+reading it here. The deleted commits, should the reasoning ever need re-reading inside the gc
+window (~30 days):
 
 | Commit | Contents |
 | --- | --- |
