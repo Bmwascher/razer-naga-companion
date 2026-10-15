@@ -17,6 +17,15 @@ Is it worth adopting here?
 **Decision bar set with the task:** a cold-start win under roughly 50 ms is not worth a larger
 binary.
 
+### Read this first: the deciding number was not the one being measured
+
+This was framed as a startup-time question with a size cost, and on those terms it is a near miss —
+25.5 ms to the tray icon, 49.0 ms to the first percentage, both under the bar, so it would have
+failed anyway. But what actually settles it is **idle private working set, up 12.3% against hard
+rule 1's ~23 MB gate** (§6). That was expected not to move at all, and the brief said to verify
+rather than assume, which is the only reason it was measured. Anyone re-opening this should start at
+§6, not §4: the milliseconds are the interesting part and the megabytes are the answer.
+
 ## 2. The signal, and why this one
 
 The app is windowless. There is no main window handle to poll, no console to print to, and the tray
