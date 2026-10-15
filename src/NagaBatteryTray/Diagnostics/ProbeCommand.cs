@@ -74,6 +74,22 @@ public static class ProbeCommand
                 int y = (reply[12] << 8) | reply[13];
                 Console.WriteLine($"  decoded @offsets[10..13]: X={x} Y={y}");
             }
+        // Same production-class section --probe carries for the battery read, and for the same
+        // reason: the raw loop above proves the OFFSETS, not the transport. GetDpiAsync polls early
+        // on the fast-read ladder, so this is the line that says the ladder reads a real DPI off
+        // real hardware rather than timing out into a null.
+        Console.WriteLine("\n--- RazerDevice.GetDpiAsync (production class) ---");
+        var store = new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"naga-probe-{Guid.NewGuid():N}.json"));
+        using (var device = new RazerDevice(store))
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var dpi = device.GetDpiAsync(CancellationToken.None).GetAwaiter().GetResult();
+            sw.Stop();
+            Console.WriteLine(dpi is { } d
+                ? $"  X={d.X} Y={d.Y} in {sw.ElapsedMilliseconds} ms (includes connect + verify)"
+                : $"  no reply after {sw.ElapsedMilliseconds} ms");
+        }
+
         Console.WriteLine("\nIf you set DPI to 1600 in another tool first, expect reply[10..11] = 06 40 and X=1600.");
         return 0;
     }

@@ -44,7 +44,7 @@ public sealed class RazerDevice : IRazerDevice
     {
         byte tid = await ResolveTransactionIdAsync(candidate, ct);
         if (tid == 0) return 0;
-        return await QueryAsync(candidate, tid, RazerProtocol.CommandIdBattery, ct) is not null ? tid : (byte)0;
+        return await QueryAsync(candidate, tid, RazerProtocol.CommandIdBattery, ct, fast: true) is not null ? tid : (byte)0;
     }
 
     public async Task<BatteryReading> ReadAsync(CancellationToken ct)
@@ -55,13 +55,13 @@ public sealed class RazerDevice : IRazerDevice
             byte tid = await _conn.EnsureAsync(ct, reselect: true);
             if (tid == 0 || _conn.Current is not { } c) return BatteryReading.Absent(now);
 
-            var battery = await QueryAsync(c, tid, RazerProtocol.CommandIdBattery, ct);
+            var battery = await QueryAsync(c, tid, RazerProtocol.CommandIdBattery, ct, fast: true);
             // A live handle that stops answering (e.g. the wireless receiver after the mouse switches to
             // wired) replies with a timeout status, not a HID error — so drop it here to force the next
             // poll to re-select whichever collection is now live.
             if (battery is null) { _conn.Close(); return BatteryReading.Absent(now); }
 
-            var charging = await QueryAsync(c, tid, RazerProtocol.CommandIdCharging, ct);
+            var charging = await QueryAsync(c, tid, RazerProtocol.CommandIdCharging, ct, fast: true);
             int percent = RazerProtocol.ScaleBattery(battery.Value);
             bool isCharging = charging is not null && charging.Value != 0;
             _loggedError = false;
@@ -115,23 +115,36 @@ public sealed class RazerDevice : IRazerDevice
 
     private const int FastReadInitialDelayMs = 50;
 
-    /// <summary>Fast SET->GET for idempotent onboard-memory READS (button/profile queries): poll early
-    /// on a doubling ladder (50→100→200→400 ms) instead of paying the battery-cadence SetReadDelayMs
-    /// per read — the grid sweep is 12 reads, so the flat 400 ms wait made it ~5 s (user find). Safe
-    /// because a premature GET is detectable and retryable: the device buffer still holds our request
-    /// echo (status 0x00), a busy marker (0x01), or the PREVIOUS command's finished reply — the
-    /// completed-status + class/cmd echo check treats all three as "not ready, wait longer". Kept
-    /// separate from ExchangeAsync so battery/DPI/writes and the transaction-id probe keep their
-    /// proven timing semantics exactly.</summary>
-    private async Task<byte[]?> FastReadAsync(IControlCollection collection, byte[] request, CancellationToken ct, int echoArgBytes = 0)
+    /// <summary>Fast SET->GET for idempotent READS: poll early on a doubling ladder (50→100→200→400 ms)
+    /// instead of paying the battery-cadence SetReadDelayMs per read — the grid sweep is 12 reads, so
+    /// the flat 400 ms wait made it ~5 s (user find). Safe because a premature GET is detectable and
+    /// retryable: the device buffer still holds our request echo (status 0x00), a busy marker (0x01),
+    /// or the PREVIOUS command's finished reply — the completed-status + class/cmd echo check treats
+    /// all three as "not ready, wait longer". Writes and the transaction-id probe stay on
+    /// ExchangeAsync: a write ack is not idempotent and the probe is interrogating an UNKNOWN
+    /// transaction id, so both keep their proven timing semantics exactly.
+    /// <para>budgetMs caps the TOTAL wait. It exists so a read that used to pay one flat
+    /// SetReadDelayMs can poll early without ever waiting longer in the worst case than it did
+    /// before: with a 400 ms budget the rungs become 50/100/200/50, so an awake mouse answers at
+    /// 50 ms and a silent one is given up on at exactly the old 400 ms. Null keeps the original
+    /// 4-rung, 750 ms ladder for the button/profile reads that shipped with it.</para></summary>
+    private async Task<byte[]?> FastReadAsync(IControlCollection collection, byte[] request, CancellationToken ct,
+                                              int echoArgBytes = 0, int? budgetMs = null)
     {
         if (!collection.IsOpen) return null;
         if (!collection.SetFeature(request)) { _conn.Close(); return null; }
 
         int delay = FastReadInitialDelayMs;
+        int spent = 0;
         for (int attempt = 0; attempt < 4; attempt++)
         {
+            if (budgetMs is { } budget)
+            {
+                if (spent >= budget) break;
+                delay = Math.Min(delay, budget - spent);
+            }
             await Task.Delay(delay, ct);
+            spent += delay;
             var reply = new byte[RazerProtocol.BufferLength];
             reply[0] = 0x00;
             if (!collection.GetFeature(reply)) { _conn.Close(); return null; }
@@ -153,10 +166,21 @@ public sealed class RazerDevice : IRazerDevice
         return null; // never became ready — caller treats like any failed read
     }
 
-    /// <summary>SET->GET a power-class query and return the data byte, or null on failure.</summary>
-    private async Task<byte?> QueryAsync(IControlCollection collection, byte transactionId, byte commandId, CancellationToken ct)
+    /// <summary>SET->GET a power-class query and return the data byte, or null on failure.
+    /// <para>fast polls early (FastReadAsync) within the same total budget the flat wait used. A
+    /// power query is an idempotent read, and the class/cmd echo is what makes early polling safe
+    /// here: battery (0x07/0x80) and charging (0x07/0x84) are issued back to back, so a premature GET
+    /// that still held the battery reply would otherwise be read as the charging flag. Hardware
+    /// confirms the echo — --probe-dpi on 2026-10-15 showed reply[7]/[8] echoed on both an awake and
+    /// an asleep mouse. The transaction-id probe passes false: it is resolving an unknown id, where a
+    /// stale finished reply from the PREVIOUS candidate id would read as that id working.</para></summary>
+    private async Task<byte?> QueryAsync(IControlCollection collection, byte transactionId, byte commandId,
+                                         CancellationToken ct, bool fast = false)
     {
-        var reply = await ExchangeAsync(collection, RazerProtocol.BuildFeatureBuffer(transactionId, commandId), ct);
+        var request = RazerProtocol.BuildFeatureBuffer(transactionId, commandId);
+        var reply = fast
+            ? await FastReadAsync(collection, request, ct, budgetMs: _settings.Settings.SetReadDelayMs)
+            : await ExchangeAsync(collection, request, ct);
         if (reply is null) return null;
         return RazerProtocol.ParseReply(reply, out byte value) == ReplyResult.Success ? value : null;
     }
@@ -167,7 +191,10 @@ public sealed class RazerDevice : IRazerDevice
         {
             byte tid = await _conn.EnsureAsync(ct);
             if (tid == 0 || _conn.Current is not { } c) return null;
-            var reply = await ExchangeAsync(c, RazerProtocol.BuildGetDpiBuffer(tid), ct);
+            // reply data REPLACES the request args, so echoArgBytes stays 0: the class/cmd echo is
+            // the whole readiness check here, exactly as for the profile list/active reads.
+            var reply = await FastReadAsync(c, RazerProtocol.BuildGetDpiBuffer(tid), ct,
+                                            budgetMs: _settings.Settings.SetReadDelayMs);
             if (reply is null) return null;
             if (RazerProtocol.ParseDpiReply(reply, out int x, out int y) != ReplyResult.Success) return null;
             return new DpiSetting(x, y);
