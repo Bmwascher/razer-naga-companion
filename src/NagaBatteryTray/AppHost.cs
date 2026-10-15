@@ -39,6 +39,13 @@ public sealed class AppHost
     /// blocking for it, and two UI-thread stalls cheaper.</summary>
     private bool _startupEnabled;
 
+    /// <summary>Bumped by every toggle, so an in-flight query can tell that its answer is already
+    /// stale. Without it a refresh issued BEFORE a toggle publishes the old value on top of the new
+    /// one - a ~25 ms window, longer when schtasks.exe spawns cold at logon - and the tray check and
+    /// the overlay switch both show the state the user just changed away from until the next
+    /// dashboard open (Fable diff r1, F6).</summary>
+    private int _startupGeneration;
+
     public AppHost(Application app) => _app = app;
 
     public void Start()
@@ -626,6 +633,7 @@ public sealed class AppHost
     {
         if (enable) _startup.Enable(); else _startup.Disable();
         _startupEnabled = enable;
+        Interlocked.Increment(ref _startupGeneration); // supersede any query already in flight
     }
 
     /// <summary>Ask Windows whether the logon task exists, off the UI thread, and publish the answer
@@ -634,6 +642,7 @@ public sealed class AppHost
     /// value in place, which is what IsEnabled's own false-on-error would have shown anyway.</summary>
     private void RefreshStartupStateAsync() => _ = Task.Run(() =>
     {
+        int generation = Volatile.Read(ref _startupGeneration);
         bool on;
         try { on = _startup.IsEnabled(); } catch { return; }
         // Quit disposes the tray and shuts the dispatcher down, and this query can still be in
@@ -642,6 +651,9 @@ public sealed class AppHost
         {
             Dispatch(() =>
             {
+                // a toggle landed while this query ran: the user's own action is the newer truth,
+                // and this answer describes the task before it changed
+                if (Volatile.Read(ref _startupGeneration) != generation) return;
                 _startupEnabled = on;
                 _tray.SetStartupChecked(on);
                 if (_dashboardVm is { } vm) vm.RunAtStartup = on;
