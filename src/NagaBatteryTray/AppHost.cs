@@ -31,6 +31,14 @@ public sealed class AppHost
     private CancellationTokenSource? _deviceDebounce;
     private bool _activating;
 
+    /// <summary>Last known run-at-login state. StartupRegistration.IsEnabled shells out to
+    /// schtasks.exe — a process spawn, ~25 ms measured — and it used to be awaited on the UI thread
+    /// both before the tray icon appeared and before the dashboard window was constructed. It is
+    /// display-only (the scheduled task itself is the source of truth, and nothing writes it back
+    /// from here), so seeding from this and correcting when the real query lands is as correct as
+    /// blocking for it, and two UI-thread stalls cheaper.</summary>
+    private bool _startupEnabled;
+
     public AppHost(Application app) => _app = app;
 
     public void Start()
@@ -59,9 +67,9 @@ public sealed class AppHost
         _tray.SettingsRequested += OpenDashboard;
         _tray.QuitRequested += Quit;
 
-        _tray.SetStartupChecked(_startup.IsEnabled());
         _tray.SetGaugeStyle(_settings.Settings.TrayIconStyle != "Text");
         _tray.Show();
+        RefreshStartupStateAsync();   // the menu is closed, so nothing is on screen to be wrong yet
 
         SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == PowerModes.Resume) _ = _monitor.RefreshNowAsync(); };
         SystemEvents.SessionSwitch += (_, e) => { if (e.Reason == SessionSwitchReason.SessionUnlock) _ = _monitor.RefreshNowAsync(); };
@@ -128,7 +136,7 @@ public sealed class AppHost
     {
         if (_dashboard is { IsVisible: true }) { _dashboard.Activate(); return; }
 
-        var vm = new DashboardViewModel(_settings.Settings, _startup.IsEnabled(), WriteBindingAsync, RestoreRawAsync);
+        var vm = new DashboardViewModel(_settings.Settings, _startupEnabled, WriteBindingAsync, RestoreRawAsync);
         var win = new DashboardWindow(vm);
         win.ApplyDpiRequested += dpi => _ = ApplyDpiAsync(vm, dpi);
         win.ProfileRefreshRequested += () => _ = RefreshProfileAsync(vm);
@@ -151,6 +159,7 @@ public sealed class AppHost
         _dashboardVm = vm;
         win.Show();
         _ = SeedDashboardAsync(vm);
+        RefreshStartupStateAsync();   // picks up a task someone changed outside the app
     }
 
     // Task.Run keeps the blocking HidD_*Feature calls off the UI thread (no UI freeze; supports the
@@ -616,7 +625,30 @@ public sealed class AppHost
     private void SetStartup(bool enable)
     {
         if (enable) _startup.Enable(); else _startup.Disable();
+        _startupEnabled = enable;
     }
+
+    /// <summary>Ask Windows whether the logon task exists, off the UI thread, and publish the answer
+    /// to whatever is currently showing it. Fire-and-forget and event-driven — one query per startup
+    /// and per dashboard open, never a timer or a poll (hard rule 1). A failure leaves the last known
+    /// value in place, which is what IsEnabled's own false-on-error would have shown anyway.</summary>
+    private void RefreshStartupStateAsync() => _ = Task.Run(() =>
+    {
+        bool on;
+        try { on = _startup.IsEnabled(); } catch { return; }
+        // Quit disposes the tray and shuts the dispatcher down, and this query can still be in
+        // flight when it does. A one-shot display refresh must not raise on the way out.
+        try
+        {
+            Dispatch(() =>
+            {
+                _startupEnabled = on;
+                _tray.SetStartupChecked(on);
+                if (_dashboardVm is { } vm) vm.RunAtStartup = on;
+            });
+        }
+        catch { /* shutting down; there is nothing left to tell */ }
+    });
 
     private void Quit()
     {

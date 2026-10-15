@@ -60,7 +60,12 @@ reference is `docs/architecture.md`; per-feature design history is `docs/superpo
 
 - HID probes (installed exe): `--probe` battery · `--probe-dpi` · `--probe-buttons
   [--reset|--slot-test]` · `--probe-profile` (capture → `%APPDATA%\NagaBatteryTray\`) ·
-  `--probe-dock`
+  `--probe-dock` · `--probe-latency` (read-only reply timing; the evidence for tuning
+  `RazerDevice.FastReadInitialDelayMs` — needs the mouse awake)
+- Perf benches (gated `NAGA_PERF=1`, filter `PerfBench`): `PerfBenchIo` times the device pipeline
+  against a latency-modelling emulator and reports round-trip counts beside wall clock;
+  `PerfBenchUi` times window open + settings scrolling; `PerfBenchHost` times the schtasks query.
+  Vars: `NAGA_PERF_OUT` (report path), `NAGA_PERF_LABEL` — a before/after pair is a diff of two runs.
 - UI screenshot probe (layout iteration + README screenshots, no install needed): set
   `NAGA_UI_PROBE=1`, run test filter `DashboardScreenshotProbe`; vars: `NAGA_UI_PROBE_OUT`,
   `NAGA_UI_PROBE_THEME`, `NAGA_UI_PROBE_STATE` (steady|renaming|named|typing|switching|offline),

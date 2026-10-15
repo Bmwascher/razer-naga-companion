@@ -560,6 +560,84 @@ public static class ProbeCommand
     /// collection stays enumerated when the mouse goes wired), verifying each candidate answers a
     /// battery query before committing - mirrors HidControlCollectionSource.Open plus
     /// MouseConnection.ConnectAsync, which is how the app itself opens a mouse.</summary>
+    /// <summary>Reply-latency probe (--probe-latency). Read-only by construction: every request it
+    /// builds is a GET. For each command it SETs once and then polls GetFeature every 5 ms until the
+    /// reply satisfies the SAME readiness test the transport's fast-read ladder applies (a completed
+    /// status plus the class/cmd echo, plus the arg echo for button reads), reporting when the device
+    /// actually answered.
+    /// <para>This exists because the ladder's first rung is a guess unless someone measures it. The
+    /// grid sweep is twelve of these reads back to back, so the rung is most of what the dashboard's
+    /// button grid costs, and tuning it off anything but a measurement would be trading a known wait
+    /// for an unknown number of wasted Win32 calls against a mouse in the user's hand (hard rule 1).</para></summary>
+    public static int RunLatency()
+    {
+        Console.WriteLine("Naga Battery Tray - reply-latency probe (read-only: GET commands only)\n");
+        using var h = OpenLiveMouse(out int pid);
+        if (h is null)
+        {
+            Console.WriteLine("No live mouse collection found (connected? awake?).");
+            return 1;
+        }
+        Console.WriteLine($"Live collection: {RazerProtocol.ModelNameForPid(pid) ?? "unknown"} PID 0x{pid:x4}");
+        Console.WriteLine("Polling every 5 ms after each SET; 'ready' = the completed status + class/cmd echo\n");
+
+        byte tid = ButtonsTid;
+        Report("battery   0x07/0x80", RazerProtocol.BuildFeatureBuffer(tid, RazerProtocol.CommandIdBattery), h, 0);
+        Report("charging  0x07/0x84", RazerProtocol.BuildFeatureBuffer(tid, RazerProtocol.CommandIdCharging), h, 0);
+        Report("get dpi   0x04/0x85", RazerProtocol.BuildGetDpiBuffer(tid), h, 0);
+        Report("prof list 0x05/0x81", RazerProtocol.BuildGetProfileListBuffer(tid), h, 0);
+        Report("active    0x05/0x84", RazerProtocol.BuildGetActiveProfileBuffer(tid), h, 0);
+
+        // the grid sweep's own read, sampled across several buttons: back-to-back same-class/cmd
+        // requests are the case the arg echo exists for, so measure it the way the sweep issues it
+        byte slot = 1;
+        if (Exchange(h, RazerProtocol.BuildGetActiveProfileBuffer(tid)) is { } a
+            && RazerProtocol.ParseActiveProfileReply(a, out byte read) == ReplyResult.Success)
+            slot = read;
+        Console.WriteLine($"\n  grid reads below use active slot {slot}");
+        for (int pos = 1; pos <= 4; pos++)
+            Report($"button {pos,2}  0x02/0x8c", RazerProtocol.BuildGetButtonBuffer(
+                tid, slot, NagaV2ProButtons.IdForPosition(pos), 0x00), h, 3);
+
+        Console.WriteLine("\nRead the 'ready' column against RazerDevice.FastReadInitialDelayMs (50 ms):");
+        Console.WriteLine("  well under it  -> the rung is too slow and the sweep is paying for nothing");
+        Console.WriteLine("  at or above it -> the sweep is at the device's floor; lowering the rung only adds GETs");
+        return 0;
+    }
+
+    private const int LatencyPollStepMs = 5;
+    private const int LatencyCapMs = 800;
+
+    private static void Report(string label, byte[] request, SafeFileHandle h, int echoArgBytes)
+    {
+        if (!HidD_SetFeature(h, request, request.Length))
+        {
+            Console.WriteLine($"  {label}: SetFeature failed err={Marshal.GetLastWin32Error()}");
+            return;
+        }
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int gets = 0;
+        while (sw.ElapsedMilliseconds < LatencyCapMs)
+        {
+            Thread.Sleep(LatencyPollStepMs);
+            var reply = new byte[RazerProtocol.BufferLength];
+            reply[0] = 0x00;
+            gets++;
+            if (!HidD_GetFeature(h, reply, reply.Length))
+            {
+                Console.WriteLine($"  {label}: GetFeature failed err={Marshal.GetLastWin32Error()} after {sw.ElapsedMilliseconds} ms");
+                return;
+            }
+            bool pending = reply[1] is 0x00 or 0x01 || reply[7] != request[7] || reply[8] != request[8];
+            for (int i = 0; !pending && i < echoArgBytes; i++)
+                if (reply[9 + i] != request[9 + i]) pending = true;
+            if (pending) continue;
+            Console.WriteLine($"  {label}: ready at {sw.ElapsedMilliseconds,4} ms  (status=0x{reply[1]:x2}, {gets} GETs)");
+            return;
+        }
+        Console.WriteLine($"  {label}: never ready within {LatencyCapMs} ms ({gets} GETs)");
+    }
+
     private static SafeFileHandle? OpenLiveMouse(out int pidOpened)
     {
         foreach (int pid in RazerProtocol.ScanPids)

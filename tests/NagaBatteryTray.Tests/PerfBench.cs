@@ -3,6 +3,7 @@ using System.IO;
 using NagaBatteryTray.Hid;
 using NagaBatteryTray.Monitoring;
 using NagaBatteryTray.Settings;
+using NagaBatteryTray.Startup;
 using Xunit;
 
 /// <summary>Repeatable timing harness, NOT a unit test — the same "magnifying glass, not coverage"
@@ -13,6 +14,9 @@ using Xunit;
 /// <para>Output: one key=value line per measurement to NAGA_PERF_OUT (default
 /// %TEMP%/naga-perf.txt), tagged with NAGA_PERF_LABEL, so a before/after pair is a diff of two
 /// runs.</para></summary>
+// Same collection as the UI bench and the screenshot probe: all three append to one report
+// file, so they must never run in parallel with each other.
+[Collection("wpf-ui")]
 public sealed class PerfBenchIo
 {
     [Fact]
@@ -179,4 +183,34 @@ internal sealed class PerfReport : IDisposable
     }
 
     public void Dispose() => _w.Dispose();
+}
+
+/// <summary>Host-call latency that sits on a UI-thread path. Separate from the device and window
+/// benches because it is neither: it is the cost of asking Windows a question, which AppHost happens
+/// to ask at two moments the user is waiting on.</summary>
+[Collection("wpf-ui")]
+public sealed class PerfBenchHost
+{
+    [Fact]
+    public void Startup_state_query()
+    {
+        if (Environment.GetEnvironmentVariable("NAGA_PERF") != "1") return;
+        using var r = PerfReport.Open("host");
+
+        // StartupRegistration.IsEnabled shells out to schtasks.exe, so this is a process spawn plus
+        // a Task Scheduler round trip. AppHost calls it before showing the tray icon and again
+        // before constructing the dashboard window, both on the UI thread.
+        var reg = new StartupRegistration();
+        reg.IsEnabled();                      // discard the first: it pays one-time loader cost
+        var times = new List<double>();
+        for (int i = 0; i < 5; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            reg.IsEnabled();
+            sw.Stop();
+            times.Add(sw.Elapsed.TotalMilliseconds);
+        }
+        times.Sort();
+        r.Write("startup_state_query", times[times.Count / 2]);
+    }
 }
