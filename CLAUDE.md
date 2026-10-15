@@ -116,6 +116,18 @@ Shipped (spec links = the full story):
   `ConnectionPolicy` state machine over a new `IControlCollection` Win32 seam, connection identity
   (id within an operation, model across time), an atomic button write, a per-mouse state cache, and
   per-mouse profile names (2026-08-19, `specs/2026-08-19-naga-mouse-selector-design.md`)
+- Perf pass — the one real gap was the transport waiting on a fixed schedule unrelated to how
+  fast the mouse answered. Every idempotent read (battery, charging, DPI, button, profile) now
+  polls early on a measured rung schedule — `--probe-latency`, added by this pass, found every
+  command class ready in 21-24 ms — under a two-part patience cap (`ReadPatience`) so no read is
+  less patient, or slower to give up, than the flat wait it replaced; `ExchangeAsync` keeps the
+  writes and the transaction-id probe. The run-at-login `schtasks` query came off the tray and
+  dashboard-open paths behind a generation token. Dashboard content 3301→638 ms, startup battery
+  read 1214→93 ms, grid sweep 1149→420 ms, dead-receiver discovery 1212→500 ms, round-trip
+  counts identical to base in all ten scenarios — so this removed waiting, not work. No spec:
+  bounded work, reviewed after the fact (Fable diff gate, PASS at round 2, degraded for want of a
+  second vendor). The story is `docs/architecture.md` § `RazerDevice.cs`; the benches are
+  `PerfBenchIo`/`PerfBenchUi`/`PerfBenchHost`, gated `NAGA_PERF=1` (2026-10-15)
 
 Next:
 
