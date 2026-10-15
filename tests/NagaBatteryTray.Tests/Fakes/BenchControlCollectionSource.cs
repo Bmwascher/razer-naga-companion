@@ -32,6 +32,13 @@ internal sealed class BenchControlCollectionSource : IControlCollectionSource
     /// whole ladder. Both cases are benched, because the policy has to be right for each.</summary>
     public HashSet<int> Refusing { get; } = new();
 
+    /// <summary>Command classes this collection echoes but never answers, so a read of that class
+    /// spends its whole schedule and learns nothing. It models a mouse that falls asleep part way
+    /// through the grid sweep: the power class still answered when the app connected, and the button
+    /// reads afterwards do not. That is the case the sixth rung would have taxed twelve times over
+    /// (Fable diff r2, F12).</summary>
+    public HashSet<byte> SilentForClasses { get; } = new();
+
     /// <summary>SET calls issued = round trips the app asked for. Delay-policy independent, so it
     /// is the metric that proves a change removed WORK rather than just shortened a wait.</summary>
     public int Exchanges { get; private set; }
@@ -85,6 +92,11 @@ internal sealed class BenchControlCollectionSource : IControlCollectionSource
             _owner.FeatureCalls++;
             if (!_answers && !_refuses) return true;      // nothing parses: a present but silent link
             Array.Copy(_request, buffer, Math.Min(_request.Length, buffer.Length));
+            if (_owner.SilentForClasses.Contains(_request[7]))
+            {
+                buffer[1] = 0x00;                          // echoed, and it will never be more
+                return true;
+            }
             if (_since.ElapsedMilliseconds < _owner.ReadyAfterMs)
             {
                 buffer[1] = 0x00;                          // still our own request echoed back

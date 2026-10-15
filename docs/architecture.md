@@ -124,7 +124,9 @@ Zero-access `CreateFile` + `HidD_Set/GetFeature`.
   candidate would read as that candidate working. Both keep their proven timing exactly.
 - `FastReadAsync` serves **every idempotent read** — battery, charging, DPI, button, profile —
   since the 2026-10-15 perf pass. It polls early on the explicit `FastReadRungs` schedule
-  (30/20/100/200/400/250 ms, so the *cumulative* wait after each GET is 30/50/150/350/750/1000), and
+  (30/20/100/200/400/250 ms, so the *cumulative* wait after each GET is 30/50/150/350/750/1000 —
+  the sixth rung is for converted reads only, and an unbudgeted button or profile read stops at the
+  fifth, which is the 750 ms its own old ladder gave up at), and
   ready = completed status + class/cmd echo, the predicate `RazerProtocol.IsReplyReady` shares with
   `--probe-latency`. The rungs are measured, not guessed: `--probe-latency` on a V3 Pro found every
   command class ready within 22–24 ms, and 30 ms is the practical floor because `Task.Delay` rounds
@@ -347,7 +349,7 @@ Phase B never-write-user-slots rule once byte-for-byte reads shipped — button-
 `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at `%APPDATA%\NagaBatteryTray\settings.json`
 (Roaming — **not** the install dir under `%LOCALAPPDATA%`); holds cadences, low-battery
 threshold/notify, `SetReadDelayMs` (the write/tid-probe SET→GET wait, default 400, and the basis
-of every converted read's patience budget — see `ConvertedReadBudgetMs`), the cached transaction id,
+of every converted read's patience budget — see `ConvertedReadPatience`), the cached transaction id,
 app-side DPI presets, `PreferredMouse` (which mouse to talk to; `null` = scan order, V3 first), and
 app-side profile-slot names. The firmware stores no names, so a rename is a dashboard label only.
 Names are keyed **per mouse** since 2026-08-19 (`ProfileNamesByMouse`, model display name → slot →

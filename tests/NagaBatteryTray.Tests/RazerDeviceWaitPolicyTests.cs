@@ -150,6 +150,49 @@ public sealed class RazerDeviceWaitPolicyTests
         Assert.Equal(NagaV2ProButtons.Count * 2, src.FeatureCalls);
     }
 
+    /// <summary>The sixth rung was added so a CONVERTED read can reach 1000 ms. The button and
+    /// profile reads pass no patience, so without a bound they would run it too - 250 ms added to a
+    /// give-up their own old four-rung ladder set at 750, twelve times over for a sweep whose mouse
+    /// sleeps part way through (Fable diff r2, F12).</summary>
+    [Fact]
+    public async Task An_unbudgeted_read_keeps_the_five_rungs_its_own_ladder_gave_up_at()
+    {
+        var src = Source(readyAfterMs: 20);
+        src.SilentForClasses.Add(RazerProtocol.CommandClassButton);
+        using var device = new RazerDevice(Store(), src);
+        await device.ReadAsync(CancellationToken.None);   // connect on the power class, which answers
+        src.ResetCounters();
+
+        var sw = Stopwatch.StartNew();
+        var raw = await device.GetButtonAsync(1, NagaV2ProButtons.IdForPosition(1), CancellationToken.None);
+        sw.Stop();
+
+        Assert.Null(raw);
+        Assert.Equal(6, src.FeatureCalls);   // one SET and five GETs; the sixth rung is not theirs
+        Assert.True(sw.ElapsedMilliseconds < 900, $"took {sw.ElapsedMilliseconds} ms");
+    }
+
+    /// <summary>The busy tail. The budget is raised on the iteration AFTER a 0x01 is seen, so a 0x01
+    /// first seen at the last rung has no iteration left to spend the second half of the patience
+    /// in - which is every read whose BaseMs alone reaches the end of the schedule, i.e. a
+    /// SetReadDelayMs above 750. Nothing clamps that setting, so the guarantee has to hold there
+    /// too (Fable diff r2, F9).</summary>
+    [Fact]
+    public async Task A_busy_reply_at_the_last_rung_still_gets_the_second_half_of_the_patience()
+    {
+        var src = Source(readyAfterMs: 20);
+        var store = Store();
+        using var device = new RazerDevice(store, src);
+        await device.ReadAsync(CancellationToken.None);   // connect while the mouse is prompt
+
+        store.Settings.SetReadDelayMs = 1000;   // hand-edited above the 750 the rungs reach
+        src.ReadyAfterMs = 900;                 // 0x00 through every rung but the last
+        src.BusyUntilMs = 1200;                 // and that last GET is the FIRST to see busy
+
+        // without the tail the loop ends at 1000 ms with null; ExchangeAsync would have reached 2200
+        Assert.NotNull(await device.GetDpiAsync(CancellationToken.None));
+    }
+
     [Fact]
     public void A_premature_reply_is_never_mistaken_for_data()
     {

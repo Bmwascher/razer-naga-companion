@@ -222,7 +222,6 @@ public sealed class PerfBenchHost
             sw.Stop();
             times.Add(sw.Elapsed.TotalMilliseconds);
         }
-        times.Sort();
-        r.Write("startup_state_query", times[times.Count / 2]);
+        r.Write("startup_state_query", PerfStat.Median(times));
     }
 }
