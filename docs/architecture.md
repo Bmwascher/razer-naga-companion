@@ -350,7 +350,9 @@ Phase B never-write-user-slots rule once byte-for-byte reads shipped — button-
 (Roaming — **not** the install dir under `%LOCALAPPDATA%`); holds cadences, low-battery
 threshold/notify, `SetReadDelayMs` (the write/tid-probe SET→GET wait, default 400, and the basis
 of every converted read's patience budget — see `ConvertedReadPatience`), the cached transaction id,
-app-side DPI presets, `PreferredMouse` (which mouse to talk to; `null` = scan order, V3 first), and
+app-side DPI presets, `PreferredMouse` (which mouse to talk to; `null` = scan order, V3 first, and
+settable *or clearable* from the dashboard — the header picks it, the settings overlay's Mouse group
+returns it to `null`), and
 app-side profile-slot names. The firmware stores no names, so a rename is a dashboard label only.
 Names are keyed **per mouse** since 2026-08-19 (`ProfileNamesByMouse`, model display name → slot →
 name) — the old slot-only `ProfileNames` made the V2's "World of Warcraft" label the V3's slot 1
@@ -427,6 +429,20 @@ Replaces the deleted `SettingsWindow`/`SettingsViewModel`/`ButtonRowViewModel`.
   the box naming one mouse over another mouse's battery and profile card. Profile-slot names are
   read and written per connected model (`ProfileNamesByMouse`); an unknown model gets its own empty
   map rather than sharing another mouse's.
+- **Clearing the preference** (2026-10-15) — the selector can only move a preference between
+  *reachable* mice, so it cannot undo one. `CanPickMouse` greys it whenever a single mouse is
+  reachable, which is exactly the state a preference for a mouse that has gone leaves behind: every
+  battery read then runs `ProbePreferred` for a mouse that cannot answer, and nothing in the UI can
+  say otherwise. The settings overlay's **Mouse** group carries the escape hatch — the stored value
+  (`Automatic` when `null`), a note naming the mouse actually in use when the preference is not it,
+  and **Use automatic**, which writes `null` to settings, the monitor and the view model. No device
+  call: with no preference `ConnectionPolicy.Decide` returns `KeepLive`, so the probe simply stops
+  and the connection stays where it is. The note is phrased off the **connected model**, never off
+  the reachable list, because that list is only filled by the dashboard's discovery sweep and would
+  call every other mouse unreachable until it lands. `AppHost.SelectMouseAsync` updates the row
+  where it persists the pick — before the connect attempt — so the value shown is the value stored
+  even when the pick failed, which is one way the stuck state is reached.
+  Spec: `docs/superpowers/specs/2026-10-15-naga-clear-preferred-mouse-design.md`.
 - `MouseStageView` — the stage is the user's **product render** of the thumb panel
   (`Assets/naga-thumb.png`, a csproj `<Resource>`; grayscale blank-key AI edit of the real photo,
   decoded at `DecodePixelWidth=560` ≈ 2 MB only while the dashboard is open) clipped to
@@ -498,9 +514,11 @@ Replaces the deleted `SettingsWindow`/`SettingsViewModel`/`ButtonRowViewModel`.
 ## Test-side UI tooling (`tests/`)
 
 - `DashboardScreenshotProbe` — gated visual diagnostic (`NAGA_UI_PROBE=1`): renders the real
-  `DashboardWindow` (or the popup via `NAGA_UI_PROBE_TARGET=popup`) off-screen with seeded state
-  (`NAGA_UI_PROBE_STATE`: steady | renaming | named | typing | switching | offline;
-  `NAGA_UI_PROBE_THEME`) and writes a PNG. Also the README screenshot source (`docs/images/`).
+  `DashboardWindow` (or the popup via `NAGA_UI_PROBE_TARGET=popup`, or the settings drawer alone
+  via `=settings` — on the dashboard it is a 340-wide scroller whose lower groups fall past the
+  fold, so only a panel-sized capture can show them) off-screen with seeded state
+  (`NAGA_UI_PROBE_STATE`: steady | renaming | named | typing | switching | offline, plus
+  `preference` for the settings target; `NAGA_UI_PROBE_THEME`) and writes a PNG. Also the README screenshot source (`docs/images/`).
   Note for test hosts: don't use `ThemeManager.Apply` there — its relative pack URIs resolve
   against the ENTRY assembly; merge theme dictionaries with assembly-qualified URIs instead.
 - `DpiPillInteractionTests` — always-on regression that drives a real bubbled `Click` through a

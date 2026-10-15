@@ -3,6 +3,13 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     HorizontalAlignment="Right" Width="340">
+  <!-- local copy of the stock converter, NOT DesignSystem.xaml's BoolToVis: StaticResource is
+       resolved at load and throws when the app dictionaries are not merged, and SettingsView is
+       constructed bare in SettingsViewTests. (Every style here is a DynamicResource, which
+       resolves lazily and tolerates that.) Converter is not a DP, so it cannot be dynamic. -->
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="NoteToVis"/>
+  </UserControl.Resources>
   <Border Style="{DynamicResource CardBorder}" Margin="0,8,12,12" Background="{DynamicResource App.CanvasBrush}">
     <ui:DynamicScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto"
                             ScrollChanged="OnScrollerScrollChanged" SizeChanged="OnScrollerSizeChanged">
@@ -53,6 +60,23 @@
           <ui:ToggleSwitch DockPanel.Dock="Right" HorizontalAlignment="Right"
                            IsChecked="{Binding LowBatteryNotify, Mode=TwoWay}"/>
         </DockPanel>
+
+        <!-- Preferred mouse: the header selector sets this but cannot unset it (it is disabled
+             whenever one mouse is reachable — exactly what a preference for a missing mouse leaves
+             behind), so this row is where the value is legible and goes back to automatic -->
+        <TextBlock Style="{DynamicResource CardTitle}" Text="Mouse" Margin="0,8,0,0"/>
+        <DockPanel Margin="0,6,0,0">
+          <TextBlock Style="{DynamicResource BodyText}" Text="Preferred mouse" VerticalAlignment="Center"/>
+          <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center"
+                     Style="{DynamicResource BodyText}" FontWeight="SemiBold"
+                     Text="{Binding PreferredMouseLabel}"/>
+        </DockPanel>
+        <TextBlock Style="{DynamicResource SubtleText}" TextWrapping="Wrap"
+                   Text="{Binding MousePreferenceNote}"
+                   Visibility="{Binding ShowMousePreferenceNote, Converter={StaticResource NoteToVis}}"/>
+        <ui:Button Content="Use automatic" Click="OnUseAutomaticMouse" Margin="0,6,0,0"
+                   IsEnabled="{Binding HasMousePreference}"
+                   ToolTip="Stop preferring one mouse — the app drives whichever it finds"/>
 
         <TextBlock Style="{DynamicResource CardTitle}" Text="Battery polling (seconds)" Margin="0,8,0,0"/>
         <DockPanel Margin="0,6">

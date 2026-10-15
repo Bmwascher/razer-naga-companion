@@ -149,6 +149,7 @@ public sealed class AppHost
         win.ProfileRefreshRequested += () => _ = RefreshProfileAsync(vm);
         vm.SwitchRequested += slot => _ = SwitchProfileAsync(vm, slot); // dropdown pick (spec §13.1)
         vm.MouseSelectRequested += name => _ = SelectMouseAsync(vm, name);
+        vm.ClearMousePreferenceRequested += () => ClearMousePreference(vm);
         win.SettingsOverlayRequested += () => ShowSettingsOverlay(win, vm);
         EventHandler<DeviceState> onState = (_, state) => Dispatch(() => vm.ApplyState(state));
         _monitor.StateChanged += onState;
@@ -432,6 +433,10 @@ public sealed class AppHost
             _settings.Settings.PreferredMouse = name;
             _settings.Save();
             _monitor.PreferredMouse = name;
+            // the settings row shows the stored value, so it is updated HERE and not on the success
+            // path: an unreachable pick persists the name it could not reach, and that is precisely
+            // the value the user later needs to see and clear (spec 2026-10-15 §1.1)
+            vm.SetPreferredMouse(name);
 
             // WAITS for the read lock: the ordinary refresh skips when a read is in flight, which would
             // report the mouse the user just picked as unreachable (spec §4.5). Task.Run for the same
@@ -456,6 +461,18 @@ public sealed class AppHost
         {
             _selecting = false;
         }
+    }
+
+    /// <summary>Settings overlay "Use automatic" (spec 2026-10-15): forget the preferred mouse. No
+    /// device call and no refresh — with no preference the battery path's reselect decision is
+    /// KeepLive, so the app simply stops probing for the mouse that is gone and stays on the one it
+    /// is talking to. Scan order (V3 first) applies the next time it chooses fresh.</summary>
+    private void ClearMousePreference(DashboardViewModel vm)
+    {
+        _settings.Settings.PreferredMouse = null;
+        _settings.Save();
+        _monitor.PreferredMouse = null;
+        vm.SetPreferredMouse(null);
     }
 
     private void ShowSettingsOverlay(DashboardWindow win, DashboardViewModel vm)

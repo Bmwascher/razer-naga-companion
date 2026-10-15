@@ -52,6 +52,7 @@ public sealed class DashboardViewModel : ObservableObject
         _pollSeconds = _seededPollSeconds = source.PollIntervalSeconds;
         _pollChargingSeconds = _seededPollChargingSeconds = source.PollIntervalChargingSeconds;
         _theme = source.Theme;
+        _preferredMouse = source.PreferredMouse;
         foreach (var (mouse, names) in source.ProfileNamesByMouse)
             _namesByMouse[mouse] = new Dictionary<byte, string>(names);
 
@@ -117,6 +118,7 @@ public sealed class DashboardViewModel : ObservableObject
     public string BatteryChipText { get => _batteryChipText; private set => Set(ref _batteryChipText, value); }
     private string _modelName = "Razer Naga";
     public string ModelName { get => _modelName; private set => Set(ref _modelName, value); }
+    private string? _connectedModel; // ModelName without its generic fallback: null = nothing connected
 
     public void ApplyState(DeviceState s)
     {
@@ -126,6 +128,13 @@ public sealed class DashboardViewModel : ObservableObject
         HeaderSubtitle = !DeviceOnline ? "offline" : s.Wired ? "Wired" : "Wireless";
         BatteryChipText = DeviceOnline ? $"{s.Percent}%{(s.Charging ? " ⚡" : "")}" : "—";
         ModelName = s.Model ?? "Razer Naga";
+        if (!string.Equals(_connectedModel, s.Model, StringComparison.Ordinal))
+        {
+            // the preference note is a statement about the CONNECTION as much as about the setting
+            _connectedModel = s.Model;
+            Notify(nameof(MousePreferenceNote));
+            Notify(nameof(ShowMousePreferenceNote));
+        }
         _namesKey = ModelName;
         // The box IS the header's model indicator now, so it has to follow the mouse actually
         // connected — before the probe lands (it reads like the label it replaced) and after an
@@ -293,6 +302,52 @@ public sealed class DashboardViewModel : ObservableObject
         // otherwise — showing the first probe hit as selected named a mouse we are not on
         SyncSelectedMouse(connected);
     }
+
+    // ---- settings overlay: preferred mouse (spec 2026-10-15) ----
+
+    /// <summary>The persisted preference (null = scan order). The header selector sets it, but it
+    /// cannot unset it: that box is disabled whenever one mouse is reachable, which is exactly the
+    /// state a preference for a mouse that is gone leaves behind. The settings row is where the
+    /// value is legible and where it goes back to automatic.</summary>
+    public string? PreferredMouse => _preferredMouse;
+    private string? _preferredMouse;
+
+    public string PreferredMouseLabel => _preferredMouse ?? "Automatic";
+
+    /// <summary>Enables "Use automatic" — with no preference there is nothing to clear.</summary>
+    public bool HasMousePreference => _preferredMouse is not null;
+
+    /// <summary>Why the preference is worth clearing, phrased off the CONNECTED model rather than
+    /// the reachable list: the list is only filled by the dashboard's discovery sweep, so before
+    /// that lands it would call every other mouse unreachable. Offline, ModelName's generic
+    /// fallback names no real mouse, so the note names none either.</summary>
+    public string MousePreferenceNote =>
+        _preferredMouse is null || string.Equals(_preferredMouse, _connectedModel, StringComparison.Ordinal)
+            ? ""
+            : _connectedModel is { } connected
+                ? $"Not connected — the app is using {connected}."
+                : "Not connected.";
+
+    public bool ShowMousePreferenceNote => MousePreferenceNote.Length > 0;
+
+    /// <summary>The one writer: the host calls it where it persists the value — on a header pick
+    /// (including one that fails to connect, which is how a stuck preference is created) and on a
+    /// clear.</summary>
+    public void SetPreferredMouse(string? name)
+    {
+        if (string.Equals(_preferredMouse, name, StringComparison.Ordinal)) return;
+        _preferredMouse = name;
+        Notify(nameof(PreferredMouse));
+        Notify(nameof(PreferredMouseLabel));
+        Notify(nameof(HasMousePreference));
+        Notify(nameof(MousePreferenceNote));
+        Notify(nameof(ShowMousePreferenceNote));
+    }
+
+    /// <summary>"Use automatic" — the host clears the setting, the monitor and this row. No device
+    /// call: with no preference the battery path simply stops probing for the missing mouse.</summary>
+    public event Action? ClearMousePreferenceRequested;
+    public void RequestClearMousePreference() => ClearMousePreferenceRequested?.Invoke();
 
     /// <summary>Snap the dropdown back after a failed pick: to the mouse actually connected, or —
     /// offline, where ModelName is the generic fallback and names no real mouse — to the last value

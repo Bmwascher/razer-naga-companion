@@ -21,6 +21,23 @@ public sealed class BatteryMonitorSelectionTests
         Assert.Equal("Naga V3 Pro", monitor.PreferredMouse);
     }
 
+    /// <summary>"Use automatic" in the settings overlay (spec 2026-10-15) clears the preference
+    /// through this same pass-through. ConnectionPolicyTests.NoPreferenceNeverProbes is the other
+    /// half: with null arriving at the device, the battery path stops probing for the mouse that
+    /// is gone.</summary>
+    [Fact]
+    public void ClearingThePreferenceReachesTheDevice()
+    {
+        var device = new FakeRazerDevice();
+        var monitor = Build(device);
+        monitor.PreferredMouse = "Naga V2 Pro";
+
+        monitor.PreferredMouse = null;
+
+        Assert.Null(device.PreferredModel);
+        Assert.Null(monitor.PreferredMouse);
+    }
+
     [Fact]
     public async Task DiscoverMiceReturnsWhatTheDeviceFound()
     {
