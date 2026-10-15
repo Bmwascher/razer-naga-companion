@@ -9,9 +9,16 @@ using Xunit;
 /// them and a real defect escaped: patience on a BUSY mouse silently fell from ~1000 ms to 400 ms,
 /// which the gated benches could not catch because the emulator had no 0x01 path at all
 /// (Fable diff r1, F1/F2).
-/// <para>They assert on BEHAVIOUR (did the read succeed, how many round trips) and on generous
-/// wall-clock bounds, never on exact timings: Task.Delay rounds up to the ~15.6 ms timer tick, so a
-/// tight assertion here would be a flaky test rather than a stronger one.</para></summary>
+/// <para>They assert on BEHAVIOUR first - did the read succeed, and how many round trips did it
+/// take. ROUND-TRIP COUNTS are the primary evidence, because the rung schedule decides how many
+/// GETs a read issues by arithmetic on nominal waits: a count reads the same on an idle machine and
+/// on a loaded CI runner. Wall clock is asserted only where nothing else can see the behaviour, and
+/// then with headroom measured rather than guessed. Task.Delay rounds up to the ~15.6 ms timer tick
+/// and the thread has to be scheduled afterwards, so under load these reads overshoot badly: at
+/// 100% CPU (16 spinners on 16 cores, 2026-10-15) a 90 ms read measured 737 ms and a 400 ms read
+/// measured 1086 ms. A bound that merely sits between two nominal outcomes is therefore a flaky
+/// test rather than a stronger one - each one below says which two outcomes its number separates
+/// and why the gap survives that overshoot.</para></summary>
 public sealed class RazerDeviceWaitPolicyTests
 {
     private static ISettingsStore Store(int setReadDelayMs = 400)
@@ -30,11 +37,17 @@ public sealed class RazerDeviceWaitPolicyTests
         return src;
     }
 
+    /// <summary>The per-read wait is the 30 ms first rung and NOT the configured flat wait. Counts
+    /// cannot show that - the flat path also took one SET and one GET per read - so wall clock is the
+    /// only evidence, and the fixture is what makes it robust: SetReadDelayMs is set far above the
+    /// whole schedule, which leaves the two outcomes 90 ms and 12 s apart instead of 90 ms and
+    /// 1200 ms. A budget that large never binds for a prompt mouse, so it does not distort the
+    /// ladder; it only moves the failing outcome out of reach of scheduler overshoot.</summary>
     [Fact]
     public async Task A_prompt_mouse_is_read_on_the_first_rung()
     {
         var src = Source(readyAfterMs: 20);
-        using var device = new RazerDevice(Store(), src);
+        using var device = new RazerDevice(Store(setReadDelayMs: 4000), src);
 
         var sw = Stopwatch.StartNew();
         var reading = await device.ReadAsync(CancellationToken.None);
@@ -44,8 +57,10 @@ public sealed class RazerDeviceWaitPolicyTests
         // verify + battery + charging, one SET and one GET each: nothing is retried
         Assert.Equal(3, src.Exchanges);
         Assert.Equal(6, src.FeatureCalls);
-        // three reads that each used to pay a flat 400 ms must now come in far under that
-        Assert.True(sw.ElapsedMilliseconds < 400, $"took {sw.ElapsedMilliseconds} ms");
+        // 2000 separates three rung-1 reads (90 ms nominal, 737 ms measured at 100% CPU) from three
+        // reads that pay the configured wait instead (12 s): 2.7x the worst measurement, 6x under
+        // the outcome it rules out.
+        Assert.True(sw.ElapsedMilliseconds < 2000, $"took {sw.ElapsedMilliseconds} ms");
     }
 
     /// <summary>The F1 regression. A mouse answering 0x01 for 600 ms is inside the patience the flat
@@ -87,9 +102,16 @@ public sealed class RazerDeviceWaitPolicyTests
         sw.Stop();
 
         Assert.False(reading.IsPresent);
-        // one converted read's full schedule is ~1000 ms; the verify failing ends ReadAsync there,
-        // so a generous ceiling still proves the loop terminates rather than spinning
-        Assert.True(sw.ElapsedMilliseconds < 4000, $"took {sw.ElapsedMilliseconds} ms");
+        // The give-up in round trips: one SET and the whole six-rung converted schedule, then stop.
+        // That is arithmetic on nominal waits, so load cannot move it, and a seventh feature call is
+        // what a retry the policy does not have would look like. The verify failing ends ReadAsync
+        // there, so this is the only read in the call.
+        Assert.Equal(1, src.Exchanges);
+        Assert.Equal(7, src.FeatureCalls);
+        // The ceiling only has to separate "ended" from "spinning", which is unbounded: the schedule
+        // is ~1000 ms nominal and measured 2001 ms at 100% CPU, so 10 s proves termination with 5x
+        // headroom instead of measuring the schedule.
+        Assert.True(sw.ElapsedMilliseconds < 10_000, $"took {sw.ElapsedMilliseconds} ms");
     }
 
     /// <summary>The converse of the busy case, and the reason patience takes TWO numbers. A
@@ -105,13 +127,16 @@ public sealed class RazerDeviceWaitPolicyTests
         src.Present.Add(RazerProtocol.MousePidV3Wireless);   // present, never answers
         using var device = new RazerDevice(Store(), src);
 
-        var sw = Stopwatch.StartNew();
         var reading = await device.ReadAsync(CancellationToken.None);
-        sw.Stop();
 
         Assert.False(reading.IsPresent);
-        // SetReadDelayMs of rungs plus timer-tick rounding; the busy-case budget would spend ~1000
-        Assert.True(sw.ElapsedMilliseconds < 800, $"took {sw.ElapsedMilliseconds} ms");
+        // The budget split, counted rather than timed: BaseMs of 400 clamps the ladder to five GETs
+        // (30+20+100+200+50), where the busy-case budget would run all six. Wall clock cannot tell
+        // those apart on a loaded machine - the outcomes are 400 and 1000 ms nominal, and these five
+        // awaits measured 1086 ms at 100% CPU, i.e. past the outcome the assertion would have to
+        // rule out. The count is 6 against 7 whatever the scheduler does.
+        Assert.Equal(1, src.Exchanges);
+        Assert.Equal(6, src.FeatureCalls);
     }
 
     /// <summary>Nothing validates SetReadDelayMs between settings.json and the transport, so a
@@ -163,13 +188,15 @@ public sealed class RazerDeviceWaitPolicyTests
         await device.ReadAsync(CancellationToken.None);   // connect on the power class, which answers
         src.ResetCounters();
 
-        var sw = Stopwatch.StartNew();
         var raw = await device.GetButtonAsync(1, NagaV2ProButtons.IdForPosition(1), CancellationToken.None);
-        sw.Stop();
 
         Assert.Null(raw);
-        Assert.Equal(6, src.FeatureCalls);   // one SET and five GETs; the sixth rung is not theirs
-        Assert.True(sw.ElapsedMilliseconds < 900, $"took {sw.ElapsedMilliseconds} ms");
+        // One SET and five GETs: spending the sixth rung is exactly a seventh feature call, so the
+        // count proves the whole thing and nothing is left for wall clock to add. It used to assert
+        // < 900 ms against a 750 ms nominal and flaked once under a concurrent headless-Edge run
+        // (2026-10-15); these same five awaits measured 937 ms at 100% CPU.
+        Assert.Equal(1, src.Exchanges);
+        Assert.Equal(6, src.FeatureCalls);
     }
 
     /// <summary>The busy tail. The budget is raised on the iteration AFTER a 0x01 is seen, so a 0x01
