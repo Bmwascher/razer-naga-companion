@@ -19,3 +19,9 @@ Thumbs.db
 # Claude Code local state (session snapshots, personal settings)
 .claude/state/
 .claude/settings.local.json
+
+# parsec: local config (machine-specific worktrees path) and review artifacts.
+# The docs root stays untracked on purpose - round replies committed into the tree
+# being reviewed can leak a blind panel's other lanes.
+.claude/parsec.toml
+reviews/
