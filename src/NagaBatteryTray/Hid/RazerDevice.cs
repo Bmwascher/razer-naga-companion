@@ -113,9 +113,20 @@ public sealed class RazerDevice : IRazerDevice
         return null; // still busy after retries
     }
 
-    private const int FastReadInitialDelayMs = 50;
+    /// <summary>Waits BETWEEN GETs for one fast read. Measured on a V3 Pro (--probe-latency,
+    /// 2026-10-15): every command class - battery, charging, DPI, profile list, active slot, and the
+    /// grid's own button reads - was ready within 22-24 ms. That is an upper bound, since the probe
+    /// cannot observe sooner than Windows' ~15.6 ms timer tick. The first rung used to be 50 ms, so
+    /// every read waited about twice as long as the mouse actually needed, twelve times per sweep.
+    /// <para>30 ms is the practical floor rather than a guess: Task.Delay rounds up to that same
+    /// ~15.6 ms tick for anything from 16 to 31 ms, and raising the system timer resolution to beat
+    /// it would cost idle power (hard rule 1). The later rungs are then chosen so the CUMULATIVE
+    /// wait after each one still matches the old 50/100/200/400 ladder exactly - 30, 50, 150, 350,
+    /// 750 - which makes this strictly faster for a mouse that answers promptly and never slower for
+    /// one that does not. The price is one extra GET on a read that needs the whole schedule.</para></summary>
+    private static readonly int[] FastReadRungs = { 30, 20, 100, 200, 400 };
 
-    /// <summary>Fast SET->GET for idempotent READS: poll early on a doubling ladder (50→100→200→400 ms)
+    /// <summary>Fast SET->GET for idempotent READS: poll early on the FastReadRungs schedule
     /// instead of paying the battery-cadence SetReadDelayMs per read — the grid sweep is 12 reads, so
     /// the flat 400 ms wait made it ~5 s (user find). Safe because a premature GET is detectable and
     /// retryable: the device buffer still holds our request echo (status 0x00), a busy marker (0x01),
@@ -134,10 +145,10 @@ public sealed class RazerDevice : IRazerDevice
         if (!collection.IsOpen) return null;
         if (!collection.SetFeature(request)) { _conn.Close(); return null; }
 
-        int delay = FastReadInitialDelayMs;
         int spent = 0;
-        for (int attempt = 0; attempt < 4; attempt++)
+        foreach (int rung in FastReadRungs)
         {
+            int delay = rung;
             if (budgetMs is { } budget)
             {
                 if (spent >= budget) break;
@@ -161,7 +172,6 @@ public sealed class RazerDevice : IRazerDevice
             for (int i = 0; !pending && i < echoArgBytes; i++)
                 if (reply[9 + i] != request[9 + i]) pending = true;
             if (!pending) return reply;
-            delay = Math.Min(delay * 2, 400);
         }
         return null; // never became ready — caller treats like any failed read
     }

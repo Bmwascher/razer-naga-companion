@@ -572,12 +572,21 @@ public static class ProbeCommand
     public static int RunLatency()
     {
         Console.WriteLine("Naga Battery Tray - reply-latency probe (read-only: GET commands only)\n");
-        using var h = OpenLiveMouse(out int pid);
-        if (h is null)
+        // A wireless mouse is asleep most of the time, and HidSharp's device list can also come back
+        // cold in a freshly started process, so a single attempt is a coin flip. Wait the way
+        // --probe-buttons already waits for a replug: poll, and tell the user what to do meanwhile.
+        using var session = new MouseSession();
+        if (!session.Open())
         {
-            Console.WriteLine("No live mouse collection found (connected? awake?).");
-            return 1;
+            Console.WriteLine("No live mouse yet - MOVE THE MOUSE to wake it (waiting up to 60 s)...");
+            if (!session.WaitForReconnect())
+            {
+                Console.WriteLine("Gave up: no mouse answered. Is it switched on and in range?");
+                return 1;
+            }
         }
+        var h = session.Handle!;
+        int pid = session.Pid;
         Console.WriteLine($"Live collection: {RazerProtocol.ModelNameForPid(pid) ?? "unknown"} PID 0x{pid:x4}");
         Console.WriteLine("Polling every 5 ms after each SET; 'ready' = the completed status + class/cmd echo\n");
 
@@ -599,7 +608,7 @@ public static class ProbeCommand
             Report($"button {pos,2}  0x02/0x8c", RazerProtocol.BuildGetButtonBuffer(
                 tid, slot, NagaV2ProButtons.IdForPosition(pos), 0x00), h, 3);
 
-        Console.WriteLine("\nRead the 'ready' column against RazerDevice.FastReadInitialDelayMs (50 ms):");
+        Console.WriteLine("\nRead the 'ready' column against the FIRST rung of RazerDevice.FastReadRungs:");
         Console.WriteLine("  well under it  -> the rung is too slow and the sweep is paying for nothing");
         Console.WriteLine("  at or above it -> the sweep is at the device's floor; lowering the rung only adds GETs");
         return 0;
