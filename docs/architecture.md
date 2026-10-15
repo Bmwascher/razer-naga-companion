@@ -441,7 +441,10 @@ Replaces the deleted `SettingsWindow`/`SettingsViewModel`/`ButtonRowViewModel`.
   the reachable list, because that list is only filled by the dashboard's discovery sweep and would
   call every other mouse unreachable until it lands. `AppHost.SelectMouseAsync` updates the row
   where it persists the pick — before the connect attempt — so the value shown is the value stored
-  even when the pick failed, which is one way the stuck state is reached.
+  even when the pick failed, which is one way the stuck state is reached. Putting the escape hatch
+  in the header instead, by listing an unreachable preferred mouse there, was considered and
+  **declined** (user, 2026-10-15): the 2026-08-19 rule stands unqualified, and a mouse is listed
+  there if and only if it answered the probe.
   Spec: `docs/superpowers/specs/2026-10-15-naga-clear-preferred-mouse-design.md`.
 - `MouseStageView` — the stage is the user's **product render** of the thumb panel
   (`Assets/naga-thumb.png`, a csproj `<Resource>`; grayscale blank-key AI edit of the real photo,

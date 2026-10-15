@@ -1,7 +1,8 @@
 # Clearing the preferred mouse — design
 
 Date: 2026-10-15
-Status: proposed
+Status: built on `fix/clear-preferred-mouse`, awaiting installed-build acceptance.
+§8's option C was put to the product owner and declined (2026-10-15).
 Follows `2026-08-19-naga-mouse-selector-design.md` (§4.5 is the control this fixes).
 
 ## 1. Problem
@@ -76,7 +77,7 @@ extra I/O.
 | --- | --- | --- |
 | A | An "Automatic" entry at the top of the header `ComboBox` | **Rejected.** That box is the header's identity element: its selection means "the mouse I am talking to", and it is resynced to the connected model on every state change. An entry that is never selectable-and-kept would be picked, then visibly snap back to "Naga V3 Pro". It also makes `Mice.Count > 1` permanently true, which retires the deliberate reads-like-a-label behaviour for everyone, to serve a rare state. |
 | B | A "Preferred mouse" row in the settings overlay, with an action that returns it to automatic | **Chosen.** See §4.2. |
-| C | List the preferred mouse in the header even when unreachable, marked as such | **Not taken here — the user's call.** It is the most direct fix, and it is narrow: it would only ever add one entry, only while a preference is set and unreachable, and it would be labelled. But "only reachable mice are listed" is a recorded decision from 2026-08-19 (§4.4: accuracy over speed, a sleeping mouse must never appear), and reversing it is not this pass's to make. Recorded in §8 as an open question. |
+| C | List the preferred mouse in the header even when unreachable, marked as such | **Put to the product owner, and declined (2026-10-15).** It is the most direct fix, and it is narrow: it would only ever add one entry, only while a preference is set and unreachable, and it would be labelled. But "only reachable mice are listed" is a recorded decision from 2026-08-19 (§4.4: accuracy over speed, a sleeping mouse must never appear), and reversing it was not this pass's to make. See §8. |
 | D | Clear the preference automatically after N failed probes | **Rejected.** It throws away an explicit choice because a dongle spent a day in a drawer. The 2026-08-19 spec (§8) states the retry is the mechanism, and giving up would strand the user on the wrong mouse. |
 | E | Relax `CanPickMouse` to `Mice.Count > 1 \|\| a preference is set` | **Rejected as insufficient.** With one mouse listed the enabled box offers only the mouse already selected, and `SelectedMouse`'s own rule suppresses re-picking the connected model. There is nothing to click. It only works in combination with C, and then C is doing the work. |
 
@@ -188,13 +189,14 @@ row is reviewable as a picture before the installed build is touched.
 4. With both mice reachable, pick the other mouse in the header. The settings row follows it.
 5. Idle footprint and mouse feel unchanged (hard rule 1).
 
-## 8. Open question for the product owner
+## 8. Option C — ruled on, declined (user, 2026-10-15)
 
-Option C — listing an unreachable *preferred* mouse in the header, marked — would put the escape
-hatch at the exact control where the preference was made, which is where a user would look first.
-It is a narrow reversal of the 2026-08-19 "only reachable mice are listed" decision: one extra
-entry, only while a stale preference exists, explicitly labelled unreachable, never a mouse the
-app merely hopes is there.
+Option C was listing an unreachable *preferred* mouse in the header, marked, so the escape hatch
+sat at the control where the preference was made. It was put to the product owner because it is a
+narrow reversal of the 2026-08-19 "only reachable mice are listed" decision: one extra entry, only
+while a stale preference exists, explicitly labelled unreachable.
 
-This pass does not take it. If it is wanted, it layers cleanly on top of what is built here — the
-settings row stays useful either way, as the place the value is legible.
+**Declined.** The header keeps listing only mice that answered the reachability probe, and the
+settings row is the whole fix. The 2026-08-19 decision therefore stands unchanged and unqualified:
+a mouse appears in that list if and only if it answered. Anything about a mouse that did not
+answer belongs in the settings overlay, not the header.
