@@ -69,7 +69,8 @@ reference is `docs/architecture.md`; per-feature design history is `docs/superpo
 - UI screenshot probe (layout iteration + README screenshots, no install needed): set
   `NAGA_UI_PROBE=1`, run test filter `DashboardScreenshotProbe`; vars: `NAGA_UI_PROBE_OUT`,
   `NAGA_UI_PROBE_THEME`, `NAGA_UI_PROBE_STATE` (steady|renaming|named|typing|switching|offline),
-  `NAGA_UI_PROBE_TARGET` (dashboard|popup)
+  `NAGA_UI_PROBE_TARGET` (dashboard|popup|settings — the settings drawer on its own, where
+  state `preference` seeds a preferred mouse other than the connected one)
 
 ## Directory
 

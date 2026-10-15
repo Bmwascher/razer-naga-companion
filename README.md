@@ -68,7 +68,9 @@ are actually awake and lets you pick; the app remembers the choice and returns t
   that's actually awake and lets you choose which one the app drives. The pick sticks, and
   if that mouse drops off and comes back the app returns to it by itself, on the battery
   poll it already runs. Nothing one mouse knows — active slot, DPI, profile names, button
-  chips — is ever shown or written for the other.
+  chips — is ever shown or written for the other. Settings shows which mouse you picked and
+  has a **Use automatic** button that forgets it again, so a choice you made for a mouse
+  you've since unplugged never becomes permanent.
 - 🔔 **Low-battery toast** — a native Windows notification when you drop to/below your
   threshold (default 15%) while on battery.
 - ⚡ **Charging aware** — polls faster while charging (15 s vs 60 s), suppresses nagging

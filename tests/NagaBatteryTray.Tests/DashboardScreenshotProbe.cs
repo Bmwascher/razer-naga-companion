@@ -18,9 +18,10 @@ using Application = System.Windows.Application;
 /// `dotnet test` runs never touch it — the WPF-windows-verified-on-the-installed-build convention
 /// stands; this is a magnifying glass for iterating on layout, not coverage.
 /// Optional: NAGA_UI_PROBE_OUT (PNG path), NAGA_UI_PROBE_THEME (preset name, default Ultraviolet),
-/// NAGA_UI_PROBE_STATE (steady | renaming | named | typing | switching | offline, default steady),
-/// NAGA_UI_PROBE_TARGET (dashboard | popup, default dashboard). Also the README screenshot
-/// source — regenerate docs/images/ with it whenever the UI visibly changes.</summary>
+/// NAGA_UI_PROBE_STATE (steady | renaming | named | typing | switching | offline, default steady;
+/// with TARGET=settings, "preference" seeds a preferred mouse other than the connected one),
+/// NAGA_UI_PROBE_TARGET (dashboard | popup | settings, default dashboard). Also the README
+/// screenshot source — regenerate docs/images/ with it whenever the UI visibly changes.</summary>
 [Collection("wpf-ui")] // shares a WPF Application slot with DpiPillInteractionTests — never in parallel
 public class DashboardScreenshotProbe
 {
@@ -68,6 +69,41 @@ public class DashboardScreenshotProbe
             while (Environment.TickCount64 < settle) { Thread.Sleep(50); DoEvents(); }
             Capture(pop, outPath);
             pop.Close();
+            Dispatcher.CurrentDispatcher.InvokeShutdown();
+            return;
+        }
+
+        if (target == "settings")
+        {
+            // the settings drawer on its own, at natural height. Captured over the dashboard it is
+            // a 340-wide scroller and everything below "General" falls past the fold, so the window
+            // shot cannot show the lower groups at all (spec 2026-10-15).
+            var svm = new DashboardViewModel(new AppSettings(), runAtStartup: true,
+                (p, k, m, u) => Task.FromResult(WriteOutcome.Applied), (p, r) => Task.FromResult(WriteOutcome.Applied));
+            svm.ApplyState(DeviceState.Online(48, charging: false, wired: false, model: "Naga V3 Pro"));
+            // the stuck state: a preference for a mouse that is not the connected one
+            if (state == "preference") svm.SetPreferredMouse("Naga V2 Pro");
+
+            var host = new Window
+            {
+                Content = new SettingsView { DataContext = svm },
+                Width = 372,
+                SizeToContent = SizeToContent.Height,
+                WindowStyle = WindowStyle.None,
+                ResizeMode = ResizeMode.NoResize,
+                Left = -20000,
+                Top = -20000,
+                ShowInTaskbar = false,
+                ShowActivated = false,
+            };
+            host.SetResourceReference(Window.BackgroundProperty, "App.CanvasBrush");
+            host.Show();
+            host.UpdateLayout();
+            DoEvents();
+            long panelSettle = Environment.TickCount64 + 400;
+            while (Environment.TickCount64 < panelSettle) { Thread.Sleep(50); DoEvents(); }
+            Capture(host, outPath);
+            host.Close();
             Dispatcher.CurrentDispatcher.InvokeShutdown();
             return;
         }

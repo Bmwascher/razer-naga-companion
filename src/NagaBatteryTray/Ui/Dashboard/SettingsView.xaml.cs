@@ -74,6 +74,11 @@ public partial class SettingsView : UserControl
     { if (ThemeList.SelectedItem is string name) ThemeChanged?.Invoke(name); }
     private void OnTrayIconStyleChanged(object s, SelectionChangedEventArgs e)
     { if (TrayIconStyleList.SelectedItem is string label) TrayIconStyleChanged?.Invoke(label == "Text only" ? "Text" : "Gauge"); }
+    // straight to the view model (the DataContext), like the dropdowns' own requests: AppHost
+    // subscribes once per dashboard, so nothing has to be wired per gear click
+    private void OnUseAutomaticMouse(object s, RoutedEventArgs e) =>
+        ((DashboardViewModel)DataContext).RequestClearMousePreference();
+
     private void OnResetAll(object s, RoutedEventArgs e)
     {
         if (_confirmingResetAll)
