@@ -186,9 +186,9 @@ prints the raw battery reply:
 ```
 
 `--probe-latency` is read-only (GET commands only) and answers one question: how long after a
-request the mouse's reply is actually ready. The reads poll early on a doubling ladder rather
-than waiting a flat interval, so that number is what the ladder's first step should be tuned
-against. The mouse must be awake — give it a nudge first.
+request the mouse's reply is actually ready. The reads poll early on a fixed rung schedule
+rather than waiting a flat interval, so that number is what the first rung is tuned against.
+The mouse must be awake — give it a nudge first.
 
 ---
 

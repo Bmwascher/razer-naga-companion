@@ -118,10 +118,39 @@ factory action).
 
 Zero-access `CreateFile` + `HidD_Set/GetFeature`.
 
-- `ExchangeAsync` transport (SET→`SetReadDelayMs` wait→GET, busy-retry, close-on-failure) for
-  battery/DPI/writes + the tid probe, and `FastReadAsync` for idempotent onboard-memory READS
-  (button/profile queries): early-poll doubling ladder 50→400 ms, ready = completed status +
-  class/cmd echo — the grid sweep's 12 reads land in ~a second instead of ~5 s.
+- `ExchangeAsync` transport (SET→`SetReadDelayMs` wait→GET, one busy-retry, close-on-failure)
+  now serves **writes and the transaction-id probe only**: a write ack is not idempotent, and the
+  probe is interrogating an *unknown* transaction id where a stale finished reply from the previous
+  candidate would read as that candidate working. Both keep their proven timing exactly.
+- `FastReadAsync` serves **every idempotent read** — battery, charging, DPI, button, profile —
+  since the 2026-10-15 perf pass. It polls early on the explicit `FastReadRungs` schedule
+  (30/20/100/200/400/250 ms, so the *cumulative* wait after each GET is 30/50/150/350/750/1000), and
+  ready = completed status + class/cmd echo, the predicate `RazerProtocol.IsReplyReady` shares with
+  `--probe-latency`. The rungs are measured, not guessed: `--probe-latency` on a V3 Pro found every
+  command class ready within 22–24 ms, and 30 ms is the practical floor because `Task.Delay` rounds
+  up to Windows' ~15.6 ms timer tick (raising the system timer resolution would cost idle power,
+  hard rule 1).
+- A read MOVED off `ExchangeAsync` also carries a `ReadPatience` cap, so it can be faster but never
+  less patient — or slower to give up — than the policy it replaced. That takes **two** numbers,
+  because `ExchangeAsync` had two behaviours: it waited `SetReadDelayMs` once and looked, and on
+  anything but a busy (0x01) reply it stopped there, while a 0x01 bought another 200 ms and a
+  *second* `SetReadDelayMs`. So the budget starts at `BaseMs` (400) and is raised to `AfterBusyMs`
+  (`SetReadDelayMs * 2 + 200` = 1000) only once a 0x01 has actually been seen. Both halves were got
+  wrong in turn during the pass, and the bench measured each:
+  - `SetReadDelayMs` alone cuts a busy mouse's patience from ~1000 to 400 ms, and busy/asleep is the
+    state this mouse is in most of the time — a would-be success becomes a null read, which
+    `ReadAsync` treats as a dead handle (found in review, not by the bench, which had no 0x01 path).
+  - the full 1000 ms alone costs 1000 ms on a collection that answers **nothing**, where
+    `ExchangeAsync` spent 400: `FastReadAsync` rightly reads a 0x00 echo as "not ready yet", where
+    `ExchangeAsync` took it as the final answer. That is the discovery path with a dead receiver
+    still plugged in (`discover_mice_silent_peer`, 521 → 1108 ms before the split).
+
+  `RazerDeviceWaitPolicyTests` holds both as regressions; it is ordinary tested code because
+  `RazerDevice` sits *above* the `IControlCollection` seam (hard rule 6).
+- Measured effect (`PerfBenchIo`, gated `NAGA_PERF=1`, 25 ms emulated turnaround): the grid sweep's
+  12 reads land in ~420 ms instead of ~1150, dashboard content 3301→638 ms, the startup battery read
+  1214→93 ms, dead-receiver discovery 1212→500 ms — round-trip counts identical to base in every
+  scenario, so waiting was removed rather than work.
 - Connection selection lives one layer down since 2026-08-19 — `RazerDevice` delegates it to
   `MouseConnection` (next section). The rule it enforces is unchanged: pick the collection whose
   `GetMaxFeatureReportLength()==91` (**not** usage page 0xFF00 — none exposed), and **verify each
@@ -317,7 +346,8 @@ Phase B never-write-user-slots rule once byte-for-byte reads shipped — button-
 
 `AppSettings` + `ISettingsStore`/`JsonSettingsStore`. JSON at `%APPDATA%\NagaBatteryTray\settings.json`
 (Roaming — **not** the install dir under `%LOCALAPPDATA%`); holds cadences, low-battery
-threshold/notify, `SetReadDelayMs` (SET→GET wait, default 400), the cached transaction id,
+threshold/notify, `SetReadDelayMs` (the write/tid-probe SET→GET wait, default 400, and the basis
+of every converted read's patience budget — see `ConvertedReadBudgetMs`), the cached transaction id,
 app-side DPI presets, `PreferredMouse` (which mouse to talk to; `null` = scan order, V3 first), and
 app-side profile-slot names. The firmware stores no names, so a rename is a dashboard label only.
 Names are keyed **per mouse** since 2026-08-19 (`ProfileNamesByMouse`, model display name → slot →
