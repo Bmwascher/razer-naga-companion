@@ -556,15 +556,10 @@ public static class ProbeCommand
         return fail == 0 ? 0 : 1;
     }
 
-    /// <summary>Opens the live mouse control collection: wired PID first, then wireless (a stale dongle
-    /// collection stays enumerated when the mouse goes wired), verifying each candidate answers a
-    /// battery query before committing - mirrors HidControlCollectionSource.Open plus
-    /// MouseConnection.ConnectAsync, which is how the app itself opens a mouse.</summary>
     /// <summary>Reply-latency probe (--probe-latency). Read-only by construction: every request it
     /// builds is a GET. For each command it SETs once and then polls GetFeature every 5 ms until the
-    /// reply satisfies the SAME readiness test the transport's fast-read ladder applies (a completed
-    /// status plus the class/cmd echo, plus the arg echo for button reads), reporting when the device
-    /// actually answered.
+    /// reply satisfies the readiness test the transport's fast-read ladder applies - literally the
+    /// same code, RazerProtocol.IsReplyReady - reporting when the device actually answered.
     /// <para>This exists because the ladder's first rung is a guess unless someone measures it. The
     /// grid sweep is twelve of these reads back to back, so the rung is most of what the dashboard's
     /// button grid costs, and tuning it off anything but a measurement would be trading a known wait
@@ -637,16 +632,17 @@ public static class ProbeCommand
                 Console.WriteLine($"  {label}: GetFeature failed err={Marshal.GetLastWin32Error()} after {sw.ElapsedMilliseconds} ms");
                 return;
             }
-            bool pending = reply[1] is 0x00 or 0x01 || reply[7] != request[7] || reply[8] != request[8];
-            for (int i = 0; !pending && i < echoArgBytes; i++)
-                if (reply[9 + i] != request[9 + i]) pending = true;
-            if (pending) continue;
+            if (!RazerProtocol.IsReplyReady(request, reply, echoArgBytes)) continue;
             Console.WriteLine($"  {label}: ready at {sw.ElapsedMilliseconds,4} ms  (status=0x{reply[1]:x2}, {gets} GETs)");
             return;
         }
         Console.WriteLine($"  {label}: never ready within {LatencyCapMs} ms ({gets} GETs)");
     }
 
+    /// <summary>Opens the live mouse control collection: wired PID first, then wireless (a stale dongle
+    /// collection stays enumerated when the mouse goes wired), verifying each candidate answers a
+    /// battery query before committing - mirrors HidControlCollectionSource.Open plus
+    /// MouseConnection.ConnectAsync, which is how the app itself opens a mouse.</summary>
     private static SafeFileHandle? OpenLiveMouse(out int pidOpened)
     {
         foreach (int pid in RazerProtocol.ScanPids)

@@ -345,6 +345,30 @@ public static class RazerProtocol
         return BuildReport(transactionId, dataSize, CommandClassProfile, commandId, args);
     }
 
+    /// <summary>Is this reply the ANSWER to this request, or should the caller poll again? This is
+    /// what makes polling a feature report early SAFE: a premature GET sees the device buffer still
+    /// holding our own request echo (status 0x00), a busy marker (0x01), or the PREVIOUS command's
+    /// finished reply - and all three are reported as "not ready" rather than parsed as data.
+    /// <para>Readiness is a completed status PLUS the reply echoing our class and cmd
+    /// (buffer[7]/[8]); hardware confirms the echo (--probe-dpi, 2026-10-15, echoed on both an awake
+    /// and an asleep mouse). echoArgBytes extends the check over the request's leading arg bytes
+    /// (buffer[9..]) for requests whose args ARE echoed rather than replaced by reply data: a button
+    /// read echoes profile/buttonId/hypershift, so a stale finished reply from the previous button
+    /// in a 12-read sweep is caught. Pass 0 where the reply overwrites those bytes with data -
+    /// power queries carry no args, and a DPI/list/active reply puts data there.</para>
+    /// <para>It lives here, not in the transport, because --probe-latency measures the device's
+    /// turnaround against this exact predicate and the fast-read rungs are tuned to that
+    /// measurement. Two copies meant a change to one silently invalidated the other
+    /// (Fable diff r1, F8).</para></summary>
+    public static bool IsReplyReady(byte[] request, byte[] reply, int echoArgBytes = 0)
+    {
+        if (reply[1] is 0x00 or 0x01) return false;
+        if (reply[7] != request[7] || reply[8] != request[8]) return false;
+        for (int i = 0; i < echoArgBytes; i++)
+            if (reply[9 + i] != request[9 + i]) return false;
+        return true;
+    }
+
     /// <summary>Validates a 91-byte reply: status byte then XOR CRC over buffer[3..88] vs buffer[89].</summary>
     private static ReplyResult ValidateReply(byte[] buffer91)
     {

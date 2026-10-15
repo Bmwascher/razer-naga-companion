@@ -107,7 +107,7 @@ public sealed class RazerDevice : IRazerDevice
             var reply = new byte[RazerProtocol.BufferLength];
             reply[0] = 0x00;
             if (!collection.GetFeature(reply)) { _conn.Close(); return null; }
-            if (reply[1] == 0x01) { await Task.Delay(200, ct); continue; } // Busy: wait, retry GET once
+            if (reply[1] == 0x01) { await Task.Delay(ExchangeBusyWaitMs, ct); continue; } // Busy: wait, retry GET once
             return reply;
         }
         return null; // still busy after retries
@@ -121,10 +121,36 @@ public sealed class RazerDevice : IRazerDevice
     /// <para>30 ms is the practical floor rather than a guess: Task.Delay rounds up to that same
     /// ~15.6 ms tick for anything from 16 to 31 ms, and raising the system timer resolution to beat
     /// it would cost idle power (hard rule 1). The later rungs are then chosen so the CUMULATIVE
-    /// wait after each one still matches the old 50/100/200/400 ladder exactly - 30, 50, 150, 350,
-    /// 750 - which makes this strictly faster for a mouse that answers promptly and never slower for
-    /// one that does not. The price is one extra GET on a read that needs the whole schedule.</para></summary>
-    private static readonly int[] FastReadRungs = { 30, 20, 100, 200, 400 };
+    /// wait after each one still matches the old ladder's checkpoints - 30, 50, 150, 350, 750 - and
+    /// the last rung carries the total to 1000 ms, which is what ExchangeAsync's flat wait PLUS its
+    /// busy retry really gave a converted read (see ReadPatience). So this is strictly
+    /// faster for a mouse that answers promptly and never slower for one that does not. The price is
+    /// one extra GET on a read that needs the whole schedule.</para></summary>
+    private static readonly int[] FastReadRungs = { 30, 20, 100, 200, 400, 250 };
+
+    /// <summary>The wait ExchangeAsync inserts after a BUSY (0x01) reply before retrying its GET.
+    /// Shared with ConvertedReadBudgetMs so the two policies cannot drift apart.</summary>
+    private const int ExchangeBusyWaitMs = 200;
+
+    /// <summary>The patience a read converted from ExchangeAsync gets, as the TWO numbers
+    /// ExchangeAsync really had. It waited SetReadDelayMs once and then looked: on anything but a
+    /// BUSY (0x01) reply it stopped there and the caller got a failed read, and only a 0x01 bought
+    /// another ExchangeBusyWaitMs and a SECOND SetReadDelayMs wait.
+    /// <para>One cap cannot be both, and either one alone is a defect. SetReadDelayMs alone cuts a
+    /// busy mouse's patience from ~1000 ms to 400 ms - and busy/asleep is the state this mouse is in
+    /// most of the time - so a would-be success becomes a null read, which ReadAsync then treats as
+    /// a dead handle (Fable diff r1, F1). The full 1000 ms alone makes a collection that answers
+    /// NOTHING cost 1000 ms where it used to cost 400, because FastReadAsync rightly reads a 0x00
+    /// echo as "not ready yet" where ExchangeAsync took it as the final answer; that is the
+    /// dashboard's discovery path with a dead receiver still plugged in, and the bench measured the
+    /// 600 ms it costs. So the budget starts at BaseMs and is raised to AfterBusyMs only once a 0x01
+    /// has actually been seen, which reproduces both behaviours instead of averaging
+    /// them.</para></summary>
+    private readonly record struct ReadPatience(int BaseMs, int AfterBusyMs);
+
+    private ReadPatience ConvertedReadPatience =>
+        new(_settings.Settings.SetReadDelayMs,
+            _settings.Settings.SetReadDelayMs * 2 + ExchangeBusyWaitMs);
 
     /// <summary>Fast SET->GET for idempotent READS: poll early on the FastReadRungs schedule
     /// instead of paying the battery-cadence SetReadDelayMs per read — the grid sweep is 12 reads, so
@@ -134,44 +160,43 @@ public sealed class RazerDevice : IRazerDevice
     /// all three as "not ready, wait longer". Writes and the transaction-id probe stay on
     /// ExchangeAsync: a write ack is not idempotent and the probe is interrogating an UNKNOWN
     /// transaction id, so both keep their proven timing semantics exactly.
-    /// <para>budgetMs caps the TOTAL wait. It exists so a read that used to pay one flat
-    /// SetReadDelayMs can poll early without ever waiting longer in the worst case than it did
-    /// before: with a 400 ms budget the rungs become 50/100/200/50, so an awake mouse answers at
-    /// 50 ms and a silent one is given up on at exactly the old 400 ms. Null keeps the original
-    /// 4-rung, 750 ms ladder for the button/profile reads that shipped with it.</para></summary>
+    /// <para>patience caps the TOTAL wait, so a converted read polls early without ever being LESS
+    /// patient OR slower to give up than the ExchangeAsync policy it replaced - see ReadPatience for
+    /// why that takes two numbers rather than one. A budget at or above the schedule's 1000 ms sum
+    /// runs every rung; a smaller one is clamped rung by rung and always gets at least one GET; a
+    /// larger one is honoured by the last rung. Null keeps the plain schedule for the button/profile
+    /// reads, which never used ExchangeAsync and so have no old behaviour to match.</para></summary>
     private async Task<byte[]?> FastReadAsync(IControlCollection collection, byte[] request, CancellationToken ct,
-                                              int echoArgBytes = 0, int? budgetMs = null)
+                                              int echoArgBytes = 0, ReadPatience? patience = null)
     {
         if (!collection.IsOpen) return null;
         if (!collection.SetFeature(request)) { _conn.Close(); return null; }
 
         int spent = 0;
-        foreach (int rung in FastReadRungs)
+        bool sawBusy = false;
+        for (int i = 0; i < FastReadRungs.Length; i++)
         {
-            int delay = rung;
-            if (budgetMs is { } budget)
+            int delay = FastReadRungs[i];
+            if (patience is { } p)
             {
-                if (spent >= budget) break;
-                delay = Math.Min(delay, budget - spent);
+                int budget = sawBusy ? p.AfterBusyMs : p.BaseMs;
+                // i > 0, so a budget of 0 or less still gets ONE poll: ExchangeAsync always did
+                // Task.Delay(it) and then a GET, and a configured 0 must not mean "never read"
+                // (Fable diff r1, F5).
+                if (i > 0 && spent >= budget) break;
+                delay = i == FastReadRungs.Length - 1
+                    ? Math.Max(0, budget - spent)        // last rung absorbs a budget above the schedule
+                    : Math.Clamp(budget - spent, 0, delay);
             }
             await Task.Delay(delay, ct);
             spent += delay;
             var reply = new byte[RazerProtocol.BufferLength];
             reply[0] = 0x00;
             if (!collection.GetFeature(reply)) { _conn.Close(); return null; }
-            // ready = a completed status AND the reply echoes OUR class+cmd (buffer[7]/[8] =
-            // report class/cmd — every Razer reply echoes them; the parses already rely on it).
-            // echoArgBytes extends the check over the request's leading arg bytes (buffer[9..]):
-            // the grid sweep issues 12 same-class/cmd requests back-to-back, so a stale finished
-            // reply from the PREVIOUS button would otherwise pass and read as a hard failure at
-            // the parse layer instead of "wait longer" (review find). Only usable when the
-            // request args are echoed rather than replaced by reply data (button reads echo
-            // profile/buttonId/hypershift; list/active reads carry data there — pass 0).
-            bool pending = reply[1] is 0x00 or 0x01
-                || reply[7] != request[7] || reply[8] != request[8];
-            for (int i = 0; !pending && i < echoArgBytes; i++)
-                if (reply[9 + i] != request[9 + i]) pending = true;
-            if (!pending) return reply;
+            // the readiness rule itself lives in RazerProtocol, shared with --probe-latency so the
+            // probe measures against the same predicate these rungs are tuned to (F8)
+            if (RazerProtocol.IsReplyReady(request, reply, echoArgBytes)) return reply;
+            if (reply[1] == 0x01) sawBusy = true;   // busy earns the second half of the patience
         }
         return null; // never became ready — caller treats like any failed read
     }
@@ -189,7 +214,7 @@ public sealed class RazerDevice : IRazerDevice
     {
         var request = RazerProtocol.BuildFeatureBuffer(transactionId, commandId);
         var reply = fast
-            ? await FastReadAsync(collection, request, ct, budgetMs: _settings.Settings.SetReadDelayMs)
+            ? await FastReadAsync(collection, request, ct, patience: ConvertedReadPatience)
             : await ExchangeAsync(collection, request, ct);
         if (reply is null) return null;
         return RazerProtocol.ParseReply(reply, out byte value) == ReplyResult.Success ? value : null;
@@ -204,7 +229,7 @@ public sealed class RazerDevice : IRazerDevice
             // reply data REPLACES the request args, so echoArgBytes stays 0: the class/cmd echo is
             // the whole readiness check here, exactly as for the profile list/active reads.
             var reply = await FastReadAsync(c, RazerProtocol.BuildGetDpiBuffer(tid), ct,
-                                            budgetMs: _settings.Settings.SetReadDelayMs);
+                                            patience: ConvertedReadPatience);
             if (reply is null) return null;
             if (RazerProtocol.ParseDpiReply(reply, out int x, out int y) != ReplyResult.Success) return null;
             return new DpiSetting(x, y);
