@@ -129,6 +129,14 @@ Shipped (spec links = the full story):
   bounded work, reviewed after the fact (Fable diff gate, PASS at round 2, degraded for want of a
   second vendor). The story is `docs/architecture.md` § `RazerDevice.cs`; the benches are
   `PerfBenchIo`/`PerfBenchUi`/`PerfBenchHost`, gated `NAGA_PERF=1` (2026-10-15)
+- ReadyToRun — **closed, not adopted.** Measured on a branch straight after the perf pass:
+  precompiling IL at publish reached the tray icon 25.5 ms sooner and the first battery
+  percentage 49.0 ms sooner (40 interleaved A/B pairs, paired medians), but raised idle private
+  working set 24.03→26.98 MB against hard rule 1's ~23 MB gate, added 59.5 MiB of binary
+  (+31.4%) and cost +10.8 ms before `Main` from mapping the larger image. Branch deleted, nothing
+  shipped; the numbers, the method and the one reusable lesson (measure startup out of a publish
+  folder, never through `install.ps1`) are
+  `specs/2026-10-15-ready-to-run-evaluation.md` (2026-10-15)
 
 Next:
 
