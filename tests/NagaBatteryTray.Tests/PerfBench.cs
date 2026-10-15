@@ -88,7 +88,7 @@ public sealed class PerfBenchIo
             exchanges = source.Exchanges;
             features = source.FeatureCalls;
         }
-        r.Write(key, Median(times), exchanges, features);
+        r.Write(key, PerfStat.Median(times), exchanges, features);
     }
 
     private static async Task MeasureSeed(PerfReport r, string key)
@@ -112,7 +112,7 @@ public sealed class PerfBenchIo
             exchanges = source.Exchanges;
             features = source.FeatureCalls;
         }
-        r.Write(key, Median(times), exchanges, features);
+        r.Write(key, PerfStat.Median(times), exchanges, features);
     }
 
     /// <summary>The user's actual machine, as --probe-dpi reported it on 2026-10-15: a V3 Pro awake
@@ -142,17 +142,29 @@ public sealed class PerfBenchIo
         return s;
     }
 
+    /// <summary>In memory, not a temp file: this is called per repetition of every scenario, and a
+    /// JsonSettingsStore would leave about forty files behind per bench run (F7).</summary>
     private static ISettingsStore StoreWithCachedTid()
     {
-        var store = new JsonSettingsStore(Path.Combine(Path.GetTempPath(), $"naga-perf-{Guid.NewGuid():N}.json"));
+        var store = new FakeSettingsStore();
         store.SetCachedTransactionId(0x1f);   // steady state: resolved once on first ever run, then cached
         return store;
     }
+}
 
-    private static double Median(List<double> xs)
+/// <summary>Reductions over a repetition's samples. One copy for every bench file: the device
+/// bench and the UI bench each grew their own, and they had already drifted - one sorted the
+/// caller's list in place and the other copied first (Fable diff r1, F8).</summary>
+internal static class PerfStat
+{
+    /// <summary>The median, chosen over the mean because a bench sample's outlier is almost always
+    /// a scheduler hiccup rather than the thing being measured. Copies before sorting: a caller that
+    /// reuses its list must not have the order changed underneath it.</summary>
+    internal static double Median(IReadOnlyList<double> xs)
     {
-        xs.Sort();
-        return xs.Count % 2 == 1 ? xs[xs.Count / 2] : (xs[xs.Count / 2 - 1] + xs[xs.Count / 2]) / 2;
+        var s = new List<double>(xs);
+        s.Sort();
+        return s.Count % 2 == 1 ? s[s.Count / 2] : (s[s.Count / 2 - 1] + s[s.Count / 2]) / 2;
     }
 }
 

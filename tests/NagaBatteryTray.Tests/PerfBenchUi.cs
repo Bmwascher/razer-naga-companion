@@ -47,12 +47,12 @@ public sealed class PerfBenchUi
         r.Write("dashboard_open_cold", OpenDashboard());
         var warm = new List<double>();
         for (int i = 0; i < 3; i++) warm.Add(OpenDashboard());
-        r.Write("dashboard_open_warm", Median(warm));
+        r.Write("dashboard_open_warm", PerfStat.Median(warm));
 
         r.Write("popup_open_cold", OpenPopup());
         warm.Clear();
         for (int i = 0; i < 3; i++) warm.Add(OpenPopup());
-        r.Write("popup_open_warm", Median(warm));
+        r.Write("popup_open_warm", PerfStat.Median(warm));
 
         MeasureSettings(r);
 
@@ -131,7 +131,7 @@ public sealed class PerfBenchUi
             opens.Add(sw.Elapsed.TotalMilliseconds);
             if (i < 2) { win.HideOverlay(); DoEvents(); }
         }
-        r.Write("settings_overlay_open", Median(opens));
+        r.Write("settings_overlay_open", PerfStat.Median(opens));
 
         // the overlay from the last iteration is still up; scroll the live one
         var live = new SettingsView { DataContext = vm };
@@ -201,12 +201,5 @@ public sealed class PerfBenchUi
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,
             new Action(() => frame.Continue = false));
         Dispatcher.PushFrame(frame);
-    }
-
-    private static double Median(List<double> xs)
-    {
-        var s = new List<double>(xs);
-        s.Sort();
-        return s.Count % 2 == 1 ? s[s.Count / 2] : (s[s.Count / 2 - 1] + s[s.Count / 2]) / 2;
     }
 }

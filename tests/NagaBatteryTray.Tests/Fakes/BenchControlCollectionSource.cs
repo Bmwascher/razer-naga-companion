@@ -6,7 +6,7 @@ using NagaBatteryTray.Hid;
 /// CORRECT reply per command class and does not become ready until <see cref="ReadyAfterMs"/> has
 /// elapsed since the SET — the same "request echo now, answer shortly" behaviour the real mouse
 /// has. That is what makes it a timing model: a premature GET reads status 0x00, exactly as on
-/// hardware, so the transport's wait policy (flat SetReadDelayMs vs the doubling fast-read ladder)
+/// hardware, so the transport's wait policy (flat SetReadDelayMs vs the fast-read rung schedule)
 /// is what the measured wall clock actually reflects.
 /// <para>internal for the same reason as FakeControlCollectionSource: it implements an internal
 /// interface, reached through InternalsVisibleTo.</para></summary>
@@ -18,6 +18,12 @@ internal sealed class BenchControlCollectionSource : IControlCollectionSource
 
     public HashSet<int> Present { get; } = new();
     public HashSet<int> Answering { get; } = new();
+
+    /// <summary>How long after the SET this collection answers BUSY (0x01) rather than data - the
+    /// status the probe legend calls busy/asleep. 0 = never busy. A reply carries data only once
+    /// BOTH this and ReadyAfterMs have elapsed, which is the case the flat path's retry existed for
+    /// and the one no scenario could reach before (Fable diff r1, F1/F2).</summary>
+    public int BusyUntilMs { get; set; }
 
     /// <summary>PIDs that reply promptly with a hard-failure status (0x04) instead of data: the
     /// still-plugged receiver whose mouse is asleep. This is what --probe-dpi actually showed on the
@@ -85,6 +91,11 @@ internal sealed class BenchControlCollectionSource : IControlCollectionSource
                 return true;
             }
             if (_refuses) { buffer[1] = 0x04; return true; } // answered, and the answer is "no"
+            if (_since.ElapsedMilliseconds < _owner.BusyUntilMs)
+            {
+                buffer[1] = 0x01;                          // busy: ask again later
+                return true;
+            }
             Compose(buffer);
             return true;
         }
@@ -104,8 +115,6 @@ internal sealed class BenchControlCollectionSource : IControlCollectionSource
                 case (RazerProtocol.CommandClassDpi, RazerProtocol.CommandIdGetDpi):
                     b[10] = 1600 >> 8; b[11] = unchecked((byte)1600);
                     b[12] = 1600 >> 8; b[13] = unchecked((byte)1600); break;
-                case (RazerProtocol.CommandClassDpi, RazerProtocol.CommandIdSetDpi):
-                    break;                                  // echoed args already carry a valid X/Y
                 case (RazerProtocol.CommandClassProfile, RazerProtocol.CommandIdGetProfileList):
                     b[9] = 3; b[10] = 1; b[11] = 2; b[12] = 3; break;
                 case (RazerProtocol.CommandClassProfile, RazerProtocol.CommandIdGetActiveProfile):
