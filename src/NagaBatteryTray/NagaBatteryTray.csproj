@@ -11,6 +11,7 @@
     <Version>2.3.0</Version>
     <StartupObject>NagaBatteryTray.Program</StartupObject>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
   <!-- Release = full self-contained single-file: bundles the .NET 10 runtime so the installed
        exe depends on nothing on the machine. No trimming (disk is not a concern; trimming risks
@@ -28,5 +29,9 @@
   <ItemGroup>
     <!-- dashboard stage artwork: user-supplied Naga V2 Pro thumb-panel render -->
     <Resource Include="Ui\Dashboard\Assets\naga-thumb.png" />
+    <!-- the title bar's mark. A PNG rather than app.ico because WPF's icon decoder picks the
+         frame itself; this is the 64 px render, which the 18-unit title bar slot downsamples
+         cleanly at both 100% and 200% DPI. Sources + generator: docs/icon/. -->
+    <Resource Include="Ui\Assets\app-icon.png" />
   </ItemGroup>
 </Project>

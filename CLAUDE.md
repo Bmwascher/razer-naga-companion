@@ -88,6 +88,7 @@ reference is `docs/architecture.md`; per-feature design history is `docs/superpo
 | `docs/architecture.md` | **The deep reference** — subsystem how-and-why, gotchas, protocol tables, prior art |
 | `docs/superpowers/specs/` | Per-feature design specs (dated; each roadmap item links its spec) |
 | `docs/images/` | README screenshots — probe-rendered, regenerate on UI change (rule 4) |
+| `docs/icon/` | App-icon SVG sources + `build-ico.py`, which rasterises them and packs `src/NagaBatteryTray/app.ico`. Edit the SVGs and rerun it; never hand-edit the `.ico` |
 | `.superpowers/sdd/progress.md` | Gitignored session ledger — append per milestone |
 
 ## Roadmap

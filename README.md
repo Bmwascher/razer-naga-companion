@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🐍 Razer Naga Companion
+<img src="docs/images/app-icon.png" width="104" alt="App icon: the Naga seen from its left flank, thumb grid lit, inside the battery gauge ring the tray icon draws"/>
+
+# Razer Naga Companion
 
 ### Your Razer Naga V2 Pro and Naga V3 Pro battery, right in the system tray — **no Razer Synapse required.**
 

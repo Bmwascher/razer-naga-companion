@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Razer Naga Companion">
+  <title>Razer Naga Companion</title>
+
+  <!-- Tray-icon language: dark coin, ring track, accent arc from twelve o'clock sweeping
+       clockwise, as IconRenderer draws it. No percentage - the tray redraws its digits every
+       reading, an app icon is baked once, and a number here would be wrong within the hour.
+
+       Left-flank view, traced from Ui/Dashboard/Assets/naga-thumb.png. The shell is SOLID and
+       light with everything else punched through it: the mouse is a black object on a nearly
+       black coin, so a faithful dark shell is invisible, and lightening it just enough to show
+       reads as frosted glass.
+
+       The seam matters more than it looks. Without it a tapered body full of keys is a TV
+       remote, which is what this kept landing on. The earlier attempt put it a couple of units
+       from the right edge, where it read as a double-line glitch - because a 12-key grid centred
+       in a 78-unit body leaves no margin for it. So the grid sits LEFT, on the flank where a
+       Naga's keys are, and the seam owns the right margin: it leaves the top edge, runs down with
+       real clearance from both the keys and the outline, and converges with the edge at about
+       three quarters height, which is where the click panel ends. -->
+
+  <defs>
+    <radialGradient id="coin" cx="0.25" cy="0" r="1.25">
+      <stop offset="0"   stop-color="#1A1C21"/>
+      <stop offset="0.6" stop-color="#0E0F12"/>
+      <stop offset="1"   stop-color="#090A0C"/>
+    </radialGradient>
+
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0"    stop-color="#44D62C" stop-opacity="0.20"/>
+      <stop offset="0.55" stop-color="#44D62C" stop-opacity="0.06"/>
+      <stop offset="1"    stop-color="#44D62C" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="arc" x1="0.5" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DEB6D"/>
+      <stop offset="1" stop-color="#36C021"/>
+    </linearGradient>
+
+    <linearGradient id="shell" x1="0.1" y1="0.05" x2="0.9" y2="0.95">
+      <stop offset="0"    stop-color="#FFFFFF"/>
+      <stop offset="0.55" stop-color="#E4E7ED"/>
+      <stop offset="1"    stop-color="#B9BEC9"/>
+    </linearGradient>
+
+    <mask id="cut">
+      <path d="M 99 84
+               C 100 77, 102 73, 106 71
+               L 137 57
+               C 145 54, 153 58, 155 66
+               C 162 83, 169 104, 170 127
+               C 171 143, 168 155, 163 166
+               C 157 179, 149 190, 141 198
+               C 134 204, 127 207, 121 207
+               C 115 206, 110 201, 106 194
+               C 99 181, 95 162, 93 143
+               C 92 129, 92 115, 94 105
+               C 95 95, 97 88, 99 84 Z" fill="#fff"/>
+
+      <!-- The seam, as a cut rather than a drawn line, so it is a gap between panels. -->
+      <path d="M 139 59 C 151 82, 158 122, 163 166"
+            fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round"/>
+
+      <!-- The twelve keys, on the flank, tilted as the art has them. -->
+      <g transform="rotate(-5 123 132)" fill="#000">
+        <rect x="100" y="107"   width="13" height="10" rx="2.6"/>
+        <rect x="117" y="107"   width="13" height="10" rx="2.6"/>
+        <rect x="134" y="107"   width="13" height="10" rx="2.6"/>
+
+        <rect x="100" y="120.5" width="13" height="10" rx="2.6"/>
+        <rect x="117" y="120.5" width="13" height="10" rx="2.6"/>
+        <rect x="134" y="120.5" width="13" height="10" rx="2.6"/>
+
+        <rect x="100" y="134"   width="13" height="10" rx="2.6"/>
+        <rect x="117" y="134"   width="13" height="10" rx="2.6"/>
+        <rect x="134" y="134"   width="13" height="10" rx="2.6"/>
+
+        <rect x="100" y="147.5" width="13" height="10" rx="2.6"/>
+        <rect x="117" y="147.5" width="13" height="10" rx="2.6"/>
+        <rect x="134" y="147.5" width="13" height="10" rx="2.6"/>
+      </g>
+    </mask>
+  </defs>
+
+  <circle cx="128" cy="128" r="126" fill="url(#coin)"/>
+  <circle cx="128" cy="128" r="126" fill="url(#halo)"/>
+
+  <circle cx="128" cy="128" r="104" fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="14"/>
+  <path d="M 128 24 A 104 104 0 1 1 27.6 154.9"
+        fill="none" stroke="url(#arc)" stroke-width="14" stroke-linecap="round"/>
+
+  <path d="M 99 84
+           C 100 77, 102 73, 106 71
+           L 137 57
+           C 145 54, 153 58, 155 66
+           C 162 83, 169 104, 170 127
+           C 171 143, 168 155, 163 166
+           C 157 179, 149 190, 141 198
+           C 134 204, 127 207, 121 207
+           C 115 206, 110 201, 106 194
+           C 99 181, 95 162, 93 143
+           C 92 129, 92 115, 94 105
+           C 95 95, 97 88, 99 84 Z"
+        fill="url(#shell)" mask="url(#cut)"/>
+
+  <!-- One key bound: the only colour inside the shell. -->
+  <rect transform="rotate(-5 123 132)" x="117" y="120.5" width="13" height="10" rx="2.6" fill="#44D62C"/>
+</svg>

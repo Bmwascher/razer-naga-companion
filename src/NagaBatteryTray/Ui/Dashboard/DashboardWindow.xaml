@@ -11,7 +11,15 @@
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/>
     </Grid.RowDefinitions>
-    <ui:TitleBar Grid.Row="0" Title="Razer Naga Companion"/>
+    <ui:TitleBar Grid.Row="0" Title="Razer Naga Companion">
+      <ui:TitleBar.Icon>
+        <!-- assembly-qualified: the bare "/Ui/Assets/..." form resolves against the ENTRY
+             assembly, which is the test host under DpiPillInteractionTests and is not this
+             assembly in a single-file publish either. Same gotcha as ThemeManager.Apply. -->
+        <ui:ImageIcon Source="pack://application:,,,/NagaBatteryTray;component/Ui/Assets/app-icon.png"
+                      Width="18" Height="18"/>
+      </ui:TitleBar.Icon>
+    </ui:TitleBar>
     <!-- header card -->
     <Border Grid.Row="1" Style="{DynamicResource CardBorder}" Margin="16,4,16,10" Padding="12,10">
       <DockPanel>
