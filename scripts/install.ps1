@@ -9,9 +9,10 @@
     2. Stops any running instance (so the exe isn't locked).
     3. Copies the runtime files (everything except the .pdb) to
        %LOCALAPPDATA%\Programs\NagaBatteryTray.
-    4. Registers a delayed logon scheduled task (run at login) and clears any
+    4. Puts a shortcut in the per-user Start menu.
+    5. Registers a delayed logon scheduled task (run at login) and clears any
        legacy HKCU "Run" entry.
-    5. Launches the installed exe.
+    6. Launches the installed exe.
 
   Run-at-login uses a Scheduled Task with a 1-minute logon delay, NOT the Run key:
   Smart App Control vetoes the unsigned exe when the Run key fires ~52 s into boot
@@ -54,6 +55,22 @@ Start-Sleep -Milliseconds 500
 Write-Host "Installing to $installDir ..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Get-ChildItem $publish | Where-Object { $_.Extension -ne '.pdb' } | Copy-Item -Destination $installDir -Force
+
+Write-Host "Adding the Start menu shortcut..." -ForegroundColor Cyan
+# Without this the app is absent from the Start menu and from search entirely: the install
+# folder is just a folder, and nothing outside the tray icon points at the exe. It also makes
+# the app impossible to pin, since "Pin to Start" has to be given something already in Start.
+$startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+$shortcut  = Join-Path $startMenu 'Razer Naga Companion.lnk'
+New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
+# CreateShortcut opens an existing .lnk rather than failing, so Save() just rewrites it - which
+# is what a reinstall wants, and it keeps the user's pin pointing at the same shortcut.
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+$lnk.TargetPath       = $installExe
+$lnk.WorkingDirectory = $installDir
+$lnk.IconLocation     = "$installExe,0"
+$lnk.Description      = 'Razer Naga battery, DPI and button remapping in the system tray'
+$lnk.Save()
 
 Write-Host "Registering run-at-login (delayed logon scheduled task)..." -ForegroundColor Cyan
 # The exe self-registers the task (single source of truth: StartupRegistration.cs).

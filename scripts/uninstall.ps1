@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  Remove Naga Battery Tray: stop it, unregister run-at-login, delete the install folder.
+  Remove Naga Battery Tray: stop it, unregister run-at-login, drop the Start menu
+  shortcut, delete the install folder.
   Leaves settings at %APPDATA%\NagaBatteryTray untouched (delete that yourself if desired).
 #>
 [CmdletBinding()]
@@ -19,6 +20,11 @@ schtasks /Delete /TN 'NagaBatteryTray' /F 2>$null | Out-Null
 # Also clear any legacy Run-key entry from older installs.
 Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
   -Name 'NagaBatteryTray' -ErrorAction SilentlyContinue
+
+Write-Host "Removing the Start menu shortcut..." -ForegroundColor Cyan
+# A Start menu pin resolves through this .lnk, so Windows drops the tile once it is gone.
+$shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Razer Naga Companion.lnk'
+if (Test-Path $shortcut) { Remove-Item $shortcut -Force }
 
 Write-Host "Deleting $installDir ..." -ForegroundColor Cyan
 if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
