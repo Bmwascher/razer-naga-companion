@@ -118,6 +118,29 @@ public static class ProbeCommand
                 sawDevice = true;
                 Console.WriteLine($"PID 0x{pid:x4} ({RazerProtocol.ModelNameForPid(pid)})");
 
+                // Device mode first, because it governs whether the DPI button does anything at
+                // all: in DRIVER mode the firmware hands button events to host software instead of
+                // acting on them, so a perfectly healthy stage table still never advances. Read
+                // only - this never sets the mode, unlike --probe-buttons, which offers to.
+                var modeReq = RazerProtocol.BuildGetDeviceModeBuffer(0x1f);
+                if (HidD_SetFeature(h, modeReq, modeReq.Length))
+                {
+                    Thread.Sleep(400);
+                    var modeReply = new byte[RazerProtocol.BufferLength];
+                    modeReply[0] = 0;
+                    if (HidD_GetFeature(h, modeReply, modeReply.Length)
+                        && RazerProtocol.ParseDeviceModeReply(modeReply, out byte mode) == ReplyResult.Success)
+                    {
+                        string which = mode == RazerProtocol.DeviceModeDriver ? "DRIVER"
+                                     : mode == RazerProtocol.DeviceModeNormal ? "normal" : "unknown";
+                        Console.WriteLine($"  device mode: 0x{mode:x2} ({which})");
+                        if (mode == RazerProtocol.DeviceModeDriver)
+                            Console.WriteLine("    ^ onboard bindings do not fire in driver mode - this alone"
+                                              + " explains a DPI button that does nothing.");
+                    }
+                    else Console.WriteLine("  device mode: unreadable");
+                }
+
                 foreach (var (label, storage) in new[]
                          { ("NOSTORE ", RazerProtocol.StorageNoStore), ("VARSTORE", RazerProtocol.StorageVarStore) })
                 {
