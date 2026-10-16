@@ -94,6 +94,64 @@ public static class ProbeCommand
         return 0;
     }
 
+    /// <summary>--probe-dpi-stages: READ-ONLY read of the onboard DPI stage table, the thing the
+    /// mouse's own DPI button cycles. Every request is BuildGetDpiStagesBuffer; this method never
+    /// references a Set builder, which is what keeps it safe to run against a configured mouse.
+    /// Sends the request under BOTH storage bytes because which one the firmware answers is the
+    /// open question - openrazer reads stages from VARSTORE, while this project's own GET DPI
+    /// reads NOSTORE and works. Raw hex is printed either way, so a layout that disagrees with
+    /// the parser stays visible rather than collapsing into "Failed".</summary>
+    public static int RunDpiStages()
+    {
+        Console.WriteLine("Naga Battery Tray - GET DPI stages probe (read-only)\n");
+        bool sawDevice = false;
+
+        foreach (int pid in RazerProtocol.ScanPids)
+            foreach (var dev in DeviceList.Local.GetHidDevices(RazerProtocol.VendorId, pid))
+            {
+                int max = -1;
+                try { max = dev.GetMaxFeatureReportLength(); } catch { }
+                if (max != RazerProtocol.BufferLength) continue;
+
+                using var h = CreateFile(dev.DevicePath, 0, 0x3, IntPtr.Zero, 0x3, 0, IntPtr.Zero);
+                if (h.IsInvalid) { Console.WriteLine($"CreateFile failed err={Marshal.GetLastWin32Error()}"); continue; }
+                sawDevice = true;
+                Console.WriteLine($"PID 0x{pid:x4} ({RazerProtocol.ModelNameForPid(pid)})");
+
+                foreach (var (label, storage) in new[]
+                         { ("NOSTORE ", RazerProtocol.StorageNoStore), ("VARSTORE", RazerProtocol.StorageVarStore) })
+                {
+                    var buf = RazerProtocol.BuildGetDpiStagesBuffer(0x1f, storage);
+                    if (!HidD_SetFeature(h, buf, buf.Length))
+                    { Console.WriteLine($"  {label}: SetFeature failed err={Marshal.GetLastWin32Error()}"); continue; }
+                    Thread.Sleep(400);
+                    var reply = new byte[RazerProtocol.BufferLength];
+                    reply[0] = 0;
+                    if (!HidD_GetFeature(h, reply, reply.Length))
+                    { Console.WriteLine($"  {label}: GetFeature failed err={Marshal.GetLastWin32Error()}"); continue; }
+
+                    Console.WriteLine($"  {label}: status=0x{reply[1]:x2}");
+                    Console.WriteLine("    reply[0..23]: " + string.Join(" ", reply.Take(24).Select(b => b.ToString("x2"))));
+                    Console.WriteLine($"    raw: storage=0x{reply[9]:x2} count={reply[10]} active={reply[11]}");
+
+                    var r = RazerProtocol.ParseDpiStagesReply(reply, out byte active, out var stages);
+                    if (r != ReplyResult.Success) { Console.WriteLine($"    parsed: {r}"); continue; }
+                    Console.WriteLine($"    parsed: {stages.Length} stage(s), active = stage {active}");
+                    foreach (var st in stages)
+                        Console.WriteLine($"      stage {st.Index}: {st.DpiX} x {st.DpiY}"
+                                          + (st.Index == active ? "   <- active" : ""));
+                }
+            }
+
+        if (!sawDevice) { Console.WriteLine("No Naga found. Wake the mouse and try again."); return 1; }
+        Console.WriteLine("\nReading this: several stages with different DPIs means the table is fine and the");
+        Console.WriteLine("DPI button has something to cycle. One stage, or every stage the same, means it does");
+        Console.WriteLine("not - the button moves the index but lands on the same DPI every time. Both storage");
+        Console.WriteLine("bytes failing to parse means the layout here is wrong, and the raw hex above is then");
+        Console.WriteLine("the evidence rather than the parse.");
+        return 0;
+    }
+
     public static int RunDock()
     {
         Console.WriteLine("Naga Battery Tray - Mouse Dock Pro probe (PID 0x00A4, battery + charging)\n");

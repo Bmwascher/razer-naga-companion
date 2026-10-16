@@ -25,6 +25,12 @@ internal static class Program
             return Diagnostics.ProbeCommand.RunDpi();
         }
 
+        if (args.Length > 0 && args[0] == "--probe-dpi-stages")
+        {
+            AllocConsoleIfNeeded();
+            return Diagnostics.ProbeCommand.RunDpiStages();
+        }
+
         if (args.Length > 0 && args[0] == "--probe-dock")
         {
             AllocConsoleIfNeeded();
