@@ -596,4 +596,135 @@ public class RazerProtocolTests
         Assert.Null(RazerProtocol.NormalizeModelName("Naga Imaginary"));
         Assert.Null(RazerProtocol.NormalizeModelName(null));
     }
+
+    /// <summary>A stage reply: 3 header bytes from buffer[9] (storage, count, active), then 7 per
+    /// stage from buffer[12] - number, X big-endian, Y big-endian, 2 reserved.</summary>
+    private static byte[] MakeDpiStagesReply(byte status, byte active, params (int X, int Y)[] stages)
+    {
+        var buf = new byte[91];
+        buf[1] = status;
+        buf[2] = 0x1f;
+        buf[6] = RazerProtocol.DataSizeDpiStages;
+        buf[7] = 0x04;                                  // command_class
+        buf[8] = 0x86;                                  // command_id (GET DPI stages)
+        buf[9] = RazerProtocol.StorageVarStore;
+        buf[10] = (byte)stages.Length;
+        buf[11] = active;
+        for (int i = 0; i < stages.Length; i++)
+        {
+            int at = 12 + 7 * i;
+            buf[at] = (byte)(i + 1);
+            buf[at + 1] = (byte)(stages[i].X >> 8); buf[at + 2] = (byte)stages[i].X;
+            buf[at + 3] = (byte)(stages[i].Y >> 8); buf[at + 4] = (byte)stages[i].Y;
+        }
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        buf[89] = crc;
+        return buf;
+    }
+
+    [Fact]
+    public void GetDpiStages_buffer_has_correct_layout_and_crc()
+    {
+        byte[] buf = RazerProtocol.BuildGetDpiStagesBuffer(0x1f, RazerProtocol.StorageVarStore);
+
+        Assert.Equal(91, buf.Length);
+        Assert.Equal(0x1f, buf[2]);   // transaction_id
+        Assert.Equal(0x26, buf[6]);   // data_size: 3 header + 7 per stage x 5
+        Assert.Equal(0x04, buf[7]);   // command_class (same class as the active-DPI commands)
+        Assert.Equal(0x86, buf[8]);   // command_id (GET stages, the read half of 0x06)
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        Assert.Equal(crc, buf[89]);
+    }
+
+    [Fact]
+    public void GetDpiStages_buffer_carries_whichever_storage_byte_it_is_given()
+    {
+        // Which one the firmware wants is the open question the probe exists to settle, so the
+        // builder must not quietly pick for the caller.
+        Assert.Equal(0x00, RazerProtocol.BuildGetDpiStagesBuffer(0x1f, RazerProtocol.StorageNoStore)[9]);
+        Assert.Equal(0x01, RazerProtocol.BuildGetDpiStagesBuffer(0x1f, RazerProtocol.StorageVarStore)[9]);
+    }
+
+    [Fact]
+    public void ParseDpiStagesReply_decodes_the_table_and_the_active_stage()
+    {
+        var r = RazerProtocol.ParseDpiStagesReply(
+            MakeDpiStagesReply(0x02, 3, (800, 800), (1600, 1600), (3200, 3200)),
+            out byte active, out var stages);
+
+        Assert.Equal(ReplyResult.Success, r);
+        Assert.Equal(3, active);
+        Assert.Equal(3, stages.Length);
+        Assert.Equal(new RazerProtocol.DpiStage(1, 800, 800), stages[0]);
+        Assert.Equal(new RazerProtocol.DpiStage(2, 1600, 1600), stages[1]);
+        Assert.Equal(new RazerProtocol.DpiStage(3, 3200, 3200), stages[2]);
+    }
+
+    [Fact]
+    public void ParseDpiStagesReply_rejects_a_count_above_the_five_stage_maximum()
+    {
+        // Every stage here carries a VALID dpi, so the count guard is the only thing that can
+        // reject this reply. An earlier version of this test left stages 2-6 zeroed, which the
+        // dpi-range guard caught instead - it passed with the count guard deleted, proving
+        // nothing. Six stages with real numbers is the case that isolates it.
+        var tooMany = MakeDpiStagesReply(0x02, 1,
+            (400, 400), (800, 800), (1600, 1600), (3200, 3200), (6400, 6400), (12800, 12800));
+        Assert.Equal(6, tooMany[10]);
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseDpiStagesReply(tooMany, out _, out _));
+    }
+
+    [Fact]
+    public void ParseDpiStagesReply_rejects_an_empty_table()
+    {
+        // An empty table is the state being investigated, and it must never decode as a valid
+        // zero-length table a caller would read as "fine". Note what actually rejects it: the
+        // ACTIVE-stage guard, because active must be within 1..count and no value is <= 0. The
+        // count guard cannot be what catches this, so this test does not claim it does.
+        var empty = MakeDpiStagesReply(0x02, 1, (1600, 1600));
+        empty[10] = 0;
+        RecomputeCrc(empty);
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseDpiStagesReply(empty, out _, out _));
+    }
+
+    [Fact]
+    public void ParseDpiStagesReply_rejects_an_active_stage_outside_the_table()
+    {
+        var zero = MakeDpiStagesReply(0x02, 0, (800, 800), (1600, 1600));
+        RecomputeCrc(zero);
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseDpiStagesReply(zero, out _, out _));
+
+        var past = MakeDpiStagesReply(0x02, 3, (800, 800), (1600, 1600));
+        RecomputeCrc(past);
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseDpiStagesReply(past, out _, out _));
+    }
+
+    [Fact]
+    public void ParseDpiStagesReply_rejects_an_out_of_range_dpi()
+    {
+        // The wrong-layout guard: if the real firmware packs stages differently, the decoded
+        // numbers are nonsense and must read as Failed rather than as a believable table.
+        var bad = MakeDpiStagesReply(0x02, 1, (1600, 1600));
+        bad[13] = 0x00; bad[14] = 0x01;   // stage 1 X -> 1, below DpiMin
+        RecomputeCrc(bad);
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseDpiStagesReply(bad, out _, out _));
+    }
+
+    [Fact]
+    public void ParseDpiStagesReply_reports_busy_and_bad_crc()
+    {
+        Assert.Equal(ReplyResult.Busy, RazerProtocol.ParseDpiStagesReply(
+            MakeDpiStagesReply(0x01, 1, (1600, 1600)), out _, out _));
+
+        var bad = MakeDpiStagesReply(0x02, 1, (1600, 1600)); bad[89] ^= 0xFF;
+        Assert.Equal(ReplyResult.Failed, RazerProtocol.ParseDpiStagesReply(bad, out _, out _));
+    }
+
+    private static void RecomputeCrc(byte[] buf)
+    {
+        byte crc = 0;
+        for (int i = 3; i <= 88; i++) crc ^= buf[i];
+        buf[89] = crc;
+    }
 }

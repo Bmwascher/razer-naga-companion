@@ -181,18 +181,24 @@ HID probe — it enumerates the Razer HID collections, tries each known transact
 prints the raw battery reply:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe          # battery
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dpi      # active DPI
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-buttons  # remap protocol
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-profile  # onboard slots
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dock     # Mouse Dock Pro
-& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-latency  # reply timing
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe             # battery
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dpi         # active DPI
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dpi-stages  # onboard DPI stage table
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-buttons     # remap protocol
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-profile     # onboard slots
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-dock        # Mouse Dock Pro
+& "$env:LOCALAPPDATA\Programs\NagaBatteryTray\NagaBatteryTray.exe" --probe-latency     # reply timing
 ```
 
 `--probe-latency` is read-only (GET commands only) and answers one question: how long after a
 request the mouse's reply is actually ready. The reads poll early on a fixed rung schedule
 rather than waiting a flat interval, so that number is what the first rung is tuned against.
 The mouse must be awake — give it a nudge first.
+
+`--probe-dpi-stages` is read-only too, and reads the onboard 5-stage DPI table — the one
+the mouse's own DPI button cycles, which is separate from the active DPI `--probe-dpi`
+reports. It prints the table under both storage bytes, so a stage table that is empty, or
+whose every stage holds the same number, is visible at a glance.
 
 ---
 

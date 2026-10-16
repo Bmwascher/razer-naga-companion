@@ -101,6 +101,16 @@ public static class RazerProtocol
     public const byte CommandIdGetDpi = 0x85;
     public const byte CommandIdSetDpi = 0x05;
     public const byte DataSizeDpi = 0x07;
+    // The onboard DPI STAGE table - what the mouse's own DPI button cycles. Distinct from the
+    // active DPI above: 0x85/0x05 read and write the one current value, these read the table it
+    // is picked from. UNVERIFIED on this hardware (openrazer layout, not yet probed here) -
+    // --probe-dpi-stages is the tool that confirms or refutes it.
+    public const byte CommandIdGetDpiStages = 0x86;
+    public const byte DpiStageMax = 5;
+    // 3 header bytes (storage, count, active) + 7 per stage.
+    public const byte DataSizeDpiStages = 3 + 7 * DpiStageMax;   // 0x26
+    public const byte StorageNoStore = 0x00;
+    public const byte StorageVarStore = 0x01;
     public const int DpiMin = 100;
     public const int DpiMax = 30000;
 
@@ -181,6 +191,16 @@ public static class RazerProtocol
         args[1] = (byte)(dpiX >> 8); args[2] = (byte)dpiX;  // X big-endian
         args[3] = (byte)(dpiY >> 8); args[4] = (byte)dpiY;  // Y big-endian
         return BuildReport(transactionId, DataSizeDpi, CommandClassDpi, CommandIdSetDpi, args);
+    }
+
+    /// <summary>GET the onboard DPI stage table. <paramref name="storage"/> is the one byte whose
+    /// correct value is not yet known on this hardware, so the probe sends both: openrazer reads
+    /// stages from VARSTORE, while this file's own GET DPI reads NOSTORE and works.</summary>
+    public static byte[] BuildGetDpiStagesBuffer(byte transactionId, byte storage)
+    {
+        Span<byte> args = stackalloc byte[DataSizeDpiStages];
+        args[0] = storage;
+        return BuildReport(transactionId, DataSizeDpiStages, CommandClassDpi, CommandIdGetDpiStages, args);
     }
 
     /// <summary>SET a button's onboard function. args = [profile, buttonId, hypershift, category, dataLen, d0..d4].
@@ -402,6 +422,42 @@ public static class RazerProtocol
         int y = (buffer91[12] << 8) | buffer91[13];
         if (x < DpiMin || x > DpiMax || y < DpiMin || y > DpiMax) return ReplyResult.Failed;
         dpiX = x; dpiY = y;
+        return ReplyResult.Success;
+    }
+
+    /// <summary>One entry of the onboard stage table. <paramref name="Index"/> is the stage number
+    /// the firmware reports, 1-based.</summary>
+    public readonly record struct DpiStage(byte Index, int DpiX, int DpiY);
+
+    /// <summary>Validates a DPI-stage reply: storage=buffer[9], count=buffer[10], active=buffer[11],
+    /// then 7 bytes per stage from buffer[12] (number, X big-endian, Y big-endian, 2 reserved).
+    /// Rejects a count outside 1..5, an active stage outside 1..count, or any DPI outside 100..30000,
+    /// so a wrong-layout reply reads as Failed rather than as a plausible table - the same
+    /// wrong-layout guard ParseDpiReply and ParseProfileListReply use. Note an EMPTY table is a
+    /// count of 0, which is Failed here: "no stages" is the probe's job to report, not the
+    /// parser's to model.</summary>
+    public static ReplyResult ParseDpiStagesReply(byte[] buffer91, out byte activeStage, out DpiStage[] stages)
+    {
+        activeStage = 0; stages = Array.Empty<DpiStage>();
+        var r = ValidateReply(buffer91);
+        if (r != ReplyResult.Success) return r;
+
+        byte count = buffer91[10];
+        byte active = buffer91[11];
+        if (count < 1 || count > DpiStageMax) return ReplyResult.Failed;
+        if (active < 1 || active > count) return ReplyResult.Failed;
+
+        var found = new DpiStage[count];
+        for (int i = 0; i < count; i++)
+        {
+            int at = 12 + 7 * i;
+            int x = (buffer91[at + 1] << 8) | buffer91[at + 2];
+            int y = (buffer91[at + 3] << 8) | buffer91[at + 4];
+            if (x < DpiMin || x > DpiMax || y < DpiMin || y > DpiMax) return ReplyResult.Failed;
+            found[i] = new DpiStage(buffer91[at], x, y);
+        }
+
+        activeStage = active; stages = found;
         return ReplyResult.Success;
     }
 

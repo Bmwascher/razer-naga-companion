@@ -58,7 +58,9 @@ reference is `docs/architecture.md`; per-feature design history is `docs/superpo
 
 ### Diagnostics
 
-- HID probes (installed exe): `--probe` battery · `--probe-dpi` · `--probe-buttons
+- HID probes (installed exe): `--probe` battery · `--probe-dpi` · `--probe-dpi-stages`
+  (read-only; the onboard 5-stage table the mouse's own DPI button cycles, read under both
+  storage bytes — layout hardware-verified 2026-10-16) · `--probe-buttons
   [--reset|--slot-test]` · `--probe-profile` (capture → `%APPDATA%\NagaBatteryTray\`) ·
   `--probe-dock` · `--probe-latency` (read-only reply timing; the evidence for tuning
   `RazerDevice.FastReadRungs` — needs the mouse awake)
